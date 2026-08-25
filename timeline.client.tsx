@@ -1,5 +1,5 @@
 import type { PluginTheme } from "@getpaseo/plugin";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Image, Pressable, ScrollView, Text, View } from "react-native";
 import { CodeBlock, Markdown } from "./markdown-view.client.tsx";
 import type { DetailBlock, RenderBody, RenderEntry } from "./render-types.shared.ts";
@@ -7,6 +7,40 @@ import { statusGlyph, todoGlyph, toolGlyph, type TimelineItem } from "./timeline
 import { Card, MONO_FONT, Mono, Tint } from "./ui.client.tsx";
 
 export type QuestionAnswerHandler = (entry: RenderEntry, optionLabels: string[]) => void;
+export type EntryLoader = (index: number) => Promise<RenderEntry | null>;
+
+/** Fetches the full body of an entry the list payload shortened, once the user asks to see it. */
+function useFullBody(
+  entry: RenderEntry,
+  enabled: boolean,
+  loadEntry?: EntryLoader,
+): { body: RenderBody; loading: boolean } {
+  const [full, setFull] = useState<RenderBody | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setFull(null);
+  }, [entry.index, entry.id]);
+
+  useEffect(() => {
+    if (!enabled || full !== null || loading || !loadEntry) return;
+    let cancelled = false;
+    setLoading(true);
+    void loadEntry(entry.index)
+      .then((loaded) => {
+        if (!cancelled && loaded) setFull(loaded.body);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, full, loading, loadEntry, entry.index]);
+
+  return { body: full ?? entry.body, loading };
+}
 
 function Disclosure({
   theme,
@@ -85,8 +119,19 @@ function DetailBlockView({ block, theme }: { block: DetailBlock; theme: PluginTh
   }
 }
 
-function ToolCard({ body, theme }: { body: Extract<RenderBody, { kind: "tool_call" }>; theme: PluginTheme }) {
+function ToolCard({
+  entry,
+  theme,
+  loadEntry,
+}: {
+  entry: RenderEntry;
+  theme: PluginTheme;
+  loadEntry?: EntryLoader;
+}) {
   const [expanded, setExpanded] = useState(false);
+  const listBody = entry.body as Extract<RenderBody, { kind: "tool_call" }>;
+  const { body: loadedBody, loading } = useFullBody(entry, expanded && listBody.detailTruncated, loadEntry);
+  const body = loadedBody.kind === "tool_call" ? loadedBody : listBody;
   const hasBody = body.detail.length > 0 || body.result !== null;
   return (
     <Disclosure
@@ -121,6 +166,9 @@ function ToolCard({ body, theme }: { body: Extract<RenderBody, { kind: "tool_cal
         ) : undefined
       }
     >
+      {loading ? (
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>Loading…</Text>
+      ) : null}
       {body.detail.map((block, index) => (
         <DetailBlockView key={index} block={block} theme={theme} />
       ))}
@@ -152,11 +200,13 @@ export function EntryView({
   theme,
   onAnswerQuestion,
   answerPending,
+  loadEntry,
 }: {
   entry: RenderEntry;
   theme: PluginTheme;
   onAnswerQuestion?: QuestionAnswerHandler;
   answerPending?: boolean;
+  loadEntry?: EntryLoader;
 }) {
   const body = entry.body;
   switch (body.kind) {
@@ -171,7 +221,7 @@ export function EntryView({
     case "thinking":
       return <ThinkingRow text={body.text} theme={theme} />;
     case "tool_call":
-      return <ToolCard body={body} theme={theme} />;
+      return <ToolCard entry={entry} theme={theme} loadEntry={loadEntry} />;
     case "todo_list":
       return (
         <Card theme={theme}>
@@ -216,15 +266,7 @@ export function EntryView({
         </Text>
       );
     case "image":
-      return body.dataUri ? (
-        <Image
-          source={{ uri: body.dataUri }}
-          style={{ width: "100%", height: 200, borderRadius: 8 }}
-          resizeMode="contain"
-        />
-      ) : (
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>{body.note ?? "image"}</Text>
-      );
+      return <ImageEntry entry={entry} theme={theme} loadEntry={loadEntry} />;
     case "unsupported":
       return null;
     default:
@@ -285,7 +327,15 @@ function QuestionCard({
   );
 }
 
-function SidechainCard({ entries, theme }: { entries: RenderEntry[]; theme: PluginTheme }) {
+function SidechainCard({
+  entries,
+  theme,
+  loadEntry,
+}: {
+  entries: RenderEntry[];
+  theme: PluginTheme;
+  loadEntry?: EntryLoader;
+}) {
   const [expanded, setExpanded] = useState(false);
   return (
     <Disclosure
@@ -306,7 +356,7 @@ function SidechainCard({ entries, theme }: { entries: RenderEntry[]; theme: Plug
       }
     >
       {entries.map((entry) => (
-        <EntryView key={`${entry.index}:${entry.id}`} entry={entry} theme={theme} />
+        <EntryView key={`${entry.index}:${entry.id}`} entry={entry} theme={theme} loadEntry={loadEntry} />
       ))}
     </Disclosure>
   );
@@ -317,19 +367,60 @@ export function TimelineItemView({
   theme,
   onAnswerQuestion,
   answerPending,
+  loadEntry,
 }: {
   item: TimelineItem;
   theme: PluginTheme;
   onAnswerQuestion?: QuestionAnswerHandler;
   answerPending?: boolean;
+  loadEntry?: EntryLoader;
 }) {
-  if (item.kind === "sidechain") return <SidechainCard entries={item.entries} theme={theme} />;
+  if (item.kind === "sidechain") {
+    return <SidechainCard entries={item.entries} theme={theme} loadEntry={loadEntry} />;
+  }
   return (
     <EntryView
       entry={item.entry}
       theme={theme}
       onAnswerQuestion={onAnswerQuestion}
       answerPending={answerPending}
+      loadEntry={loadEntry}
     />
   );
+}
+
+function ImageEntry({
+  entry,
+  theme,
+  loadEntry,
+}: {
+  entry: RenderEntry;
+  theme: PluginTheme;
+  loadEntry?: EntryLoader;
+}) {
+  const listBody = entry.body as Extract<RenderBody, { kind: "image" }>;
+  const [requested, setRequested] = useState(false);
+  const { body, loading } = useFullBody(entry, requested, loadEntry);
+  const dataUri = body.kind === "image" ? body.dataUri : null;
+
+  if (dataUri) {
+    return (
+      <Image
+        source={{ uri: dataUri }}
+        style={{ width: "100%", height: 200, borderRadius: 8 }}
+        resizeMode="contain"
+      />
+    );
+  }
+  if (listBody.deferred && loadEntry) {
+    return (
+      <Pressable onPress={() => setRequested(true)} style={{ padding: 8, borderRadius: 6, overflow: "hidden" }}>
+        <Tint color={theme.colors.foreground} opacity={0.08} />
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
+          {loading ? "Loading image…" : "Image · tap to load"}
+        </Text>
+      </Pressable>
+    );
+  }
+  return <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>{listBody.note ?? "image"}</Text>;
 }

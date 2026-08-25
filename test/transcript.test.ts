@@ -95,3 +95,29 @@ test("returns null for a missing session", async () => {
   const store = new TranscriptStore(env);
   assert.equal(await store.timelineSince(workspaceDir, "nope", 0), null);
 });
+
+test("ships only the most recent window of a long transcript", async () => {
+  const { env, file, workspaceDir } = await setupWorkspace();
+  const lines: string[] = [];
+  for (let index = 0; index < 250; index += 1) lines.push(userLine(`prompt ${index}`));
+  await appendFile(file, lines.join(""));
+
+  const store = new TranscriptStore(env);
+  const slice = await store.timelineSince(workspaceDir, SESSION_ID, 0);
+  assert.ok(slice);
+  assert.equal(slice.total, 251);
+  assert.equal(slice.entries.length, 200);
+  assert.equal(slice.windowStart, 51);
+  assert.equal(slice.entries[0]!.index, 51);
+
+  const older = await store.timelineSince(workspaceDir, SESSION_ID, 0, 0);
+  assert.equal(older?.entries.length, 251);
+});
+
+test("returns the full body of a single entry", async () => {
+  const { env, workspaceDir } = await setupWorkspace();
+  const store = new TranscriptStore(env);
+  const entry = await store.entryAt(workspaceDir, SESSION_ID, 0);
+  assert.equal(entry?.body.kind === "user_text" && entry.body.text, "first");
+  assert.equal(await store.entryAt(workspaceDir, SESSION_ID, 99), null);
+});

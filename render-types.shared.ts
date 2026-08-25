@@ -71,6 +71,8 @@ export const RenderBodySchema = z.discriminatedUnion("kind", [
     title: z.string(),
     summary: z.string().optional(),
     detail: z.array(DetailBlockSchema),
+    /** The list payload ships shortened detail; the full body comes from `timeline.entry`. */
+    detailTruncated: z.boolean().default(false),
     status: ToolStatusSchema,
     result: z
       .object({ text: z.string(), truncated: z.boolean() })
@@ -92,6 +94,8 @@ export const RenderBodySchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("image"),
     dataUri: z.string().nullable().default(null),
+    /** Left out of the list payload because of its size; `timeline.entry` returns it. */
+    deferred: z.boolean().default(false),
     note: z.string().optional(),
   }),
   z.object({ kind: z.literal("unsupported"), entryType: z.string() }),

@@ -18,7 +18,7 @@ import {
   StatusPill,
 } from "./panel-controls.client.tsx";
 import type { RenderEntry, SendBehavior, SessionStatus, SessionSummary } from "./render-types.shared.ts";
-import { groupEntries } from "./timeline-model.client.ts";
+import { groupEntries, type TimelineItem } from "./timeline-model.client.ts";
 import { TimelineItemView } from "./timeline.client.tsx";
 import { Tint, relativeTimeFrom } from "./ui.client.tsx";
 
@@ -34,11 +34,20 @@ type TimelineState = {
   entries: (RenderEntry | undefined)[];
   unsupportedCount: number;
   total: number;
+  windowStart: number;
   sessionStatus: SessionStatus;
 };
 
 function emptyTimeline(key: string): TimelineState {
-  return { key, revision: 0, entries: [], unsupportedCount: 0, total: 0, sessionStatus: "detached" };
+  return {
+    key,
+    revision: 0,
+    entries: [],
+    unsupportedCount: 0,
+    total: 0,
+    windowStart: 0,
+    sessionStatus: "detached",
+  };
 }
 
 function sessionLabel(session: SessionSummary): string {
@@ -62,6 +71,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const listAttachable = useRpc(contracts.listAttachableTerminals);
   const attachTerminal = useRpc(contracts.attachTerminal);
   const sendPrompt = useRpc(contracts.sendPrompt);
+  const getTimelineEntry = useRpc(contracts.getTimelineEntry);
   const getDialog = useRpc(contracts.getDialog);
   const answerDialog = useRpc(contracts.answerDialog);
   const attachImage = useRpc(contracts.attachImage);
@@ -73,6 +83,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const [imageSheetOpen, setImageSheetOpen] = useState(false);
   const [imagePaths, setImagePaths] = useState<string[]>([]);
   const [note, setNote] = useState<string | null>(null);
+  const [windowStart, setWindowStart] = useState<number | null>(null);
 
   const sessionsQuery = useQuery({
     queryKey: ["claude-code-sessions", workspaceDir],
@@ -100,11 +111,13 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
     null;
   const activeSession = sessions.find((session) => session.sessionId === activeSessionId) ?? null;
 
+  const listRef = useRef<FlatList<TimelineItem> | null>(null);
+  const followRef = useRef(true);
   const timelineRef = useRef<TimelineState>(emptyTimeline(""));
   const timelineKey = `${workspaceDir ?? ""}:${activeSessionId ?? ""}`;
 
   const timelineQuery = useQuery({
-    queryKey: ["claude-code-timeline", timelineKey],
+    queryKey: ["claude-code-timeline", timelineKey, windowStart],
     enabled: workspaceDir !== null && activeSessionId !== null,
     refetchInterval: TIMELINE_POLL_MS,
     queryFn: async (): Promise<TimelineState> => {
@@ -115,6 +128,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         workspaceId,
         sessionId: activeSessionId!,
         sinceRevision: previous.revision,
+        fromIndex: windowStart,
       });
       const entries = response.reset ? [] : previous.entries.slice();
       for (const entry of response.entries) entries[entry.index] = entry;
@@ -125,6 +139,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         entries,
         unsupportedCount: response.unsupportedCount,
         total: response.total,
+        windowStart: response.windowStart,
         sessionStatus: response.sessionStatus,
       };
       timelineRef.current = next;
@@ -144,8 +159,21 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
 
   const selectSession = useCallback((sessionId: string) => {
     setSelectedSessionId(sessionId);
+    setWindowStart(null);
     setPickerOpen(false);
   }, []);
+
+  const loadEntry = useCallback(
+    async (index: number) => {
+      const response = await getTimelineEntry({
+        workspaceDir: workspaceDir!,
+        sessionId: activeSessionId!,
+        index,
+      });
+      return response.entry;
+    },
+    [getTimelineEntry, workspaceDir, activeSessionId],
+  );
 
   const enableHooksMutation = useMutation({
     mutationFn: () => enableHooks({}),
@@ -158,7 +186,8 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
     mutationFn: () => startSession({ workspaceDir: workspaceDir! }),
     onSuccess: (result) => {
       setSelectedSessionId(result.sessionId);
-      setNote(`Started a session in a new "Claude Code" terminal.`);
+      setWindowStart(null);
+      setNote(result.warning ?? 'Started a session in a new "Claude Code" terminal.');
       void sessionsQuery.refetch();
     },
     onError: (error) => setNote(errorText(error)),
@@ -166,8 +195,8 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
 
   const resumeMutation = useMutation({
     mutationFn: () => resumeSession({ workspaceDir: workspaceDir!, sessionId: activeSessionId! }),
-    onSuccess: () => {
-      setNote("Resumed in a new terminal.");
+    onSuccess: (result) => {
+      setNote(result.warning ?? "Resumed in a new terminal.");
       void sessionsQuery.refetch();
     },
     onError: (error) => setNote(errorText(error)),
@@ -275,14 +304,16 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           </Text>
           <Text numberOfLines={1} style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
             {activeSession
-              ? `${relativeTimeFrom(activeSession.mtime)} · ${sessions.length} session${sessions.length === 1 ? "" : "s"}`
+              ? layout.compact
+                ? relativeTimeFrom(activeSession.mtime)
+                : `${relativeTimeFrom(activeSession.mtime)} · ${sessions.length} session${sessions.length === 1 ? "" : "s"}`
               : "tap to pick a session"}
           </Text>
         </Pressable>
         <StatusPill status={status} theme={theme} />
         <ActionButton
           theme={theme}
-          label="New"
+          label={layout.compact ? "＋" : "New"}
           disabled={startMutation.isPending}
           onPress={() => startMutation.mutate()}
         />
@@ -301,7 +332,17 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         />
       ) : (
         <FlatList
+          ref={listRef}
           data={items}
+          onContentSizeChange={() => {
+            if (followRef.current) listRef.current?.scrollToEnd({ animated: false });
+          }}
+          onScroll={(event) => {
+            const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+            const distanceFromBottom = contentSize.height - contentOffset.y - layoutMeasurement.height;
+            followRef.current = distanceFromBottom < 80;
+          }}
+          scrollEventThrottle={200}
           keyExtractor={(item) => item.key}
           contentContainerStyle={{ padding: layout.compact ? 10 : 16, gap: 10 }}
           initialNumToRender={20}
@@ -314,8 +355,22 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
               theme={theme}
               answerPending={answerMutation.isPending}
               onAnswerQuestion={(_entry, labels) => answerMutation.mutate({ labels })}
+              loadEntry={loadEntry}
             />
           )}
+          ListHeaderComponent={
+            (timelineQuery.data?.windowStart ?? 0) > 0 ? (
+              <View style={{ alignItems: "center", paddingBottom: 8 }}>
+                <ActionButton
+                  theme={theme}
+                  label={`Load ${Math.min(200, timelineQuery.data?.windowStart ?? 0)} older entries`}
+                  onPress={() =>
+                    setWindowStart(Math.max(0, (timelineQuery.data?.windowStart ?? 0) - 200))
+                  }
+                />
+              </View>
+            ) : null
+          }
           ListEmptyComponent={
             <Text style={{ color: theme.colors.foregroundMuted }}>
               {timelineQuery.isPending
@@ -329,6 +384,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
       <Footer
         theme={theme}
         entryCount={entries.length}
+        total={timelineQuery.data?.total ?? 0}
         unsupportedCount={timelineQuery.data?.unsupportedCount ?? 0}
       />
 
@@ -451,15 +507,19 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
 function Footer({
   theme,
   entryCount,
+  total,
   unsupportedCount,
 }: {
   theme: PluginWorkspacePanelProps["theme"];
   entryCount: number;
+  total: number;
   unsupportedCount: number;
 }) {
   return (
     <View style={{ paddingHorizontal: 12, paddingVertical: 4, flexDirection: "row", gap: 12 }}>
-      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{entryCount} entries</Text>
+      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
+        {entryCount < total ? `${entryCount} of ${total} entries` : `${entryCount} entries`}
+      </Text>
       {unsupportedCount > 0 ? (
         <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
           {unsupportedCount} unsupported

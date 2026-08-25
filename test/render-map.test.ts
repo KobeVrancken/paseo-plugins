@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { parseQuestionAnswers, TimelineBuilder } from "../render-map.server.ts";
+import { capEntryForList, parseQuestionAnswers, TimelineBuilder } from "../render-map.server.ts";
 import type { RenderBody, RenderEntry } from "../render-types.shared.ts";
 
 const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -185,4 +185,49 @@ test("keeps an unknown tool on a generic card", () => {
 test("finds the newest unanswered question", () => {
   const builder = buildFixture("session-basic.jsonl");
   assert.equal(builder.pendingQuestionIndex(), null);
+});
+
+test("shortens long tool detail for the list payload", () => {
+  const builder = new TimelineBuilder();
+  builder.push({
+    type: "assistant",
+    uuid: "a1",
+    message: {
+      role: "assistant",
+      content: [{ type: "tool_use", id: "t1", name: "Write", input: { file_path: "/a.ts", content: "x".repeat(5000) } }],
+    },
+  });
+  const full = builder.entryAt(0)!;
+  const capped = capEntryForList(full);
+  assert.equal(full.body.kind === "tool_call" && full.body.detailTruncated, false);
+  assert.ok(capped.body.kind === "tool_call" && capped.body.detailTruncated);
+  const block = capped.body.kind === "tool_call" ? capped.body.detail[0] : null;
+  assert.ok(block && block.kind === "code" && block.text.length < 1000);
+});
+
+test("leaves a small tool call alone", () => {
+  const builder = new TimelineBuilder();
+  builder.push({
+    type: "assistant",
+    uuid: "a1",
+    message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }] },
+  });
+  const full = builder.entryAt(0)!;
+  assert.equal(capEntryForList(full), full);
+});
+
+test("defers a large image out of the list payload", () => {
+  const builder = new TimelineBuilder();
+  builder.push({
+    type: "user",
+    uuid: "u1",
+    message: {
+      role: "user",
+      content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "A".repeat(200_000) } }],
+    },
+  });
+  const full = builder.entryAt(0)!;
+  const capped = capEntryForList(full);
+  assert.ok(full.body.kind === "image" && full.body.dataUri !== null);
+  assert.ok(capped.body.kind === "image" && capped.body.dataUri === null && capped.body.deferred);
 });

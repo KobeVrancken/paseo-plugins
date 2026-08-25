@@ -9,6 +9,7 @@ import {
   getDialogHandler,
   getHooksStatusHandler,
   getSettingsHandler,
+  getTimelineEntryHandler,
   getTimelineHandler,
   listAttachableTerminalsHandler,
   listSessionsHandler,
@@ -25,6 +26,7 @@ export const PANEL_ID = "claude-code-cli";
 export default function contribute(plugin: PluginContext) {
   plugin.handle(contracts.listSessions, (input) => listSessionsHandler(input));
   plugin.handle(contracts.getTimeline, (input, context) => getTimelineHandler(input, context));
+  plugin.handle(contracts.getTimelineEntry, (input) => getTimelineEntryHandler(input));
   plugin.handle(contracts.getHooksStatus, (input, context) => getHooksStatusHandler(input, context));
   plugin.handle(contracts.enableHooks, (input, context) => enableHooksHandler(input, context));
   plugin.handle(contracts.getSettings, () => getSettingsHandler());

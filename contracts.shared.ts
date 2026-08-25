@@ -23,17 +23,26 @@ export const getTimeline = defineRpc({
     sessionId: z.string(),
     sinceRevision: z.number().int().min(0),
     workspaceId: z.string().optional(),
+    /** Lowest entry index to include; omitted means "the most recent window". */
+    fromIndex: z.number().int().min(0).nullable().default(null),
   }),
   output: z.object({
     /** Entries created or changed since `sinceRevision`, addressed by their stable `index`. */
     entries: z.array(RenderEntrySchema),
     total: z.number().int(),
+    windowStart: z.number().int(),
     revision: z.number().int(),
     /** The client must discard everything it has cached for this session before merging. */
     reset: z.boolean(),
     unsupportedCount: z.number().int(),
     sessionStatus: SessionStatusSchema,
   }),
+});
+
+export const getTimelineEntry = defineRpc({
+  name: "timeline.entry",
+  input: z.object({ workspaceDir: z.string(), sessionId: z.string(), index: z.number().int().min(0) }),
+  output: z.object({ entry: RenderEntrySchema.nullable() }),
 });
 
 export const getHooksStatus = defineRpc({
@@ -60,16 +69,22 @@ export const setSettings = defineRpc({
   output: z.object({ sendBehavior: SendBehaviorSchema }),
 });
 
+const StartedSessionSchema = z.object({
+  sessionId: z.string(),
+  terminalId: z.string(),
+  warning: z.string().nullable(),
+});
+
 export const startSession = defineRpc({
   name: "session.start",
   input: z.object({ workspaceDir: z.string() }),
-  output: z.object({ sessionId: z.string(), terminalId: z.string() }),
+  output: StartedSessionSchema,
 });
 
 export const resumeSession = defineRpc({
   name: "session.resume",
   input: z.object({ workspaceDir: z.string(), sessionId: z.string() }),
-  output: z.object({ sessionId: z.string(), terminalId: z.string() }),
+  output: StartedSessionSchema,
 });
 
 export const listAttachableTerminals = defineRpc({

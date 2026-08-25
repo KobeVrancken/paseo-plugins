@@ -10,8 +10,8 @@ import type {
 
 export type RawEntry = Record<string, unknown>;
 
-const MAX_DETAIL_CHARS = 20_000;
-const MAX_RESULT_CHARS = 8_000;
+const MAX_DETAIL_CHARS = 8_000;
+const MAX_RESULT_CHARS = 4_000;
 const MAX_IMAGE_BASE64_CHARS = 2_000_000;
 
 /** Transcript line types that carry no conversation content and are deliberately not rendered. */
@@ -269,6 +269,52 @@ function describeTool(
   }
 }
 
+const LIST_TEXT_CHARS = 600;
+const LIST_DIFF_LINES = 24;
+const LIST_IMAGE_CHARS = 128 * 1024;
+
+function capDetailBlock(block: DetailBlock): { block: DetailBlock; truncated: boolean } {
+  switch (block.kind) {
+    case "text":
+    case "code": {
+      if (block.text.length <= LIST_TEXT_CHARS) return { block, truncated: false };
+      return { block: { ...block, text: `${block.text.slice(0, LIST_TEXT_CHARS)}\n…` }, truncated: true };
+    }
+    case "diff": {
+      if (block.lines.length <= LIST_DIFF_LINES) return { block, truncated: false };
+      return { block: { ...block, lines: block.lines.slice(0, LIST_DIFF_LINES) }, truncated: true };
+    }
+    default:
+      return { block, truncated: false };
+  }
+}
+
+/**
+ * Shortens an entry for the timeline payload.
+ * A long transcript is mostly tool output nobody expands, so the full body is fetched per entry instead.
+ */
+export function capEntryForList(entry: RenderEntry): RenderEntry {
+  const body = entry.body;
+  if (body.kind === "image") {
+    if (body.dataUri === null || body.dataUri.length <= LIST_IMAGE_CHARS) return entry;
+    return { ...entry, body: { ...body, dataUri: null, deferred: true } };
+  }
+  if (body.kind !== "tool_call") return entry;
+  let truncated = false;
+  const detail = body.detail.map((block) => {
+    const capped = capDetailBlock(block);
+    truncated = truncated || capped.truncated;
+    return capped.block;
+  });
+  let result = body.result;
+  if (result && result.text.length > LIST_TEXT_CHARS) {
+    result = { text: `${result.text.slice(0, LIST_TEXT_CHARS)}\n…`, truncated: true };
+    truncated = true;
+  }
+  if (!truncated) return entry;
+  return { ...entry, body: { ...body, detail, result, detailTruncated: true } };
+}
+
 type Tracked = { entry: RenderEntry; rev: number };
 
 /**
@@ -295,8 +341,11 @@ export class TimelineBuilder {
     return this.tracked.length;
   }
 
-  changedSince(revision: number): RenderEntry[] {
-    return this.tracked.filter((tracked) => tracked.rev > revision).map((tracked) => tracked.entry);
+  /** `fromIndex` keeps the first load of a long transcript from shipping every entry at once. */
+  changedSince(revision: number, fromIndex = 0): RenderEntry[] {
+    return this.tracked
+      .filter((tracked) => tracked.rev > revision && tracked.entry.index >= fromIndex)
+      .map((tracked) => tracked.entry);
   }
 
   /** Index of the newest unresolved `AskUserQuestion` call, or null when none is pending. */
@@ -456,7 +505,7 @@ export class TimelineBuilder {
         id,
         ts: timestamp,
         isSidechain,
-        body: { kind: "image", dataUri: null, note: "image (unsupported source)" },
+        body: { kind: "image", dataUri: null, deferred: false, note: "image (unsupported source)" },
       });
       return;
     }
@@ -465,7 +514,7 @@ export class TimelineBuilder {
         id,
         ts: timestamp,
         isSidechain,
-        body: { kind: "image", dataUri: null, note: "image too large to preview" },
+        body: { kind: "image", dataUri: null, deferred: false, note: "image too large to preview" },
       });
       return;
     }
@@ -473,7 +522,7 @@ export class TimelineBuilder {
       id,
       ts: timestamp,
       isSidechain,
-      body: { kind: "image", dataUri: `data:${mediaType};base64,${data}` },
+      body: { kind: "image", dataUri: `data:${mediaType};base64,${data}`, deferred: false },
     });
   }
 
@@ -627,6 +676,7 @@ export class TimelineBuilder {
         title: described.title,
         ...(described.summary !== undefined ? { summary: described.summary } : {}),
         detail: described.detail,
+        detailTruncated: false,
         status: "pending",
         result: null,
       },

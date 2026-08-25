@@ -94,11 +94,17 @@ export async function getTimelineHandler(
   context: Context,
 ): Promise<Output<typeof contracts.getTimeline>> {
   const sessionStatus = await statusFor(context.paseo, input.sessionId, input.workspaceId);
-  const slice = await store.timelineSince(input.workspaceDir, input.sessionId, input.sinceRevision);
+  const slice = await store.timelineSince(
+    input.workspaceDir,
+    input.sessionId,
+    input.sinceRevision,
+    input.fromIndex,
+  );
   if (!slice) {
     return {
       entries: [],
       total: 0,
+      windowStart: 0,
       revision: 0,
       reset: true,
       unsupportedCount: 0,
@@ -108,11 +114,18 @@ export async function getTimelineHandler(
   return {
     entries: slice.entries,
     total: slice.total,
+    windowStart: slice.windowStart,
     revision: slice.revision,
     reset: slice.reset,
     unsupportedCount: slice.unsupportedCount,
     sessionStatus,
   };
+}
+
+export async function getTimelineEntryHandler(
+  input: Input<typeof contracts.getTimelineEntry>,
+): Promise<Output<typeof contracts.getTimelineEntry>> {
+  return { entry: await store.entryAt(input.workspaceDir, input.sessionId, input.index) };
 }
 
 export async function getHooksStatusHandler(

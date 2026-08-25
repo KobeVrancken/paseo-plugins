@@ -75,6 +75,12 @@ async function paseo(args: string[]): Promise<string> {
     return stdout;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("ENOENT")) {
+      throw new PaseoCliError(
+        `the paseo CLI was not found at "${binary}" — set PASEO_BIN to its path`,
+        args,
+      );
+    }
     throw new PaseoCliError(`\`paseo ${args.join(" ")}\` failed: ${message}`, args);
   }
 }

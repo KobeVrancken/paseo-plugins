@@ -12,6 +12,7 @@ import type { SendBehavior } from "./state.server.ts";
 
 const TERMINAL_NAME = "Claude Code";
 const ANSWER_KEY_GAP_MS = 120;
+const LAUNCH_CHECK_MS = 1500;
 const ANSWER_VERIFY_MS = 700;
 const IDLE_WAIT_TIMEOUT_MS = 120_000;
 const IDLE_POLL_MS = 750;
@@ -27,22 +28,36 @@ export function delay(ms: number): Promise<void> {
  * usage accounting stays normal and the session syncs to the Claude apps.
  * The session id is generated here so the terminal maps onto exactly one transcript file.
  */
-export async function startSession(workspaceDir: string): Promise<{ sessionId: string; terminalId: string }> {
-  const sessionId = randomUUID();
-  const terminal = await createTerminal(workspaceDir, TERMINAL_NAME);
-  await sendKeys(terminal.id, [`claude --session-id ${sessionId}`], true);
-  await sendKeys(terminal.id, ["Enter"]);
-  return { sessionId, terminalId: terminal.id };
+export type StartedSession = { sessionId: string; terminalId: string; warning: string | null };
+
+/** `claude` runs in the user's shell, so a missing binary only shows up on the terminal screen. */
+async function launchWarning(terminalId: string): Promise<string | null> {
+  await delay(LAUNCH_CHECK_MS);
+  try {
+    const screen = (await captureTerminal(terminalId)).join("\n");
+    if (/command not found|not recognized as an internal|No such file or directory/i.test(screen)) {
+      return "the terminal could not start `claude` — check that it is on your PATH";
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
-export async function resumeSession(
-  workspaceDir: string,
-  sessionId: string,
-): Promise<{ sessionId: string; terminalId: string }> {
+async function launch(workspaceDir: string, command: string, sessionId: string): Promise<StartedSession> {
   const terminal = await createTerminal(workspaceDir, TERMINAL_NAME);
-  await sendKeys(terminal.id, [`claude --resume ${sessionId}`], true);
+  await sendKeys(terminal.id, [command], true);
   await sendKeys(terminal.id, ["Enter"]);
-  return { sessionId, terminalId: terminal.id };
+  return { sessionId, terminalId: terminal.id, warning: await launchWarning(terminal.id) };
+}
+
+export async function startSession(workspaceDir: string): Promise<StartedSession> {
+  const sessionId = randomUUID();
+  return launch(workspaceDir, `claude --session-id ${sessionId}`, sessionId);
+}
+
+export async function resumeSession(workspaceDir: string, sessionId: string): Promise<StartedSession> {
+  return launch(workspaceDir, `claude --resume ${sessionId}`, sessionId);
 }
 
 export type AttachableTerminal = TerminalRow & { looksLikeClaude: boolean };

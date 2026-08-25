@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { TimelineBuilder } from "./render-map.server.ts";
+import { capEntryForList, TimelineBuilder } from "./render-map.server.ts";
 import { resolveProjectDir, type Env } from "./paths.server.ts";
 import type { RenderEntry } from "./render-types.shared.ts";
 
@@ -8,6 +8,7 @@ const HEAD_SCAN_BYTES = 128 * 1024;
 const SIGNATURE_BYTES = 256;
 const TAIL_SCAN_BYTES = 64 * 1024;
 const LIVE_WINDOW_MS = 60_000;
+const INITIAL_WINDOW = 200;
 
 export type SessionFileSummary = {
   sessionId: string;
@@ -31,6 +32,7 @@ type SessionState = {
 
 export type TimelineSlice = {
   entries: RenderEntry[];
+  windowStart: number;
   total: number;
   revision: number;
   reset: boolean;
@@ -151,11 +153,7 @@ export class TranscriptStore {
     return path.join(projectDir, `${sessionId}.jsonl`);
   }
 
-  async timelineSince(
-    workspaceDir: string,
-    sessionId: string,
-    sinceRevision: number,
-  ): Promise<TimelineSlice | null> {
+  private async sync(workspaceDir: string, sessionId: string): Promise<{ state: SessionState; mtime: number } | null> {
     const filePath = await this.sessionFilePath(workspaceDir, sessionId);
     if (!filePath) return null;
     let stat;
@@ -207,20 +205,40 @@ export class TranscriptStore {
         if (entry) state.builder.push(entry);
       }
     }
+    return { state, mtime: stat.mtimeMs };
+  }
+
+  async timelineSince(
+    workspaceDir: string,
+    sessionId: string,
+    sinceRevision: number,
+    fromIndex: number | null = null,
+  ): Promise<TimelineSlice | null> {
+    const synced = await this.sync(workspaceDir, sessionId);
+    if (!synced) return null;
+    const { state, mtime } = synced;
 
     const revision = state.revisionBase + state.builder.revision;
     const reset = sinceRevision < state.revisionBase;
     const localSince = reset ? 0 : sinceRevision - state.revisionBase;
+    const windowStart = fromIndex ?? Math.max(0, state.builder.total - INITIAL_WINDOW);
     return {
-      entries: state.builder.changedSince(localSince),
+      entries: state.builder.changedSince(localSince, windowStart).map(capEntryForList),
+      windowStart,
       total: state.builder.total,
       revision,
       reset: reset || sinceRevision === 0,
       unsupportedCount: state.builder.unsupportedCount,
       title: state.builder.title,
       lastEntryTimestamp: state.builder.lastEntryTimestamp,
-      mtime: stat.mtimeMs,
+      mtime,
     };
+  }
+
+  /** Full, uncapped body of a single entry, for a card the user expanded. */
+  async entryAt(workspaceDir: string, sessionId: string, index: number): Promise<RenderEntry | null> {
+    const synced = await this.sync(workspaceDir, sessionId);
+    return synced?.state.builder.entryAt(index) ?? null;
   }
 
   forget(filePath: string): void {
