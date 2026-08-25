@@ -16,6 +16,7 @@ import {
 import { base64FromDataUrl } from "./clipboard-image.client.ts";
 import { IMAGE_ACCEPT, pickFiles } from "./file-picker.client.ts";
 import { AttachmentLightbox } from "./lightbox.client.tsx";
+import { isPanelWatching, useMutedTerminalNotifications, type MuteStatus } from "./notifications.client.ts";
 import {
   DialogCard,
   EFFORT_LABELS,
@@ -105,6 +106,14 @@ function effortLabel(state: { thinking: boolean; effortLevel: string | null }): 
   return EFFORT_LABELS[state.effortLevel] ?? state.effortLevel;
 }
 
+/** Silent when there is nothing to say: the mute only has to explain itself when it did not take. */
+const MUTE_NOTES: Record<MuteStatus, string | null> = {
+  off: null,
+  muted: null,
+  blocked: "paseo's notification bridge is sealed, so it still notifies about the bound terminal.",
+  unavailable: "Notifications about the bound terminal can only be muted in the desktop app.",
+};
+
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -178,6 +187,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const activeSession = sessions.find((session) => session.sessionId === activeSessionId) ?? null;
 
   const listRef = useRef<FlatList<TimelineItem> | null>(null);
+  const rootRef = useRef<View | null>(null);
   const promptCounter = useRef(0);
   const followRef = useRef(true);
   const timelineRef = useRef<TimelineState>(emptyTimeline(""));
@@ -514,6 +524,11 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
     onError: (error) => setNote(errorText(error)),
   });
 
+  // Paseo cannot know a panel is showing the terminal it is about to shout about, so the panel says
+  // so itself for as long as it is the thing on screen.
+  const watching = useCallback(() => isPanelWatching(rootRef.current), []);
+  const muteStatus = useMutedTerminalNotifications(activeSession?.boundTerminalId ?? null, watching);
+
   const attachableQuery = useQuery({
     queryKey: ["claude-code-attachable", workspaceDir, attachOpen],
     enabled: attachOpen && workspaceDir !== null,
@@ -533,7 +548,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
     : null;
 
   return (
-    <View style={{ flex: 1, backgroundColor: palette.surface0 }}>
+    <View ref={rootRef} style={{ flex: 1, backgroundColor: palette.surface0 }}>
       <View
         style={{
           height: HEADER_HEIGHT,
@@ -776,6 +791,9 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
             void hooksQuery.refetch();
           }}
         />
+        {MUTE_NOTES[muteStatus] ? (
+          <SheetNote palette={palette}>{MUTE_NOTES[muteStatus]}</SheetNote>
+        ) : null}
       </Sheet>
 
       <Sheet palette={palette} visible={attachOpen} title="Attach to terminal" onClose={() => setAttachOpen(false)}>
