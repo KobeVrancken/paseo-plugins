@@ -22,6 +22,7 @@ import {
   sendKeys,
   type TerminalRow,
 } from "./paseo-cli.server.ts";
+import { composePrompt } from "../prompt.shared.ts";
 import type { SendBehavior } from "./state.server.ts";
 
 const TERMINAL_NAME = "Claude Code";
@@ -98,13 +99,6 @@ export async function listAttachableTerminals(workspaceDir: string): Promise<Att
 export async function terminalExists(terminalId: string): Promise<boolean> {
   const terminals = await listTerminals();
   return terminals.some((terminal) => terminal.id === terminalId);
-}
-
-export function composePrompt(text: string, references: string[]): string {
-  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
-  if (references.length === 0) return normalized;
-  // An attachment reaches the CLI as a line of its own: a path it reads, or a URL it fetches.
-  return [normalized, ...references].filter((part) => part !== "").join("\n");
 }
 
 export type SendPromptResult = { delivered: boolean; note: string | null };

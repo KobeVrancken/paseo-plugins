@@ -1,9 +1,10 @@
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin";
 import { useRpc, useWorkspace } from "@getpaseo/plugin";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Clipboard, FlatList, Linking, Platform, Pressable, Text, View } from "react-native";
 import * as contracts from "../contracts.shared.ts";
+import { composePrompt } from "../prompt.shared.ts";
 import {
   addAttachment,
   fileAttachment,
@@ -34,7 +35,13 @@ import {
 } from "./panel-controls.client.tsx";
 import type { RenderEntry, SendBehavior, SessionStatus, SessionSummary } from "../render-types.shared.ts";
 import { fontSize, HEADER_HEIGHT, MAX_CONTENT_WIDTH, radius, spacing, type Palette } from "./theme.client.ts";
-import { groupEntries, type TimelineItem } from "./timeline-model.client.ts";
+import {
+  groupEntries,
+  pendingItems,
+  reconcilePending,
+  type PendingPrompt,
+  type TimelineItem,
+} from "./timeline-model.client.ts";
 import { TimelineItemView } from "./timeline.client.tsx";
 import {
   Button,
@@ -47,6 +54,10 @@ import {
 
 const SESSION_POLL_MS = 2000;
 const TIMELINE_POLL_MS = 750;
+/** While the panel is waiting on something it just did, or the session is mid-turn. */
+const TIMELINE_ACTIVE_POLL_MS = 250;
+/** How long after the last transcript change the session still counts as mid-turn. */
+const TIMELINE_ACTIVE_WINDOW_MS = 6000;
 const HOOKS_POLL_MS = 5000;
 const DIALOG_OPEN_POLL_MS = 1500;
 const DIALOG_WATCH_POLL_MS = 3000;
@@ -138,6 +149,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const [modeOpen, setModeOpen] = useState(false);
   const [forceWatchUntil, setForceWatchUntil] = useState(0);
   const [windowStart, setWindowStart] = useState<number | null>(null);
+  const [pending, setPending] = useState<PendingPrompt[]>([]);
 
   const sessionsQuery = useQuery({
     queryKey: ["claude-code-sessions", workspaceDir],
@@ -166,6 +178,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const activeSession = sessions.find((session) => session.sessionId === activeSessionId) ?? null;
 
   const listRef = useRef<FlatList<TimelineItem> | null>(null);
+  const promptCounter = useRef(0);
   const followRef = useRef(true);
   const timelineRef = useRef<TimelineState>(emptyTimeline(""));
   const timelineKey = `${workspaceDir ?? ""}:${activeSessionId ?? ""}`;
@@ -173,7 +186,13 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const timelineQuery = useQuery({
     queryKey: ["claude-code-timeline", timelineKey, windowStart],
     enabled: workspaceDir !== null && activeSessionId !== null,
-    refetchInterval: TIMELINE_POLL_MS,
+    // Reading the transcript is a tail read of a local file, so it is polled hard while anything is
+    // moving and only eases off once the session has settled.
+    refetchInterval: (query) =>
+      pending.length > 0 ||
+      Date.now() - (query.state.data?.lastChangeAt ?? 0) < TIMELINE_ACTIVE_WINDOW_MS
+        ? TIMELINE_ACTIVE_POLL_MS
+        : TIMELINE_POLL_MS,
     queryFn: async (): Promise<TimelineState> => {
       if (timelineRef.current.key !== timelineKey) timelineRef.current = emptyTimeline(timelineKey);
       const previous = timelineRef.current;
@@ -205,7 +224,16 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
     () => (timelineQuery.data?.entries ?? []).filter((entry): entry is RenderEntry => entry !== undefined),
     [timelineQuery.data],
   );
-  const items = useMemo(() => groupEntries(entries), [entries]);
+  const items = useMemo(() => [...groupEntries(entries), ...pendingItems(pending)], [entries, pending]);
+
+  useEffect(() => {
+    setPending((current) => reconcilePending(current, entries));
+  }, [entries]);
+
+  // An echo belongs to the session it was typed into, and nothing else.
+  useEffect(() => {
+    setPending([]);
+  }, [timelineKey]);
 
   const status: SessionStatus = timelineQuery.data?.sessionStatus ?? "detached";
   const hooksReady = hooksQuery.data?.enabled === true;
@@ -274,21 +302,50 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
     },
   });
 
+  const dropPending = useCallback((id: string) => {
+    setPending((current) => current.filter((prompt) => prompt.id !== id));
+  }, []);
+
   const sendMutation = useMutation({
-    mutationFn: (text: string) =>
+    mutationFn: (sent: { prompt: PendingPrompt; references: string[] }) =>
       sendPrompt({
         workspaceId,
         workspaceDir: workspaceDir!,
         sessionId: activeSessionId!,
-        text,
-        references: attachments.map((attachment) => attachment.reference),
+        text: sent.prompt.text,
+        references: sent.references,
       }),
-    onSuccess: (result) => {
-      setAttachments([]);
+    onSuccess: (result, sent) => {
+      if (!result.delivered) dropPending(sent.prompt.id);
       setNote(result.note ?? (result.delivered ? null : "not delivered"));
     },
-    onError: (error) => setNote(errorText(error)),
+    onError: (error, sent) => {
+      dropPending(sent.prompt.id);
+      setNote(errorText(error));
+    },
   });
+
+  /**
+   * The prompt goes up the moment it is sent, before the CLI has been typed at, let alone written
+   * the line down: the round trip to the terminal takes a second or two, and a chat window that
+   * shows nothing for that long reads as broken.
+   */
+  const submitPrompt = useCallback(
+    (text: string) => {
+      const references = attachments.map((attachment) => attachment.reference);
+      const prompt: PendingPrompt = {
+        id: `${Date.now()}-${promptCounter.current++}`,
+        text: composePrompt(text, references),
+        afterIndex: timelineRef.current.total,
+      };
+      followRef.current = true;
+      setPending((current) => [...current, prompt]);
+      setAttachments([]);
+      setNote(null);
+      sendMutation.mutate({ prompt, references });
+    },
+    [attachments, sendMutation],
+  );
 
   // A pending option dialog never reaches the transcript — Claude Code writes the tool call only once
   // it is answered — and the hooks only report needs-input for an idle prompt, so the terminal screen
@@ -667,7 +724,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           onRemoveAttachment={(reference) =>
             setAttachments((current) => current.filter((item) => item.reference !== reference))
           }
-          onSend={(text) => sendMutation.mutate(text)}
+          onSend={submitPrompt}
         />
       )}
 

@@ -12,6 +12,8 @@ export type EntryLoader = (index: number) => Promise<RenderEntry | null>;
 /** Tool rows sit slightly wider than the text column so their hover surface reads as a row, not a box. */
 const ROW_BLEED = -spacing[2];
 
+const PENDING_OPACITY = 0.55;
+
 /** Fetches the full body of an entry the list payload shortened, once the user asks to see it. */
 function useFullBody(
   entry: RenderEntry,
@@ -591,6 +593,14 @@ export function TimelineItemView({
 }) {
   if (item.kind === "sidechain") {
     return <SidechainCard entries={item.entries} palette={palette} loadEntry={loadEntry} />;
+  }
+  // Dimmed until the transcript has it: the prompt is on its way to the terminal, not in the session.
+  if (item.kind === "pending") {
+    return (
+      <View style={{ opacity: PENDING_OPACITY }}>
+        <EntryView entry={item.entry} palette={palette} />
+      </View>
+    );
   }
   return (
     <EntryView
