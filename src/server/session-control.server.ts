@@ -100,11 +100,11 @@ export async function terminalExists(terminalId: string): Promise<boolean> {
   return terminals.some((terminal) => terminal.id === terminalId);
 }
 
-export function composePrompt(text: string, imagePaths: string[]): string {
+export function composePrompt(text: string, references: string[]): string {
   const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
-  if (imagePaths.length === 0) return normalized;
-  // The CLI picks up image attachments from file paths written in the prompt.
-  return [normalized, ...imagePaths].filter((part) => part !== "").join("\n");
+  if (references.length === 0) return normalized;
+  // An attachment reaches the CLI as a line of its own: a path it reads, or a URL it fetches.
+  return [normalized, ...references].filter((part) => part !== "").join("\n");
 }
 
 export type SendPromptResult = { delivered: boolean; note: string | null };
@@ -112,11 +112,11 @@ export type SendPromptResult = { delivered: boolean; note: string | null };
 export async function sendPrompt(options: {
   terminalId: string;
   text: string;
-  imagePaths: string[];
+  references: string[];
   behavior: SendBehavior;
   readStatus: () => Promise<"idle" | "running" | "needs_input" | "detached">;
 }): Promise<SendPromptResult> {
-  const composed = composePrompt(options.text, options.imagePaths);
+  const composed = composePrompt(options.text, options.references);
   if (composed === "") return { delivered: false, note: "nothing to send" };
 
   let note: string | null = null;

@@ -1,6 +1,6 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import type { StyleProp, TextStyle, ViewStyle } from "react-native";
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Image, Platform, Pressable, Text, View } from "react-native";
 import {
   controlHeight,
@@ -24,6 +24,16 @@ export function usePalette(theme: PluginTheme): Palette {
  * React Native types a pressable's style callback without `hovered`, which the web renderer does pass
  * and which every paseo control styles itself with.
  */
+/** Keeps a value still while the user is typing, so every keystroke does not reach the daemon. */
+export function useDebounced<Value>(value: Value, delay: number): Value {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return settled;
+}
+
 export type PressState = { pressed: boolean; hovered?: boolean };
 
 export function pressable(style: (state: PressState) => ViewStyle): (state: { pressed: boolean }) => StyleProp<ViewStyle> {

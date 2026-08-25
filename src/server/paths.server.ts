@@ -87,6 +87,10 @@ export function imagesDir(env: Env = process.env): string {
   return path.join(cacheDir(env), "images");
 }
 
+export function filesDir(env: Env = process.env): string {
+  return path.join(cacheDir(env), "files");
+}
+
 export function stateFilePath(env: Env = process.env): string {
   return path.join(cacheDir(env), "state.json");
 }

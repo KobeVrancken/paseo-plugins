@@ -57,12 +57,3 @@ export function base64FromDataUrl(dataUrl: string): string | null {
   const match = /^data:[^;,]*;base64,(.*)$/s.exec(dataUrl);
   return match ? match[1]! : null;
 }
-
-export function readImageDataUrl(file: PastedFile): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error("the pasted image could not be read"));
-    reader.readAsDataURL(file as unknown as Blob);
-  });
-}

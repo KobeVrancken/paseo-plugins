@@ -12,10 +12,12 @@ import {
 import { readCliSettings, modelLabel } from "./cli-settings.server.ts";
 import {
   attachImagePath,
-  cleanupOldImages,
+  cleanupOldUploads,
   imagePreviewDataUrl,
+  saveBase64File,
   saveBase64Image,
-} from "./images.server.ts";
+} from "./uploads.server.ts";
+import { searchForgeItems } from "./github.server.ts";
 import { StateStore } from "./state.server.ts";
 import { TranscriptStore, isRecentlyActive } from "./transcript.server.ts";
 
@@ -28,8 +30,8 @@ type Context = { paseo: PaseoLike };
 
 let prunedBindings = false;
 
-void cleanupOldImages().then((removed) => {
-  if (removed > 0) console.log(`removed ${removed} cached image(s) older than a week`);
+void cleanupOldUploads().then((removed) => {
+  if (removed > 0) console.log(`removed ${removed} cached upload(s) older than a week`);
 });
 
 /** Bindings survive daemon restarts, so validate them against the live terminals once per process. */
@@ -217,7 +219,7 @@ export async function sendPromptHandler(
   return control.sendPrompt({
     terminalId,
     text: input.text,
-    imagePaths: input.imagePaths,
+    references: input.references,
     behavior: sendBehavior,
     readStatus: () => statusFor(context.paseo, input.sessionId, input.workspaceId),
   });
@@ -281,6 +283,18 @@ export async function uploadImageHandler(
   input: Input<typeof contracts.uploadImage>,
 ): Promise<Output<typeof contracts.uploadImage>> {
   return { path: await saveBase64Image(input.fileName, input.base64) };
+}
+
+export async function uploadFileHandler(
+  input: Input<typeof contracts.uploadFile>,
+): Promise<Output<typeof contracts.uploadFile>> {
+  return { path: await saveBase64File(input.fileName, input.base64) };
+}
+
+export async function searchForgeItemsHandler(
+  input: Input<typeof contracts.searchForgeItems>,
+): Promise<Output<typeof contracts.searchForgeItems>> {
+  return searchForgeItems(input.workspaceDir, input.query, input.limit);
 }
 
 export async function getComposerStateHandler(

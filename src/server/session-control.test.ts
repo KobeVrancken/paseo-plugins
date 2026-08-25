@@ -8,14 +8,14 @@ test("normalizes newlines and trims the prompt", () => {
   assert.equal(composePrompt("  hello\r\nworld  ", []), "hello\nworld");
 });
 
-test("appends image paths on their own lines", () => {
+test("appends every attachment on a line of its own", () => {
   assert.equal(
-    composePrompt("look at this", ["/cache/a.png", "/cache/b.png"]),
-    "look at this\n/cache/a.png\n/cache/b.png",
+    composePrompt("look at this", ["/cache/a.png", "https://example.test/pull/3"]),
+    "look at this\n/cache/a.png\nhttps://example.test/pull/3",
   );
 });
 
-test("sends images without text", () => {
+test("sends an attachment without text", () => {
   assert.equal(composePrompt("", ["/cache/a.png"]), "/cache/a.png");
 });
 

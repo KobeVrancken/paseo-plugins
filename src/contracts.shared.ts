@@ -120,7 +120,8 @@ export const sendPrompt = defineRpc({
     workspaceDir: z.string(),
     sessionId: z.string(),
     text: z.string(),
-    imagePaths: z.array(z.string()).default([]),
+    /** Attachment lines appended to the prompt: a path the CLI reads, or a URL it fetches. */
+    references: z.array(z.string()).default([]),
   }),
   output: z.object({ delivered: z.boolean(), note: z.string().nullable() }),
 });
@@ -176,6 +177,38 @@ export const uploadImage = defineRpc({
   name: "image.upload",
   input: z.object({ fileName: z.string(), base64: z.string() }),
   output: z.object({ path: z.string() }),
+});
+
+/** Anything that is not an image: saved next to the images and named in the prompt the same way. */
+export const uploadFile = defineRpc({
+  name: "file.upload",
+  input: z.object({ fileName: z.string(), base64: z.string() }),
+  output: z.object({ path: z.string() }),
+});
+
+/**
+ * Issues and pull requests, read through the user's own `gh`.
+ * A miss is a warning rather than an error: not every workspace is a GitHub checkout.
+ */
+export const searchForgeItems = defineRpc({
+  name: "github.search",
+  input: z.object({
+    workspaceDir: z.string(),
+    query: z.string().default(""),
+    limit: z.number().int().min(1).max(50).default(20),
+  }),
+  output: z.object({
+    items: z.array(
+      z.object({
+        kind: z.enum(["issue", "pr"]),
+        number: z.number().int(),
+        title: z.string(),
+        state: z.string(),
+        url: z.string(),
+      }),
+    ),
+    warning: z.string().nullable(),
+  }),
 });
 
 export const PermissionModeSchema = z.enum([

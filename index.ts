@@ -17,9 +17,11 @@ import {
   listAttachableTerminalsHandler,
   listSessionsHandler,
   resumeSessionHandler,
+  searchForgeItemsHandler,
   sendPromptHandler,
   setSettingsHandler,
   startSessionHandler,
+  uploadFileHandler,
   uploadImageHandler,
 } from "./src/server/handlers.server.ts";
 import { ClaudeCodePanel } from "./src/client/main.client.tsx";
@@ -44,6 +46,8 @@ export default function contribute(plugin: PluginContext) {
   plugin.handle(contracts.answerDialog, (input) => answerDialogHandler(input));
   plugin.handle(contracts.attachImage, (input) => attachImageHandler(input));
   plugin.handle(contracts.uploadImage, (input) => uploadImageHandler(input));
+  plugin.handle(contracts.uploadFile, (input) => uploadFileHandler(input));
+  plugin.handle(contracts.searchForgeItems, (input) => searchForgeItemsHandler(input));
   plugin.handle(contracts.getComposerState, (input) => getComposerStateHandler(input));
   plugin.handle(contracts.openCliMenu, (input) => openCliMenuHandler(input));
   plugin.handle(contracts.permissionMode, (input) => permissionModeHandler(input));

@@ -2,8 +2,14 @@ import type { TextInputKeyPressEvent } from "react-native";
 import React, { useEffect, useRef, useState } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { SendBehavior, SessionStatus } from "../render-types.shared.ts";
-import { attachmentName, type Attachment } from "./attachments.client.ts";
-import { pastedImageName, pastedImages, readImageDataUrl } from "./clipboard-image.client.ts";
+import {
+  forgeLabel,
+  forgeOptionLabel,
+  type Attachment,
+  type ForgeItem,
+} from "./attachments.client.ts";
+import { pastedImageName, pastedImages } from "./clipboard-image.client.ts";
+import { readFileDataUrl } from "./file-picker.client.ts";
 import {
   controlHeight,
   fontSize,
@@ -231,7 +237,7 @@ export function PromptBox({
   attachments,
   controls,
   onSend,
-  onAttachImage,
+  onAddAttachment,
   onPasteImages,
   onRemoveAttachment,
 }: {
@@ -243,9 +249,9 @@ export function PromptBox({
   attachments?: Attachment[];
   controls: ComposerControls | null;
   onSend: (text: string) => void;
-  onAttachImage?: () => void;
+  onAddAttachment?: () => void;
   onPasteImages?: (images: { fileName: string; dataUrl: string }[]) => void;
-  onRemoveAttachment?: (path: string) => void;
+  onRemoveAttachment?: (reference: string) => void;
 }) {
   const [text, setText] = useState("");
   const inputRef = useRef<TextInput | null>(null);
@@ -266,7 +272,7 @@ export function PromptBox({
       void Promise.all(
         images.map(async (image) => ({
           fileName: pastedImageName(image),
-          dataUrl: await readImageDataUrl(image),
+          dataUrl: await readFileDataUrl(image),
         })),
       ).then(onPasteImages, () => {});
     };
@@ -311,13 +317,13 @@ export function PromptBox({
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing[2] }}>
             {files.map((file) => (
               <AttachmentPill
-                key={file.path}
+                key={file.reference}
                 palette={palette}
                 previewDataUrl={file.previewDataUrl}
-                title={attachmentName(file.path)}
-                subtitle="Image"
+                title={file.title}
+                subtitle={file.subtitle}
                 disabled={disabled}
-                onRemove={() => onRemoveAttachment?.(file.path)}
+                onRemove={() => onRemoveAttachment?.(file.reference)}
               />
             ))}
           </View>
@@ -370,8 +376,8 @@ export function PromptBox({
           }}
         >
           <View style={{ flexDirection: "row", alignItems: "center", minWidth: 0, flexShrink: 1 }}>
-            {onAttachImage ? (
-              <Pill palette={palette} glyph="＋" onPress={onAttachImage} disabled={disabled} />
+            {onAddAttachment ? (
+              <Pill palette={palette} glyph="＋" onPress={onAddAttachment} disabled={disabled} />
             ) : null}
             {controls ? (
               <>
@@ -582,6 +588,69 @@ export function ImageAttachSheet({
           />
         </View>
       </View>
+    </Sheet>
+  );
+}
+
+/** Issues and pull requests come from the user's own `gh`, so an unauthenticated one says so here. */
+export function ForgePickerSheet({
+  palette,
+  visible,
+  query,
+  items,
+  loading,
+  warning,
+  onQueryChange,
+  onClose,
+  onPick,
+}: {
+  palette: Palette;
+  visible: boolean;
+  query: string;
+  items: ForgeItem[];
+  loading: boolean;
+  warning: string | null;
+  onQueryChange: (query: string) => void;
+  onClose: () => void;
+  onPick: (item: ForgeItem) => void;
+}) {
+  return (
+    <Sheet palette={palette} visible={visible} title="Add issue or PR" onClose={onClose}>
+      <View style={{ paddingHorizontal: spacing[4], paddingTop: spacing[3] }}>
+        <TextInput
+          value={query}
+          onChangeText={onQueryChange}
+          placeholder="Search issues and pull requests"
+          placeholderTextColor={palette.foregroundMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={{
+            minHeight: controlHeight.compact,
+            paddingHorizontal: spacing[3],
+            borderRadius: radius.md,
+            borderWidth: 1,
+            borderColor: palette.border,
+            backgroundColor: palette.surface2,
+            color: palette.foreground,
+            fontSize: fontSize.base,
+            ...NO_OUTLINE,
+          }}
+        />
+      </View>
+      {warning ? <SheetNote palette={palette}>{warning}</SheetNote> : null}
+      {items.map((item) => (
+        <SheetRow
+          key={`${item.kind}:${item.number}`}
+          palette={palette}
+          label={forgeOptionLabel(item)}
+          detail={`${forgeLabel(item.kind)} · ${item.state}`}
+          onPress={() => onPick(item)}
+        />
+      ))}
+      {loading && items.length === 0 ? <SheetNote palette={palette}>Asking gh…</SheetNote> : null}
+      {!loading && !warning && items.length === 0 ? (
+        <SheetNote palette={palette}>Nothing matched.</SheetNote>
+      ) : null}
     </Sheet>
   );
 }

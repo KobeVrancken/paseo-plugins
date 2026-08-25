@@ -5,18 +5,24 @@ import path from "node:path";
 import test from "node:test";
 import {
   attachImagePath,
-  cleanupOldImages,
+  cleanupOldUploads,
   imagePreviewDataUrl,
+  saveBase64File,
   saveBase64Image,
-} from "./images.server.ts";
+} from "./uploads.server.ts";
 
 const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUg==";
 
-async function tempEnv(): Promise<{ env: Record<string, string>; imagesDir: string }> {
+async function tempEnv(): Promise<{
+  env: Record<string, string>;
+  imagesDir: string;
+  filesDir: string;
+}> {
   const cache = await mkdtemp(path.join(os.tmpdir(), "claude-images-"));
   return {
     env: { XDG_CACHE_HOME: cache, HOME: cache },
     imagesDir: path.join(cache, "paseo-claude-code-cli-plugin", "images"),
+    filesDir: path.join(cache, "paseo-claude-code-cli-plugin", "files"),
   };
 }
 
@@ -54,7 +60,7 @@ test("deletes cached images older than a week", async () => {
   const longAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   await utimes(stale, longAgo, longAgo);
 
-  assert.equal(await cleanupOldImages(env), 1);
+  assert.equal(await cleanupOldUploads(env), 1);
   await assert.rejects(() => stat(stale));
   assert.ok(await stat(fresh));
 });
@@ -74,4 +80,13 @@ test("leaves a large image without a preview", async () => {
   const { env } = await tempEnv();
   const big = await saveBase64Image("big.png", Buffer.alloc(2_000_000, 1).toString("base64"), env);
   assert.equal(await imagePreviewDataUrl(big), null);
+});
+
+test("keeps a non-image upload under its own name", async () => {
+  const { env, filesDir } = await tempEnv();
+  const written = await saveBase64File("notes.md", Buffer.from("# hi").toString("base64"), env);
+  assert.equal(path.dirname(written), filesDir);
+  assert.match(path.basename(written), /^\d+-notes\.md$/);
+  assert.equal((await readFile(written)).toString(), "# hi");
+  await assert.rejects(() => saveBase64File("empty.md", "", env), /empty/);
 });

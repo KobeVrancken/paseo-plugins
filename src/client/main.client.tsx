@@ -2,13 +2,22 @@ import type { PluginWorkspacePanelProps } from "@getpaseo/plugin";
 import { useRpc, useWorkspace } from "@getpaseo/plugin";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { Clipboard, FlatList, Pressable, Text, View } from "react-native";
+import { Clipboard, FlatList, Platform, Pressable, Text, View } from "react-native";
 import * as contracts from "../contracts.shared.ts";
-import type { Attachment } from "./attachments.client.ts";
+import {
+  addAttachment,
+  fileAttachment,
+  forgeAttachment,
+  imageAttachment,
+  type Attachment,
+  type ForgeItem,
+} from "./attachments.client.ts";
 import { base64FromDataUrl } from "./clipboard-image.client.ts";
+import { IMAGE_ACCEPT, pickFiles } from "./file-picker.client.ts";
 import {
   DialogCard,
   EFFORT_LABELS,
+  ForgePickerSheet,
   HooksOnboarding,
   ImageAttachSheet,
   PERMISSION_MODE_LABELS,
@@ -26,7 +35,14 @@ import type { RenderEntry, SendBehavior, SessionStatus, SessionSummary } from ".
 import { fontSize, HEADER_HEIGHT, MAX_CONTENT_WIDTH, radius, spacing, type Palette } from "./theme.client.ts";
 import { groupEntries, type TimelineItem } from "./timeline-model.client.ts";
 import { TimelineItemView } from "./timeline.client.tsx";
-import { Button, IconButton, pressable, usePalette, relativeTimeFrom } from "./ui.client.tsx";
+import {
+  Button,
+  IconButton,
+  pressable,
+  useDebounced,
+  usePalette,
+  relativeTimeFrom,
+} from "./ui.client.tsx";
 
 const SESSION_POLL_MS = 2000;
 const TIMELINE_POLL_MS = 750;
@@ -39,6 +55,8 @@ const DIALOG_BACKOFF_AFTER_MS = 45_000;
 const DIALOG_GIVE_UP_AFTER_MS = 120_000;
 const SEND_BEHAVIORS: SendBehavior[] = ["cli_default", "hold_until_idle", "interrupt_first"];
 const COMPOSER_POLL_MS = 5000;
+const FORGE_SEARCH_DEBOUNCE_MS = 250;
+const FORGE_SEARCH_STALE_MS = 30_000;
 /** How long opening a CLI menu keeps the screen watched, so the menu reaches the dialog card. */
 const MENU_WATCH_MS = 60_000;
 
@@ -98,6 +116,8 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const answerDialog = useRpc(contracts.answerDialog);
   const attachImage = useRpc(contracts.attachImage);
   const uploadImage = useRpc(contracts.uploadImage);
+  const uploadFile = useRpc(contracts.uploadFile);
+  const searchForgeItems = useRpc(contracts.searchForgeItems);
   const getComposerState = useRpc(contracts.getComposerState);
   const openCliMenu = useRpc(contracts.openCliMenu);
   const permissionMode = useRpc(contracts.permissionMode);
@@ -107,6 +127,9 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const [menuOpen, setMenuOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [imageSheetOpen, setImageSheetOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [forgeOpen, setForgeOpen] = useState(false);
+  const [forgeQuery, setForgeQuery] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [note, setNote] = useState<string | null>(null);
   const [modeOpen, setModeOpen] = useState(false);
@@ -255,7 +278,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         workspaceDir: workspaceDir!,
         sessionId: activeSessionId!,
         text,
-        imagePaths: attachments.map((attachment) => attachment.path),
+        references: attachments.map((attachment) => attachment.reference),
       }),
     onSuccess: (result) => {
       setAttachments([]);
@@ -315,29 +338,60 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
     onError: (error) => setNote(errorText(error)),
   });
 
+  const attach = useCallback((next: Attachment[]) => {
+    setAttachments((current) => next.reduce(addAttachment, current));
+  }, []);
+
   const imageMutation = useMutation({
     mutationFn: (path: string) => attachImage({ path }),
     onSuccess: (result) => {
-      setAttachments((current) => [...current, result]);
+      attach([imageAttachment(result.path, result.previewDataUrl)]);
       setImageSheetOpen(false);
     },
   });
 
-  // A pasted image is already in the panel's hands, so it is uploaded and previewed from there
-  // rather than read back off disk.
-  const pasteMutation = useMutation({
-    mutationFn: async (images: { fileName: string; dataUrl: string }[]) => {
+  // A picked or pasted image is already in the panel's hands, so it is previewed from there rather
+  // than read back off disk.
+  const uploadMutation = useMutation({
+    mutationFn: async (picked: { files: { fileName: string; dataUrl: string }[]; images: boolean }) => {
       const attached: Attachment[] = [];
-      for (const image of images) {
-        const base64 = base64FromDataUrl(image.dataUrl);
+      for (const file of picked.files) {
+        const base64 = base64FromDataUrl(file.dataUrl);
         if (base64 === null) continue;
-        const { path } = await uploadImage({ fileName: image.fileName, base64 });
-        attached.push({ path, previewDataUrl: image.dataUrl });
+        if (picked.images) {
+          const { path } = await uploadImage({ fileName: file.fileName, base64 });
+          attached.push(imageAttachment(path, file.dataUrl));
+        } else {
+          const { path } = await uploadFile({ fileName: file.fileName, base64 });
+          attached.push(fileAttachment(path));
+        }
       }
       return attached;
     },
-    onSuccess: (attached) => setAttachments((current) => [...current, ...attached]),
+    onSuccess: attach,
     onError: (error) => setNote(errorText(error)),
+  });
+
+  const openPicker = useCallback(
+    (images: boolean) => {
+      setAddOpen(false);
+      if (Platform.OS !== "web") {
+        setImageSheetOpen(true);
+        return;
+      }
+      void pickFiles({ accept: images ? IMAGE_ACCEPT : "", multiple: true }).then((files) => {
+        if (files.length > 0) uploadMutation.mutate({ files, images });
+      });
+    },
+    [uploadMutation],
+  );
+
+  const forgeDebouncedQuery = useDebounced(forgeQuery, FORGE_SEARCH_DEBOUNCE_MS);
+  const forgeQueryResult = useQuery({
+    queryKey: ["claude-code-forge", workspaceDir, forgeDebouncedQuery],
+    enabled: forgeOpen && workspaceDir !== null,
+    staleTime: FORGE_SEARCH_STALE_MS,
+    queryFn: () => searchForgeItems({ workspaceDir: workspaceDir!, query: forgeDebouncedQuery, limit: 20 }),
   });
 
   // Everything the composer shows is read from files, so it can be polled with the transcript.
@@ -580,10 +634,10 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
                 }
               : null
           }
-          onAttachImage={() => setImageSheetOpen(true)}
-          onPasteImages={(images) => pasteMutation.mutate(images)}
-          onRemoveAttachment={(path) =>
-            setAttachments((current) => current.filter((item) => item.path !== path))
+          onAddAttachment={() => setAddOpen(true)}
+          onPasteImages={(files) => uploadMutation.mutate({ files, images: true })}
+          onRemoveAttachment={(reference) =>
+            setAttachments((current) => current.filter((item) => item.reference !== reference))
           }
           onSend={(text) => sendMutation.mutate(text)}
         />
@@ -672,6 +726,57 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           />
         ))}
       </Sheet>
+
+      <Sheet palette={palette} visible={addOpen} title="Add attachment" onClose={() => setAddOpen(false)}>
+        <SheetRow
+          palette={palette}
+          label="Add image"
+          detail="Pick a png, jpg, gif or webp to send with the prompt"
+          onPress={() => openPicker(true)}
+        />
+        <SheetRow
+          palette={palette}
+          label="Add issue or PR"
+          detail="Name a GitHub issue or pull request in the prompt"
+          onPress={() => {
+            setAddOpen(false);
+            setForgeOpen(true);
+          }}
+        />
+        <SheetRow
+          palette={palette}
+          label="Upload file"
+          detail="Send any other file for the CLI to read"
+          onPress={() => openPicker(false)}
+        />
+        {/* The file picker reaches the machine showing the panel; a typed path reaches the one paseo runs on. */}
+        {Platform.OS === "web" ? (
+          <SheetRow
+            palette={palette}
+            label="Attach by path…"
+            detail="Name an image on the machine running paseo"
+            onPress={() => {
+              setAddOpen(false);
+              setImageSheetOpen(true);
+            }}
+          />
+        ) : null}
+      </Sheet>
+
+      <ForgePickerSheet
+        palette={palette}
+        visible={forgeOpen}
+        query={forgeQuery}
+        items={forgeQueryResult.data?.items ?? []}
+        loading={forgeQueryResult.isFetching}
+        warning={forgeQueryResult.data?.warning ?? null}
+        onQueryChange={setForgeQuery}
+        onClose={() => setForgeOpen(false)}
+        onPick={(item: ForgeItem) => {
+          attach([forgeAttachment(item)]);
+          setForgeOpen(false);
+        }}
+      />
 
       <ImageAttachSheet
         palette={palette}
