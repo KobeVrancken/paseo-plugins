@@ -261,7 +261,6 @@ export function DialogCard({
     );
   }
 
-  const answerable = dialog.options.filter((option) => !option.meta);
   return (
     <Card theme={theme} tone="danger" style={{ margin: 10 }}>
       <View style={{ gap: 6 }}>
@@ -271,14 +270,17 @@ export function DialogCard({
           </Text>
         ))}
         <Text style={{ color: theme.colors.foreground, fontWeight: "600" }}>{dialog.prompt}</Text>
-        {answerable.map((option) => {
+        {dialog.options.map((option) => {
           const selected = checked.includes(option.index);
+          // "Type something" and "Chat about this" open a field in the CLI rather than answering,
+          // so they are always a single press, even in a multi-select.
+          const toggles = dialog.multiSelect && !option.meta;
           return (
             <Pressable
               key={option.index}
               disabled={answering}
               onPress={() => {
-                if (!dialog.multiSelect) {
+                if (!toggles) {
                   onAnswer([option.index]);
                   return;
                 }
@@ -290,10 +292,18 @@ export function DialogCard({
               }}
               style={{ padding: 8, borderRadius: 6, overflow: "hidden" }}
             >
-              <Tint color={selected ? theme.colors.accent : theme.colors.foreground} opacity={selected ? 0.2 : 0.1} />
-              <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>
-                {dialog.multiSelect ? (selected ? "☑ " : "☐ ") : ""}
-                {option.label}
+              <Tint
+                color={selected ? theme.colors.accent : theme.colors.foreground}
+                opacity={selected ? 0.2 : option.meta ? 0.05 : 0.1}
+              />
+              <Text
+                style={{
+                  color: option.meta ? theme.colors.foregroundMuted : theme.colors.foreground,
+                  fontSize: 13,
+                }}
+              >
+                {toggles ? (selected ? "☑ " : "☐ ") : ""}
+                {option.index}. {option.label}
               </Text>
             </Pressable>
           );

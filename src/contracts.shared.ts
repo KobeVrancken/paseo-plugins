@@ -161,6 +161,7 @@ export const answerDialog = defineRpc({
     answered: z.boolean(),
     verified: z.boolean(),
     warning: z.string().nullable(),
+    note: z.string().nullable(),
   }),
 });
 

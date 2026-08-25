@@ -237,7 +237,12 @@ export async function answerDialogHandler(
 ): Promise<Output<typeof contracts.answerDialog>> {
   const terminalId = await boundTerminalId(input.sessionId);
   if (!terminalId) {
-    return { answered: false, verified: false, warning: "no terminal is bound to this session" };
+    return {
+      answered: false,
+      verified: false,
+      warning: "no terminal is bound to this session",
+      note: null,
+    };
   }
   const dialog = await control.readDialog(terminalId);
   if (!dialog) {
@@ -245,6 +250,7 @@ export async function answerDialogHandler(
       answered: false,
       verified: false,
       warning: "no dialog is on screen — answer it in the terminal",
+      note: null,
     };
   }
   const optionIndices =
@@ -254,14 +260,10 @@ export async function answerDialogHandler(
       answered: false,
       verified: false,
       warning: "the terminal is showing different options — answer it in the terminal",
+      note: null,
     };
   }
-  return control.answerDialog({
-    terminalId,
-    optionIndices,
-    multiSelect: dialog.multiSelect,
-    previousPrompt: dialog.prompt,
-  });
+  return control.answerDialog({ terminalId, dialog, optionIndices });
 }
 
 export async function attachImageHandler(

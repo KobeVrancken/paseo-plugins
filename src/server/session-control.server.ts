@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { looksLikeClaudeSession, parseDialog, type ParsedDialog } from "./capture.server.ts";
-import { answerKeys, PASTE_END, PASTE_START } from "./keymap.server.ts";
+import { answerKeys, metaOptionKeys, PASTE_END, PASTE_START } from "./keymap.server.ts";
 import {
   captureTerminal,
   createTerminal,
@@ -144,30 +144,46 @@ export function optionIndicesForLabels(dialog: ParsedDialog, labels: string[]): 
   return indices;
 }
 
-export type AnswerResult = { answered: boolean; verified: boolean; warning: string | null };
+export type AnswerResult = {
+  answered: boolean;
+  verified: boolean;
+  warning: string | null;
+  note: string | null;
+};
 
 export async function answerDialog(options: {
   terminalId: string;
+  dialog: ParsedDialog;
   optionIndices: number[];
-  multiSelect: boolean;
-  previousPrompt: string;
 }): Promise<AnswerResult> {
-  const keys = answerKeys(options.optionIndices, options.multiSelect);
+  const chosen = options.dialog.options.filter((option) => options.optionIndices.includes(option.index));
+  const meta = chosen.length === 1 && chosen[0]!.meta ? chosen[0]! : null;
+  const keys = meta ? metaOptionKeys(meta.index) : answerKeys(options.optionIndices, options.dialog.multiSelect);
   if (keys.length === 0) {
-    return { answered: false, verified: false, warning: "no option to send" };
+    return { answered: false, verified: false, warning: "no option to send", note: null };
   }
   for (const key of keys) {
     await sendKeys(options.terminalId, [key], true);
     await delay(ANSWER_KEY_GAP_MS);
   }
+  if (meta) {
+    return {
+      answered: true,
+      verified: true,
+      warning: null,
+      note: `"${meta.label}" is open in the terminal — type your reply in the prompt box below.`,
+    };
+  }
+
   await delay(ANSWER_VERIFY_MS);
   const remaining = await readDialog(options.terminalId);
-  if (remaining && remaining.prompt === options.previousPrompt) {
+  if (remaining && remaining.prompt === options.dialog.prompt) {
     return {
       answered: true,
       verified: false,
       warning: "the dialog is still on screen — answer it in the terminal",
+      note: null,
     };
   }
-  return { answered: true, verified: true, warning: null };
+  return { answered: true, verified: true, warning: null, note: null };
 }

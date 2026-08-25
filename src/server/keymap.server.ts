@@ -20,3 +20,11 @@ export function answerKeys(optionIndices: number[], multiSelect: boolean): strin
   if (!multiSelect) return [digits[0]!];
   return [...digits, ARROW_RIGHT, "1"];
 }
+
+/**
+ * "Type something" and "Chat about this" open a field instead of answering, so they are a single
+ * keypress even in a multi-select, and the dialog is expected to stay on screen afterwards.
+ */
+export function metaOptionKeys(optionIndex: number): string[] {
+  return optionIndex >= 1 && optionIndex <= 9 ? [String(optionIndex)] : [];
+}

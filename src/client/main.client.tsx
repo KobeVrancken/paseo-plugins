@@ -25,7 +25,12 @@ import { Tint, relativeTimeFrom } from "./ui.client.tsx";
 const SESSION_POLL_MS = 2000;
 const TIMELINE_POLL_MS = 750;
 const HOOKS_POLL_MS = 5000;
-const DIALOG_POLL_MS = 1000;
+const DIALOG_OPEN_POLL_MS = 1500;
+const DIALOG_WATCH_POLL_MS = 3000;
+const DIALOG_BACKOFF_POLL_MS = 10_000;
+const DIALOG_WATCH_AFTER_MS = 2000;
+const DIALOG_BACKOFF_AFTER_MS = 45_000;
+const DIALOG_GIVE_UP_AFTER_MS = 120_000;
 const SEND_BEHAVIORS: SendBehavior[] = ["cli_default", "hold_until_idle", "interrupt_first"];
 
 type TimelineState = {
@@ -36,6 +41,7 @@ type TimelineState = {
   total: number;
   windowStart: number;
   sessionStatus: SessionStatus;
+  lastChangeAt: number;
 };
 
 function emptyTimeline(key: string): TimelineState {
@@ -47,6 +53,7 @@ function emptyTimeline(key: string): TimelineState {
     total: 0,
     windowStart: 0,
     sessionStatus: "detached",
+    lastChangeAt: Date.now(),
   };
 }
 
@@ -141,6 +148,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         total: response.total,
         windowStart: response.windowStart,
         sessionStatus: response.sessionStatus,
+        lastChangeAt: response.revision === previous.revision ? previous.lastChangeAt : Date.now(),
       };
       timelineRef.current = next;
       return next;
@@ -236,12 +244,41 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
     onError: (error) => setNote(errorText(error)),
   });
 
+  // A pending option dialog never reaches the transcript — Claude Code writes the tool call only once
+  // it is answered — and the hooks only report needs-input for an idle prompt, so the terminal screen
+  // is the only place a live question can be seen.
+  // Reading it shells out to the paseo CLI, which costs about a second of CPU per call, so the screen
+  // is only watched while the session has gone quiet after recent activity, which is exactly when a
+  // dialog is waiting, and the interval backs off the longer nothing turns up.
+  const dialogOpenRef = useRef(false);
+  const probedRef = useRef<string | null>(null);
+  const dialogKey = `${activeSessionId ?? ""}:${activeSession?.boundTerminalId ?? ""}`;
+  const quietFor = Date.now() - (timelineQuery.data?.lastChangeAt ?? Date.now());
+  const watchScreen =
+    (activeSession?.boundTerminalId ?? null) !== null &&
+    // Probe once when the session is opened: a question may have been waiting long before that.
+    (probedRef.current !== dialogKey ||
+      dialogOpenRef.current ||
+      (quietFor > DIALOG_WATCH_AFTER_MS && quietFor < DIALOG_GIVE_UP_AFTER_MS));
+
   const dialogQuery = useQuery({
-    queryKey: ["claude-code-dialog", activeSessionId],
-    enabled: activeSessionId !== null && status === "needs_input",
-    refetchInterval: DIALOG_POLL_MS,
-    queryFn: () => getDialog({ sessionId: activeSessionId! }),
+    queryKey: ["claude-code-dialog", activeSessionId, activeSession?.boundTerminalId ?? null],
+    enabled: activeSessionId !== null && watchScreen,
+    refetchInterval: (query) =>
+      query.state.data?.dialog
+        ? DIALOG_OPEN_POLL_MS
+        : quietFor < DIALOG_BACKOFF_AFTER_MS
+          ? DIALOG_WATCH_POLL_MS
+          : DIALOG_BACKOFF_POLL_MS,
+    queryFn: async () => {
+      const response = await getDialog({ sessionId: activeSessionId! });
+      dialogOpenRef.current = response.dialog !== null;
+      probedRef.current = dialogKey;
+      return response;
+    },
   });
+  // Stale data must not outlive the watch: once the transcript moves again the dialog is gone.
+  const dialog = watchScreen ? (dialogQuery.data?.dialog ?? null) : null;
 
   const answerMutation = useMutation({
     mutationFn: (answer: { optionIndices?: number[]; labels?: string[] }) =>
@@ -251,7 +288,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         labels: answer.labels ?? [],
       }),
     onSuccess: (result) => {
-      setNote(result.warning);
+      setNote(result.warning ?? result.note);
       void dialogQuery.refetch();
     },
     onError: (error) => setNote(errorText(error)),
@@ -310,7 +347,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
               : "tap to pick a session"}
           </Text>
         </Pressable>
-        <StatusPill status={status} theme={theme} />
+        <StatusPill status={dialog ? "needs_input" : status} theme={theme} />
         <ActionButton
           theme={theme}
           label={layout.compact ? "＋" : "New"}
@@ -395,10 +432,10 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           error={enableHooksMutation.error ? errorText(enableHooksMutation.error) : null}
           onEnable={() => enableHooksMutation.mutate()}
         />
-      ) : status === "needs_input" ? (
+      ) : dialog || status === "needs_input" ? (
         <DialogCard
           theme={theme}
-          dialog={dialogQuery.data?.dialog ?? null}
+          dialog={dialog}
           terminalHint={terminalHint}
           answering={answerMutation.isPending}
           warning={note}

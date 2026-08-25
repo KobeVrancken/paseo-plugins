@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { looksLikeClaudeSession, parseDialog } from "./capture.server.ts";
-import { answerKeys, ARROW_RIGHT } from "./keymap.server.ts";
+import { answerKeys, ARROW_RIGHT, metaOptionKeys } from "./keymap.server.ts";
 
 const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 
@@ -71,6 +71,13 @@ test("answers a single-select dialog with its digit", () => {
 
 test("toggles then submits a multi-select dialog", () => {
   assert.deepEqual(answerKeys([1, 3], true), ["1", "3", ARROW_RIGHT, "1"]);
+});
+
+test("presses a meta option once instead of answering with it", () => {
+  const dialog = parseDialog(capture("capture-question-multi.txt"));
+  const typeSomething = dialog!.options.find((option) => option.meta)!;
+  assert.deepEqual(metaOptionKeys(typeSomething.index), [String(typeSomething.index)]);
+  assert.deepEqual(metaOptionKeys(0), []);
 });
 
 test("ignores option numbers the keyboard cannot reach", () => {

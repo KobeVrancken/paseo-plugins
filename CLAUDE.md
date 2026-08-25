@@ -43,6 +43,11 @@ With `--cwd`, the `cwd` field of each row is the directory you asked for rather 
 Pass `--literal` for anything the user typed, so a prompt containing the word "Enter" is not translated into a carriage return.
 Interrupt a turn with `Escape`; Ctrl+C clears the Claude CLI's input line and exits it when pressed twice.
 
+A pending option dialog is not in the transcript at all: Claude Code writes the `AskUserQuestion` tool call only once it has been answered, and paseo's hooks report needs-input only for an idle prompt, so a live question can only be seen by capturing the terminal screen.
+
+Every `paseo` CLI call boots Electron-as-node and costs roughly a second of CPU, so nothing may poll `terminal capture` on a fixed timer.
+The panel probes once when a session is opened and then only while the transcript has gone quiet after recent activity, backing off the longer nothing appears.
+
 Claude Code writes `~/.claude/projects/<cwd with every non-alphanumeric replaced by a dash>/<session-id>.jsonl`, and the file does not exist until the session's first prompt.
 In its option dialogs a digit selects an option in a single-select and toggles it in a multi-select, which is then submitted with the right arrow followed by `1`.
 
