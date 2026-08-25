@@ -11,10 +11,10 @@ import {
 } from "./session-status.server.ts";
 import { readCliSettings, modelLabel } from "./cli-settings.server.ts";
 import {
-  attachFilePath,
   cleanupOldUploads,
   fullImageDataUrl,
   imagePreviewDataUrl,
+  resolveAttachmentPath,
   saveBase64File,
   saveBase64Image,
 } from "./uploads.server.ts";
@@ -278,7 +278,7 @@ export async function answerDialogHandler(
 export async function attachPathHandler(
   input: Input<typeof contracts.attachPath>,
 ): Promise<Output<typeof contracts.attachPath>> {
-  const attached = await attachFilePath(input.path);
+  const attached = await resolveAttachmentPath(input.path);
   return { ...attached, previewDataUrl: await imagePreviewDataUrl(attached.path) };
 }
 

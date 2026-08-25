@@ -168,6 +168,7 @@ export const answerDialog = defineRpc({
 
 /**
  * A file named by its path on the machine paseo runs on, which the file dialog cannot reach.
+ * It is attached in place, so the answer is the path itself.
  * The preview only comes back for an image, and an upload carries none: the panel already holds
  * the bytes it just sent.
  */

@@ -618,9 +618,9 @@ export function AttachPathSheet({
     <Sheet palette={palette} visible={visible} title="Attach a file by path" onClose={onClose}>
       <View style={{ padding: spacing[4], gap: spacing[3] }}>
         <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.base, lineHeight: 20 }}>
-          Point at any file on the machine running paseo. It is copied into the plugin cache and its
-          path is appended to the prompt, which is how the CLI picks an attachment up: an image is
-          read as an image, anything else as a file to open.
+          Point at any file on the machine running paseo. It stays where it is, and its path is
+          appended to the prompt, which is how the CLI picks an attachment up: an image is read as an
+          image, anything else as a file to open.
         </Text>
         <TextInput
           value={path}

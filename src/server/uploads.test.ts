@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-  attachFilePath,
   cleanupOldUploads,
   imagePreviewDataUrl,
+  resolveAttachmentPath,
   saveBase64File,
   saveBase64Image,
 } from "./uploads.server.ts";
@@ -41,22 +41,25 @@ test("sanitizes hostile file names", async () => {
   assert.match(path.basename(written), /passwd\.png$/);
 });
 
-test("copies a file the user named, filing an image as an image", async () => {
-  const { env, imagesDir, filesDir } = await tempEnv();
+test("attaches a file the user named where it already is", async () => {
+  const { env } = await tempEnv();
   const picture = path.join(env.XDG_CACHE_HOME!, "picture.png");
   await writeFile(picture, Buffer.from(PNG_BASE64, "base64"));
-  const image = await attachFilePath(picture, env);
-  assert.equal(path.dirname(image.path), imagesDir);
-  assert.equal(image.kind, "image");
+  assert.deepEqual(await resolveAttachmentPath(picture, env), { path: picture, kind: "image" });
 
   const notes = path.join(env.XDG_CACHE_HOME!, "notes.txt");
   await writeFile(notes, "hello");
-  const file = await attachFilePath(notes, env);
-  assert.equal(path.dirname(file.path), filesDir);
-  assert.equal(file.kind, "file");
-  assert.match(path.basename(file.path), /^\d+-notes\.txt$/);
+  assert.deepEqual(await resolveAttachmentPath(`  ${notes}  `, env), { path: notes, kind: "file" });
 
-  await assert.rejects(() => attachFilePath(env.XDG_CACHE_HOME!, env), /not a file/);
+  await assert.rejects(() => resolveAttachmentPath(env.XDG_CACHE_HOME!, env), /not a file/);
+});
+
+test("expands a leading ~ against the home directory", async () => {
+  const { env } = await tempEnv();
+  const notes = path.join(env.HOME!, "notes.txt");
+  await writeFile(notes, "hello");
+  const attached = await resolveAttachmentPath("~/notes.txt", env);
+  assert.equal(attached.path, notes);
 });
 
 test("deletes cached images older than a week", async () => {

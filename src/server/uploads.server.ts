@@ -114,21 +114,18 @@ export async function saveBase64File(
 export type AttachedFile = { path: string; kind: "image" | "file" };
 
 /**
- * Copies a file the user pointed at into the cache, so the path the prompt names stays valid for as
- * long as the CLI might read it, whatever happens to the original.
+ * A file the user named by path is attached where it already is: the CLI reads it from there just as
+ * well, and a copy would only go stale.
+ * The cache is for bytes the panel is holding and the disk has no name for, which is a paste or an
+ * upload.
  */
-export async function attachFilePath(
+export async function resolveAttachmentPath(
   sourcePath: string,
   env: Env = process.env,
 ): Promise<AttachedFile> {
-  const resolved = sourcePath.replace(/^~(?=\/)/, env.HOME ?? "~").trim();
+  const resolved = sourcePath.trim().replace(/^~(?=\/|$)/, env.HOME ?? "~");
   const stat = await fs.stat(resolved);
   if (!stat.isFile()) throw new Error("not a file");
-  if (stat.size > MAX_BYTES) throw new Error("the file is larger than 10 MB");
   const isImage = IMAGE_EXTENSIONS.has(path.extname(resolved).toLowerCase());
-  const dir = isImage ? imagesDir(env) : filesDir(env);
-  await fs.mkdir(dir, { recursive: true });
-  const target = path.join(dir, safeName(path.basename(resolved), null));
-  await fs.copyFile(resolved, target);
-  return { path: target, kind: isImage ? "image" : "file" };
+  return { path: resolved, kind: isImage ? "image" : "file" };
 }
