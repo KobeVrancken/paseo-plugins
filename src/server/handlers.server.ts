@@ -19,6 +19,7 @@ import {
   saveBase64Image,
 } from "./uploads.server.ts";
 import { listSlashCommands } from "./commands.server.ts";
+import { snapshotFile, waitForFileChange } from "./file-events.server.ts";
 import { searchWorkspaceEntries } from "./file-search.server.ts";
 import { searchForgeItems } from "./github.server.ts";
 import { StateStore } from "./state.server.ts";
@@ -104,13 +105,24 @@ export async function getTimelineHandler(
   input: Input<typeof contracts.getTimeline>,
   context: Context,
 ): Promise<Output<typeof contracts.getTimeline>> {
-  const sessionStatus = await statusFor(context.paseo, input.sessionId, input.workspaceId);
-  const slice = await store.timelineSince(
-    input.workspaceDir,
-    input.sessionId,
-    input.sinceRevision,
-    input.fromIndex,
-  );
+  const readSlice = () =>
+    store.timelineSince(input.workspaceDir, input.sessionId, input.sinceRevision, input.fromIndex);
+
+  // The snapshot is taken before the read, so an append that lands during the read is a change too.
+  const filePath = input.waitMs > 0 ? await store.sessionFilePath(input.workspaceDir, input.sessionId) : null;
+  const before = filePath === null ? null : await snapshotFile(filePath);
+
+  let sessionStatus = await statusFor(context.paseo, input.sessionId, input.workspaceId);
+  let slice = await readSlice();
+
+  // Nothing to say yet: hold the request open until the transcript moves rather than answer "no" and
+  // be asked again. The kernel reports the append, so the panel sees it as soon as the CLI writes it.
+  if (filePath !== null && (slice?.entries.length ?? 0) === 0) {
+    if (await waitForFileChange(filePath, before, input.waitMs)) {
+      slice = await readSlice();
+      sessionStatus = await statusFor(context.paseo, input.sessionId, input.workspaceId);
+    }
+  }
   if (!slice) {
     return {
       entries: [],

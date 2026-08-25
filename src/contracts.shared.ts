@@ -25,6 +25,12 @@ export const getTimeline = defineRpc({
     workspaceId: z.string().optional(),
     /** Lowest entry index to include; omitted means "the most recent window". */
     fromIndex: z.number().int().min(0).nullable().default(null),
+    /**
+     * How long the handler may hold the request open waiting for the transcript to change.
+     * The daemon gives a plugin RPC 30 seconds and does not cancel a handler that overruns it, so
+     * this stays well inside that.
+     */
+    waitMs: z.number().int().min(0).max(20_000).default(0),
   }),
   output: z.object({
     /** Entries created or changed since `sinceRevision`, addressed by their stable `index`. */

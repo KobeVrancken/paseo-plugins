@@ -54,11 +54,17 @@ import {
 } from "./ui.client.tsx";
 
 const SESSION_POLL_MS = 2000;
+/** Only the fallback for a request that failed; a healthy one waits on the transcript instead. */
 const TIMELINE_POLL_MS = 750;
-/** While the panel is waiting on something it just did, or the session is mid-turn. */
-const TIMELINE_ACTIVE_POLL_MS = 250;
-/** How long after the last transcript change the session still counts as mid-turn. */
-const TIMELINE_ACTIVE_WINDOW_MS = 6000;
+/**
+ * How long a request may park on the transcript before answering "nothing yet".
+ * It could be twenty seconds as far as the daemon is concerned, but the panel's own clocks — how
+ * long the session has been quiet, and so when the terminal screen is worth reading — advance when a
+ * request settles, so parking for much longer would blunt them.
+ */
+const TIMELINE_WAIT_MS = 2000;
+/** A parked request answers the moment the file moves, so the next one is armed straight away. */
+const TIMELINE_REARM_MS = 50;
 const HOOKS_POLL_MS = 5000;
 const DIALOG_OPEN_POLL_MS = 1500;
 const DIALOG_WATCH_POLL_MS = 3000;
@@ -196,13 +202,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const timelineQuery = useQuery({
     queryKey: ["claude-code-timeline", timelineKey, windowStart],
     enabled: workspaceDir !== null && activeSessionId !== null,
-    // Reading the transcript is a tail read of a local file, so it is polled hard while anything is
-    // moving and only eases off once the session has settled.
-    refetchInterval: (query) =>
-      pending.length > 0 ||
-      Date.now() - (query.state.data?.lastChangeAt ?? 0) < TIMELINE_ACTIVE_WINDOW_MS
-        ? TIMELINE_ACTIVE_POLL_MS
-        : TIMELINE_POLL_MS,
+    refetchInterval: (query) => (query.state.status === "error" ? TIMELINE_POLL_MS : TIMELINE_REARM_MS),
     queryFn: async (): Promise<TimelineState> => {
       if (timelineRef.current.key !== timelineKey) timelineRef.current = emptyTimeline(timelineKey);
       const previous = timelineRef.current;
@@ -212,6 +212,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         sessionId: activeSessionId!,
         sinceRevision: previous.revision,
         fromIndex: windowStart,
+        waitMs: TIMELINE_WAIT_MS,
       });
       const entries = response.reset ? [] : previous.entries.slice();
       for (const entry of response.entries) entries[entry.index] = entry;
