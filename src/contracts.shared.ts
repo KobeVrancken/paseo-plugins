@@ -168,7 +168,8 @@ export const answerDialog = defineRpc({
 export const attachImage = defineRpc({
   name: "image.attach",
   input: z.object({ path: z.string() }),
-  output: z.object({ path: z.string() }),
+  /** An upload does not carry one back: the panel already holds the bytes it just sent. */
+  output: z.object({ path: z.string(), previewDataUrl: z.string().nullable() }),
 });
 
 export const uploadImage = defineRpc({

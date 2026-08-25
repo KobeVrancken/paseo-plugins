@@ -1,7 +1,9 @@
 import type { TextInputKeyPressEvent } from "react-native";
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { SendBehavior, SessionStatus } from "../render-types.shared.ts";
+import { attachmentName, type Attachment } from "./attachments.client.ts";
+import { pastedImageName, pastedImages, readImageDataUrl } from "./clipboard-image.client.ts";
 import {
   controlHeight,
   fontSize,
@@ -13,7 +15,7 @@ import {
   type Palette,
 } from "./theme.client.ts";
 import { QuestionOption } from "./timeline.client.tsx";
-import { Button, Card, IconButton, NO_OUTLINE, pressable } from "./ui.client.tsx";
+import { AttachmentPill, Button, Card, IconButton, NO_OUTLINE, pressable } from "./ui.client.tsx";
 
 export const SEND_BEHAVIOR_LABELS: Record<SendBehavior, string> = {
   cli_default: "CLI default",
@@ -230,6 +232,7 @@ export function PromptBox({
   controls,
   onSend,
   onAttachImage,
+  onPasteImages,
   onRemoveAttachment,
 }: {
   palette: Palette;
@@ -237,15 +240,39 @@ export function PromptBox({
   disabled: boolean;
   sending: boolean;
   note: string | null;
-  attachments?: string[];
+  attachments?: Attachment[];
   controls: ComposerControls | null;
   onSend: (text: string) => void;
   onAttachImage?: () => void;
+  onPasteImages?: (images: { fileName: string; dataUrl: string }[]) => void;
   onRemoveAttachment?: (path: string) => void;
 }) {
   const [text, setText] = useState("");
+  const inputRef = useRef<TextInput | null>(null);
   const files = attachments ?? [];
   const canSend = !disabled && !sending && (text.trim() !== "" || files.length > 0);
+
+  // A pasted screenshot never reaches React Native's TextInput, so the DOM node is asked directly.
+  useEffect(() => {
+    if (Platform.OS !== "web" || !onPasteImages) return;
+    const node = inputRef.current as unknown as HTMLElement | null;
+    if (!node?.addEventListener) return;
+    const onPaste = (event: Event) => {
+      const clipboard = (event as ClipboardEvent).clipboardData;
+      if (!clipboard) return;
+      const images = pastedImages(clipboard);
+      if (images.length === 0) return;
+      event.preventDefault();
+      void Promise.all(
+        images.map(async (image) => ({
+          fileName: pastedImageName(image),
+          dataUrl: await readImageDataUrl(image),
+        })),
+      ).then(onPasteImages, () => {});
+    };
+    node.addEventListener("paste", onPaste);
+    return () => node.removeEventListener("paste", onPaste);
+  }, [onPasteImages]);
 
   const submit = () => {
     if (!canSend) return;
@@ -283,26 +310,15 @@ export function PromptBox({
         {files.length > 0 ? (
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing[2] }}>
             {files.map((file) => (
-              <Pressable
-                key={file}
-                onPress={() => onRemoveAttachment?.(file)}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: spacing[1],
-                  paddingHorizontal: spacing[2],
-                  paddingVertical: spacing[1],
-                  borderRadius: radius.md,
-                  borderWidth: 1,
-                  borderColor: palette.border,
-                  backgroundColor: palette.surface2,
-                }}
-              >
-                <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.sm }}>
-                  {file.split("/").pop()}
-                </Text>
-                <Text style={{ color: palette.foregroundExtraMuted, fontSize: fontSize.sm }}>✕</Text>
-              </Pressable>
+              <AttachmentPill
+                key={file.path}
+                palette={palette}
+                previewDataUrl={file.previewDataUrl}
+                title={attachmentName(file.path)}
+                subtitle="Image"
+                disabled={disabled}
+                onRemove={() => onRemoveAttachment?.(file.path)}
+              />
             ))}
           </View>
         ) : null}
@@ -322,6 +338,7 @@ export function PromptBox({
             </Text>
           ) : null}
           <TextInput
+            ref={inputRef}
             value={text}
             onChangeText={setText}
             editable={!disabled}

@@ -4,7 +4,35 @@ import { imagesDir, type Env } from "./paths.server.ts";
 
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_BYTES = 10 * 1024 * 1024;
-const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+/** Above this the composer keeps the file's name and drops the thumbnail rather than inline megabytes. */
+const PREVIEW_MAX_BYTES = 1_500_000;
+
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+};
+
+const IMAGE_EXTENSIONS = new Set(Object.keys(IMAGE_MIME_TYPES));
+
+export function imageMimeType(filePath: string): string | null {
+  return IMAGE_MIME_TYPES[path.extname(filePath).toLowerCase()] ?? null;
+}
+
+/** The thumbnail the composer shows next to a prompt, inlined because the panel cannot read files. */
+export async function imagePreviewDataUrl(filePath: string): Promise<string | null> {
+  const mimeType = imageMimeType(filePath);
+  if (!mimeType) return null;
+  try {
+    const stat = await fs.stat(filePath);
+    if (stat.size > PREVIEW_MAX_BYTES) return null;
+    return `data:${mimeType};base64,${(await fs.readFile(filePath)).toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
 
 function safeName(fileName: string): string {
   const base = path.basename(fileName).replace(/[^a-zA-Z0-9._-]/g, "_");

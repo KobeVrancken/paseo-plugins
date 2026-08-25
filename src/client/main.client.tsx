@@ -4,6 +4,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { Clipboard, FlatList, Pressable, Text, View } from "react-native";
 import * as contracts from "../contracts.shared.ts";
+import type { Attachment } from "./attachments.client.ts";
+import { base64FromDataUrl } from "./clipboard-image.client.ts";
 import {
   DialogCard,
   EFFORT_LABELS,
@@ -95,6 +97,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const getDialog = useRpc(contracts.getDialog);
   const answerDialog = useRpc(contracts.answerDialog);
   const attachImage = useRpc(contracts.attachImage);
+  const uploadImage = useRpc(contracts.uploadImage);
   const getComposerState = useRpc(contracts.getComposerState);
   const openCliMenu = useRpc(contracts.openCliMenu);
   const permissionMode = useRpc(contracts.permissionMode);
@@ -104,7 +107,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const [menuOpen, setMenuOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [imageSheetOpen, setImageSheetOpen] = useState(false);
-  const [imagePaths, setImagePaths] = useState<string[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [note, setNote] = useState<string | null>(null);
   const [modeOpen, setModeOpen] = useState(false);
   const [forceWatchUntil, setForceWatchUntil] = useState(0);
@@ -252,10 +255,10 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         workspaceDir: workspaceDir!,
         sessionId: activeSessionId!,
         text,
-        imagePaths,
+        imagePaths: attachments.map((attachment) => attachment.path),
       }),
     onSuccess: (result) => {
-      setImagePaths([]);
+      setAttachments([]);
       setNote(result.note ?? (result.delivered ? null : "not delivered"));
     },
     onError: (error) => setNote(errorText(error)),
@@ -315,9 +318,26 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const imageMutation = useMutation({
     mutationFn: (path: string) => attachImage({ path }),
     onSuccess: (result) => {
-      setImagePaths((current) => [...current, result.path]);
+      setAttachments((current) => [...current, result]);
       setImageSheetOpen(false);
     },
+  });
+
+  // A pasted image is already in the panel's hands, so it is uploaded and previewed from there
+  // rather than read back off disk.
+  const pasteMutation = useMutation({
+    mutationFn: async (images: { fileName: string; dataUrl: string }[]) => {
+      const attached: Attachment[] = [];
+      for (const image of images) {
+        const base64 = base64FromDataUrl(image.dataUrl);
+        if (base64 === null) continue;
+        const { path } = await uploadImage({ fileName: image.fileName, base64 });
+        attached.push({ path, previewDataUrl: image.dataUrl });
+      }
+      return attached;
+    },
+    onSuccess: (attached) => setAttachments((current) => [...current, ...attached]),
+    onError: (error) => setNote(errorText(error)),
   });
 
   // Everything the composer shows is read from files, so it can be polled with the transcript.
@@ -544,7 +564,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           disabled={activeSessionId === null}
           sending={sendMutation.isPending}
           note={note}
-          attachments={imagePaths}
+          attachments={attachments}
           controls={
             composerQuery.data?.bound
               ? {
@@ -561,7 +581,10 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
               : null
           }
           onAttachImage={() => setImageSheetOpen(true)}
-          onRemoveAttachment={(path) => setImagePaths((current) => current.filter((item) => item !== path))}
+          onPasteImages={(images) => pasteMutation.mutate(images)}
+          onRemoveAttachment={(path) =>
+            setAttachments((current) => current.filter((item) => item.path !== path))
+          }
           onSend={(text) => sendMutation.mutate(text)}
         />
       )}

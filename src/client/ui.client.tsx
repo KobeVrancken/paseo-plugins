@@ -1,7 +1,7 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import type { StyleProp, TextStyle, ViewStyle } from "react-native";
 import React, { useMemo } from "react";
-import { Platform, Pressable, Text, View } from "react-native";
+import { Image, Platform, Pressable, Text, View } from "react-native";
 import {
   controlHeight,
   derivePalette,
@@ -131,6 +131,85 @@ export function IconButton({
         {glyph}
       </Text>
     </Pressable>
+  );
+}
+
+/** Every attachment body renders at this height, so a tray of mixed kinds lines up. */
+const ATTACHMENT_CONTENT_HEIGHT = 48;
+
+export function AttachmentPill({
+  palette,
+  previewDataUrl,
+  title,
+  subtitle,
+  disabled,
+  onRemove,
+}: {
+  palette: Palette;
+  previewDataUrl?: string | null;
+  title: string;
+  subtitle: string;
+  disabled?: boolean;
+  onRemove: () => void;
+}) {
+  return (
+    <View style={{ position: "relative" }}>
+      <View
+        style={{
+          borderRadius: radius.md,
+          borderWidth: 1,
+          borderColor: palette.borderAccent,
+          overflow: "hidden",
+        }}
+      >
+        {previewDataUrl ? (
+          <Image
+            source={{ uri: previewDataUrl }}
+            style={{ width: ATTACHMENT_CONTENT_HEIGHT, height: ATTACHMENT_CONTENT_HEIGHT }}
+          />
+        ) : (
+          <View
+            style={{
+              height: ATTACHMENT_CONTENT_HEIGHT,
+              maxWidth: 260,
+              justifyContent: "center",
+              paddingHorizontal: spacing[3],
+              backgroundColor: palette.surface1,
+            }}
+          >
+            <Text numberOfLines={1} style={{ color: palette.foreground, fontSize: fontSize.base }}>
+              {title}
+            </Text>
+            <Text numberOfLines={1} style={{ color: palette.foregroundMuted, fontSize: fontSize.sm }}>
+              {subtitle}
+            </Text>
+          </View>
+        )}
+      </View>
+      <Pressable
+        onPress={onRemove}
+        disabled={disabled}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={`Remove ${title}`}
+        style={{
+          position: "absolute",
+          top: -8,
+          left: -8,
+          width: 24,
+          height: 24,
+          borderRadius: radius.full,
+          alignItems: "center",
+          justifyContent: "center",
+          borderWidth: 1,
+          borderColor: palette.border,
+          backgroundColor: palette.surface2,
+          zIndex: 1,
+        }}
+      >
+        <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.sm }}>✕</Text>
+      </Pressable>
+    </View>
   );
 }
 

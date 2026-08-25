@@ -10,7 +10,12 @@ import {
   type PaseoLike,
 } from "./session-status.server.ts";
 import { readCliSettings, modelLabel } from "./cli-settings.server.ts";
-import { attachImagePath, cleanupOldImages, saveBase64Image } from "./images.server.ts";
+import {
+  attachImagePath,
+  cleanupOldImages,
+  imagePreviewDataUrl,
+  saveBase64Image,
+} from "./images.server.ts";
 import { StateStore } from "./state.server.ts";
 import { TranscriptStore, isRecentlyActive } from "./transcript.server.ts";
 
@@ -268,7 +273,8 @@ export async function answerDialogHandler(
 export async function attachImageHandler(
   input: Input<typeof contracts.attachImage>,
 ): Promise<Output<typeof contracts.attachImage>> {
-  return { path: await attachImagePath(input.path) };
+  const attached = await attachImagePath(input.path);
+  return { path: attached, previewDataUrl: await imagePreviewDataUrl(attached) };
 }
 
 export async function uploadImageHandler(
