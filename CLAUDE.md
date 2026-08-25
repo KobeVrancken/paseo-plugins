@@ -51,6 +51,12 @@ The panel probes once when a session is opened and then only while the transcrip
 Claude Code writes `~/.claude/projects/<cwd with every non-alphanumeric replaced by a dash>/<session-id>.jsonl`, and the file does not exist until the session's first prompt.
 In its option dialogs a digit selects an option in a single-select and toggles it in a multi-select, which is then submitted with the right arrow followed by `1`.
 
+## Coverage of the transcript format
+
+Anything the Claude Code terminal puts on screen belongs in the timeline; anything it only injects into the model's context does not.
+Most `attachment` lines are the latter (token and todo reminders, tool and agent listings, IDE file syncs), while a few are the former (attached files, IDE selections, diagnostics, hook messages, mode changes), so they are split by an explicit allow list either way.
+A kind that matches neither list is logged once per session as `no renderer for transcript kind "..."`, which is the signal that the CLI has grown something new; sweep the local transcripts with `TimelineBuilder` after a CLI upgrade to find them in bulk.
+
 ## Payload discipline
 
 The panel polls, and a long transcript is mostly tool output nobody reads.

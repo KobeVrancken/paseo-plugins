@@ -107,7 +107,6 @@ export async function getTimelineHandler(
       windowStart: 0,
       revision: 0,
       reset: true,
-      unsupportedCount: 0,
       sessionStatus,
     };
   }
@@ -117,7 +116,6 @@ export async function getTimelineHandler(
     windowStart: slice.windowStart,
     revision: slice.revision,
     reset: slice.reset,
-    unsupportedCount: slice.unsupportedCount,
     sessionStatus,
   };
 }

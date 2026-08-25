@@ -31,6 +31,126 @@ const IGNORED_ENTRY_TYPES = new Set([
   "relocated",
 ]);
 
+/**
+ * Attachments the CLI injects into the model's context without ever putting them on screen.
+ * Anything the terminal does show has a renderer in ATTACHMENT_ROWS instead.
+ */
+const IGNORED_ATTACHMENT_TYPES = new Set([
+  "total_tokens_reminder",
+  "task_reminder",
+  "todo_reminder",
+  "deferred_tools_delta",
+  "mcp_instructions_delta",
+  "agent_listing_delta",
+  "skill_listing",
+  "invoked_skills",
+  "command_permissions",
+  "hook_additional_context",
+  "compact_file_reference",
+  "plan_file_reference",
+  "nested_memory",
+  "read_truncation_notice",
+  "edited_text_file",
+  "queued_command",
+  "date_change",
+  // The machine-readable payload behind a tool result that is already rendered on its own card.
+  "structured_output",
+]);
+
+const MODE_LABELS: Record<string, string> = {
+  plan_mode: "plan mode on",
+  plan_mode_reentry: "plan mode on",
+  plan_mode_exit: "plan mode off",
+  auto_mode: "auto mode on",
+  auto_mode_exit: "auto mode off",
+};
+
+function baseName(filePath: string): string {
+  return filePath.split("/").filter((part) => part !== "").pop() ?? filePath;
+}
+
+function countDiagnostics(files: unknown): { issues: number; files: number } {
+  if (!Array.isArray(files)) return { issues: 0, files: 0 };
+  let issues = 0;
+  for (const file of files) {
+    const list = asRecord(file)?.diagnostics;
+    if (Array.isArray(list)) issues += list.length;
+  }
+  return { issues, files: files.length };
+}
+
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes < 60) return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+/** One row per attachment the Claude Code terminal puts on screen; `null` means "nothing to show". */
+const ATTACHMENT_ROWS: Record<string, (attachment: RawEntry) => RenderBody | null> = {
+  file: (attachment) => {
+    const name = asString(attachment.displayPath) ?? asString(attachment.filename);
+    return name ? { kind: "activity", label: `attached ${name}`, tone: "muted" } : null;
+  },
+  directory: (attachment) => {
+    const name = asString(attachment.displayPath) ?? asString(attachment.path);
+    return name ? { kind: "activity", label: `attached ${name}/`, tone: "muted" } : null;
+  },
+  opened_file_in_ide: (attachment) => {
+    const name = asString(attachment.filename);
+    return name ? { kind: "activity", label: `opened ${baseName(name)} in the IDE`, tone: "muted" } : null;
+  },
+  selected_lines_in_ide: (attachment) => {
+    const name = asString(attachment.filename);
+    if (!name) return null;
+    const start = attachment.lineStart;
+    const end = attachment.lineEnd;
+    const ide = asString(attachment.ideName);
+    const range = typeof start === "number" && typeof end === "number" ? ` ${start}-${end}` : "";
+    return {
+      kind: "activity",
+      label: `selected lines${range} in ${baseName(name)}${ide ? ` (${ide})` : ""}`,
+      tone: "muted",
+    };
+  },
+  diagnostics: (attachment) => {
+    const counted = countDiagnostics(attachment.files);
+    if (counted.issues === 0) return null;
+    return {
+      kind: "activity",
+      label: `${counted.issues} diagnostic issue${counted.issues === 1 ? "" : "s"} in ${counted.files} file${counted.files === 1 ? "" : "s"}`,
+      tone: "muted",
+    };
+  },
+  hook_system_message: (attachment) => {
+    const content = asString(attachment.content);
+    return content ? { kind: "activity", label: firstLine(content), tone: "muted" } : null;
+  },
+  hook_success: (attachment) => {
+    // `command` is the human-facing label the CLI prints; without it the hook ran silently.
+    const command = asString(attachment.command);
+    return command ? { kind: "activity", label: firstLine(command), tone: "muted" } : null;
+  },
+  hook_cancelled: (attachment) => ({
+    kind: "activity",
+    label: `${asString(attachment.hookName) ?? "hook"} cancelled`,
+    tone: "danger",
+  }),
+  hook_non_blocking_error: (attachment) => ({
+    kind: "activity",
+    label: `${asString(attachment.hookName) ?? "hook"} failed: ${firstLine(asString(attachment.stderr) ?? "")}`,
+    tone: "danger",
+  }),
+};
+
+for (const [type, label] of Object.entries(MODE_LABELS)) {
+  ATTACHMENT_ROWS[type] = () => ({ kind: "activity", label, tone: "muted" });
+}
+
 const TOOL_KINDS: Record<string, ToolKind> = {
   Bash: "bash",
   BashOutput: "bash",
@@ -327,7 +447,8 @@ export class TimelineBuilder {
   private textEntryByRequestId = new Map<string, number>();
   private rev = 0;
 
-  unsupportedCount = 0;
+  /** Line kinds this build does not know how to render, reported once per session in the plugin log. */
+  readonly unknownKinds = new Set<string>();
   cwd: string | null = null;
   title: string | null = null;
   firstUserPrompt: string | null = null;
@@ -381,6 +502,9 @@ export class TimelineBuilder {
       case "system":
         this.pushSystem(entry);
         return;
+      case "attachment":
+        this.pushAttachment(entry);
+        return;
       case "ai-title":
       case "custom-title":
       case "summary": {
@@ -390,7 +514,7 @@ export class TimelineBuilder {
       }
       default:
         if (IGNORED_ENTRY_TYPES.has(type)) return;
-        this.unsupportedCount += 1;
+        this.unknownKinds.add(type);
     }
   }
 
@@ -685,19 +809,48 @@ export class TimelineBuilder {
   }
 
   private pushSystem(entry: RawEntry): void {
-    const content = asString(entry.content) ?? "";
-    const text = stripTag(content, "local-command-stdout").trim();
-    if (text === "") return;
+    const subtype = asString(entry.subtype);
     const level = asString(entry.level);
+    const content = stripTag(asString(entry.content) ?? "", "local-command-stdout").trim();
+
+    let label = content === "" ? null : firstLine(content);
+    if (label === null && subtype === "turn_duration" && typeof entry.durationMs === "number") {
+      label = `worked for ${formatDuration(entry.durationMs)}`;
+    }
+    if (label === null && subtype === "api_error") label = "API error";
+    if (label === null && subtype === "agents_killed") label = "subagents stopped";
+    if (label === null) return;
+
     this.append({
       id: asString(entry.uuid) ?? `system-${this.tracked.length}`,
       ts: asString(entry.timestamp),
       isSidechain: entry.isSidechain === true,
       body: {
         kind: "activity",
-        label: firstLine(text),
-        tone: level === "error" ? "danger" : "muted",
+        label,
+        tone: level === "error" || subtype === "api_error" ? "danger" : "muted",
       },
+    });
+  }
+
+  private pushAttachment(entry: RawEntry): void {
+    const attachment = asRecord(entry.attachment);
+    const type = asString(attachment?.type);
+    if (!attachment || type === null) return;
+    if (IGNORED_ATTACHMENT_TYPES.has(type)) return;
+
+    const render = ATTACHMENT_ROWS[type];
+    if (!render) {
+      this.unknownKinds.add(`attachment:${type}`);
+      return;
+    }
+    const body = render(attachment);
+    if (!body) return;
+    this.append({
+      id: asString(entry.uuid) ?? `attachment-${this.tracked.length}`,
+      ts: asString(entry.timestamp),
+      isSidechain: entry.isSidechain === true,
+      body,
     });
   }
 }

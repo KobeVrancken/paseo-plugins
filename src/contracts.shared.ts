@@ -34,7 +34,6 @@ export const getTimeline = defineRpc({
     revision: z.number().int(),
     /** The client must discard everything it has cached for this session before merging. */
     reset: z.boolean(),
-    unsupportedCount: z.number().int(),
     sessionStatus: SessionStatusSchema,
   }),
 });

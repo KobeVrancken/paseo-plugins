@@ -20,6 +20,7 @@ export type SessionFileSummary = {
 
 type SessionState = {
   sessionId: string;
+  reportedUnknownKinds: Set<string>;
   filePath: string;
   builder: TimelineBuilder;
   offset: number;
@@ -36,7 +37,6 @@ export type TimelineSlice = {
   total: number;
   revision: number;
   reset: boolean;
-  unsupportedCount: number;
   title: string | null;
   lastEntryTimestamp: string | null;
   mtime: number;
@@ -174,6 +174,7 @@ export class TranscriptStore {
         revisionBase: 0,
         signature: "",
         signatureBytes: 0,
+        reportedUnknownKinds: new Set(),
       };
       this.states.set(filePath, state);
     }
@@ -204,8 +205,18 @@ export class TranscriptStore {
         const entry = parseLine(line);
         if (entry) state.builder.push(entry);
       }
+      this.reportUnknownKinds(state);
     }
     return { state, mtime: stat.mtimeMs };
+  }
+
+  /** A line kind we cannot render is a gap against the CLI, so say so once in the plugin log. */
+  private reportUnknownKinds(state: SessionState): void {
+    for (const kind of state.builder.unknownKinds) {
+      if (state.reportedUnknownKinds.has(kind)) continue;
+      state.reportedUnknownKinds.add(kind);
+      console.log(`session ${state.sessionId}: no renderer for transcript kind "${kind}"`);
+    }
   }
 
   async timelineSince(
@@ -228,7 +239,6 @@ export class TranscriptStore {
       total: state.builder.total,
       revision,
       reset: reset || sinceRevision === 0,
-      unsupportedCount: state.builder.unsupportedCount,
       title: state.builder.title,
       lastEntryTimestamp: state.builder.lastEntryTimestamp,
       mtime,

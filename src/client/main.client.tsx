@@ -37,7 +37,6 @@ type TimelineState = {
   key: string;
   revision: number;
   entries: (RenderEntry | undefined)[];
-  unsupportedCount: number;
   total: number;
   windowStart: number;
   sessionStatus: SessionStatus;
@@ -49,7 +48,6 @@ function emptyTimeline(key: string): TimelineState {
     key,
     revision: 0,
     entries: [],
-    unsupportedCount: 0,
     total: 0,
     windowStart: 0,
     sessionStatus: "detached",
@@ -144,7 +142,6 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         key: timelineKey,
         revision: response.revision,
         entries,
-        unsupportedCount: response.unsupportedCount,
         total: response.total,
         windowStart: response.windowStart,
         sessionStatus: response.sessionStatus,
@@ -418,13 +415,6 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         />
       )}
 
-      <Footer
-        theme={theme}
-        entryCount={entries.length}
-        total={timelineQuery.data?.total ?? 0}
-        unsupportedCount={timelineQuery.data?.unsupportedCount ?? 0}
-      />
-
       {!hooksReady ? (
         <HooksOnboarding
           theme={theme}
@@ -547,31 +537,6 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
             .catch(() => {});
         }}
       />
-    </View>
-  );
-}
-
-function Footer({
-  theme,
-  entryCount,
-  total,
-  unsupportedCount,
-}: {
-  theme: PluginWorkspacePanelProps["theme"];
-  entryCount: number;
-  total: number;
-  unsupportedCount: number;
-}) {
-  return (
-    <View style={{ paddingHorizontal: 12, paddingVertical: 4, flexDirection: "row", gap: 12 }}>
-      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
-        {entryCount < total ? `${entryCount} of ${total} entries` : `${entryCount} entries`}
-      </Text>
-      {unsupportedCount > 0 ? (
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
-          {unsupportedCount} unsupported
-        </Text>
-      ) : null}
     </View>
   );
 }

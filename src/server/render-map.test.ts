@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { capEntryForList, parseQuestionAnswers, TimelineBuilder } from "./render-map.server.ts";
+import {
+  capEntryForList,
+  formatDuration,
+  parseQuestionAnswers,
+  TimelineBuilder,
+} from "./render-map.server.ts";
 import type { RenderBody, RenderEntry } from "../render-types.shared.ts";
 
 const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -128,9 +133,45 @@ test("passes transcript images through as data URIs", () => {
   assert.equal(image.dataUri, "data:image/png;base64,iVBORw0KGgo=");
 });
 
-test("counts unsupported entries and ignores bookkeeping ones", () => {
-  // one `attachment` plus one unknown type; `mode` is bookkeeping and stays uncounted.
-  assert.equal(buildFixture("session-basic.jsonl").unsupportedCount, 2);
+test("reports only line kinds it has no renderer for", () => {
+  // `mode` and the context-injection attachments are bookkeeping; the other two are real gaps.
+  assert.deepEqual(
+    [...buildFixture("session-basic.jsonl").unknownKinds].sort(),
+    ["attachment:a_brand_new_attachment", "totally-new-entry-kind"],
+  );
+});
+
+test("renders the attachments the terminal puts on screen", () => {
+  const labels = bodies(buildFixture("session-basic.jsonl"))
+    .filter((body) => body.kind === "activity")
+    .map((body) => (body.kind === "activity" ? body.label : ""));
+  assert.ok(labels.includes("attached parser.ts"));
+  assert.ok(labels.includes("selected lines 145-157 in parser.ts (GoLand)"));
+  assert.ok(labels.includes("plan mode on"));
+  assert.ok(labels.includes("2 diagnostic issues in 1 file"));
+  assert.ok(labels.includes("UserPromptSubmit failed: Failed to run: plugin missing"));
+});
+
+test("keeps context-only attachments off the timeline", () => {
+  const builder = new TimelineBuilder();
+  for (const type of ["total_tokens_reminder", "todo_reminder", "deferred_tools_delta", "queued_command"]) {
+    builder.push({ type: "attachment", uuid: type, attachment: { type } });
+  }
+  assert.equal(builder.total, 0);
+  assert.equal(builder.unknownKinds.size, 0);
+});
+
+test("shows how long a turn took", () => {
+  const builder = new TimelineBuilder();
+  builder.push({ type: "system", subtype: "turn_duration", uuid: "s1", durationMs: 626391 });
+  assert.equal(findBody(builder, "activity").label, "worked for 10m 26s");
+});
+
+test("formats durations the way the CLI does", () => {
+  assert.equal(formatDuration(900), "900ms");
+  assert.equal(formatDuration(6000), "6s");
+  assert.equal(formatDuration(120000), "2m");
+  assert.equal(formatDuration(3_700_000), "1h 1m");
 });
 
 test("reports only entries changed since a revision", () => {
