@@ -24,7 +24,7 @@ import { Tint, relativeTimeFrom } from "./ui.client.tsx";
 
 const SESSION_POLL_MS = 2000;
 const TIMELINE_POLL_MS = 750;
-const HOOKS_POLL_MS = 15_000;
+const HOOKS_POLL_MS = 5000;
 const DIALOG_POLL_MS = 1000;
 const SEND_BEHAVIORS: SendBehavior[] = ["cli_default", "hold_until_idle", "interrupt_first"];
 
@@ -461,10 +461,20 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
             onPress={() => behaviorMutation.mutate(behavior)}
           />
         ))}
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11, padding: 10 }}>
-          {hooksReady ? "Terminal agent hooks are on." : "Terminal agent hooks are off."}
-          {terminalHint ? ` This session runs in ${terminalHint}.` : ""}
-        </Text>
+        <SheetRow
+          theme={theme}
+          label={hooksReady ? "Terminal agent hooks are on" : "Terminal agent hooks are off"}
+          detail={
+            hooksReady
+              ? terminalHint
+                ? `This session runs in ${terminalHint}. Tap to re-check the setting.`
+                : "Tap to re-check the setting."
+              : "Turn them on in paseo's settings, then tap to re-check."
+          }
+          onPress={() => {
+            void hooksQuery.refetch();
+          }}
+        />
       </Sheet>
 
       <Sheet theme={theme} visible={attachOpen} title="Attach to terminal" onClose={() => setAttachOpen(false)}>

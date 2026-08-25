@@ -1,7 +1,7 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import type { TextInputKeyPressEvent } from "react-native";
 import React, { useState } from "react";
-import { Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { SendBehavior, SessionStatus } from "./render-types.shared.ts";
 import { Card, Tint } from "./ui.client.tsx";
 
@@ -399,6 +399,10 @@ export function ResumeBar({
   );
 }
 
+/**
+ * An overlay inside the panel rather than a React Native `Modal`: the panel is embedded in the host
+ * app, and the backdrop is a sibling of the content so a press inside the sheet cannot close it.
+ */
 export function Sheet({
   theme,
   visible,
@@ -412,16 +416,30 @@ export function Sheet({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  if (!visible) return null;
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={{ flex: 1, justifyContent: "center", padding: 16 }} onPress={onClose}>
+    <View style={[StyleSheet.absoluteFill, { justifyContent: "center", padding: 16 }]}>
+      <Pressable style={StyleSheet.absoluteFill} onPress={onClose}>
         <Tint color="#000000" opacity={0.5} />
-        <View style={{ maxHeight: "80%", borderRadius: 12, backgroundColor: theme.colors.surface0, padding: 12, gap: 8 }}>
-          <Text style={{ color: theme.colors.foreground, fontWeight: "600" }}>{title}</Text>
-          <ScrollView contentContainerStyle={{ gap: 6 }}>{children}</ScrollView>
-        </View>
       </Pressable>
-    </Modal>
+      <View
+        style={{
+          maxHeight: "80%",
+          borderRadius: 12,
+          backgroundColor: theme.colors.surface0,
+          padding: 12,
+          gap: 8,
+        }}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Text style={{ color: theme.colors.foreground, fontWeight: "600", flex: 1 }}>{title}</Text>
+          <Pressable onPress={onClose} hitSlop={8}>
+            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 14 }}>✕</Text>
+          </Pressable>
+        </View>
+        <ScrollView contentContainerStyle={{ gap: 6 }}>{children}</ScrollView>
+      </View>
+    </View>
   );
 }
 
