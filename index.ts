@@ -9,8 +9,12 @@ import {
   getDialogHandler,
   getHooksStatusHandler,
   getSettingsHandler,
+  getComposerStateHandler,
   getTimelineEntryHandler,
   getTimelineHandler,
+  openCliMenuHandler,
+  permissionModeHandler,
+  toggleFastModeHandler,
   listAttachableTerminalsHandler,
   listSessionsHandler,
   resumeSessionHandler,
@@ -41,6 +45,10 @@ export default function contribute(plugin: PluginContext) {
   plugin.handle(contracts.answerDialog, (input) => answerDialogHandler(input));
   plugin.handle(contracts.attachImage, (input) => attachImageHandler(input));
   plugin.handle(contracts.uploadImage, (input) => uploadImageHandler(input));
+  plugin.handle(contracts.getComposerState, (input) => getComposerStateHandler(input));
+  plugin.handle(contracts.openCliMenu, (input) => openCliMenuHandler(input));
+  plugin.handle(contracts.toggleFastMode, (input) => toggleFastModeHandler(input));
+  plugin.handle(contracts.permissionMode, (input) => permissionModeHandler(input));
 
   plugin.addWorkspacePanel({
     id: PANEL_ID,

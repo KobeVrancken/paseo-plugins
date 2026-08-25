@@ -1,6 +1,21 @@
 import { randomUUID } from "node:crypto";
-import { looksLikeClaudeSession, parseDialog, type ParsedDialog } from "./capture.server.ts";
-import { answerKeys, metaOptionKeys, PASTE_END, PASTE_START } from "./keymap.server.ts";
+import {
+  looksLikeClaudeSession,
+  parseDialog,
+  parsePermissionMode,
+  type ParsedDialog,
+  type PermissionMode,
+} from "./capture.server.ts";
+import {
+  answerKeys,
+  FAST_MODE_TOGGLE,
+  metaOptionKeys,
+  MODEL_MENU,
+  PASTE_END,
+  PASTE_START,
+  SHIFT_TAB,
+  THINKING_TOGGLE,
+} from "./keymap.server.ts";
 import {
   captureTerminal,
   createTerminal,
@@ -18,6 +33,10 @@ const IDLE_WAIT_TIMEOUT_MS = 120_000;
 const IDLE_POLL_MS = 750;
 const INTERRUPT_SETTLE_MS = 300;
 const SUBMIT_SETTLE_MS = 150;
+const MENU_SETTLE_MS = 400;
+const MODE_SETTLE_MS = 250;
+/** One full trip around the cycle, which is as far as Shift+Tab can ever need to go. */
+const MODE_CYCLE_LIMIT = 5;
 
 export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -186,4 +205,50 @@ export async function answerDialog(options: {
     };
   }
   return { answered: true, verified: true, warning: null, note: null };
+}
+
+/**
+ * Opens one of the CLI's own menus: Alt+P lists the models and the effort levels, Alt+T the thinking
+ * setting. The panel does not reimplement either; it reads the menu back off the screen.
+ */
+export async function openCliMenu(terminalId: string, menu: "model" | "thinking"): Promise<void> {
+  await sendKeys(terminalId, [menu === "model" ? MODEL_MENU : THINKING_TOGGLE], true);
+  await delay(MENU_SETTLE_MS);
+}
+
+/** Alt+O opens a confirmation rather than a menu: Tab flips the switch and Enter commits it. */
+export async function toggleFastMode(terminalId: string): Promise<void> {
+  await sendKeys(terminalId, [FAST_MODE_TOGGLE], true);
+  await delay(MENU_SETTLE_MS);
+  await sendKeys(terminalId, ["Tab"]);
+  await delay(MODE_SETTLE_MS);
+  await sendKeys(terminalId, ["Enter"]);
+  await delay(MODE_SETTLE_MS);
+}
+
+export async function readPermissionMode(terminalId: string): Promise<PermissionMode | null> {
+  return parsePermissionMode(await captureTerminal(terminalId));
+}
+
+export type ModeResult = { mode: PermissionMode | null; warning: string | null };
+
+/**
+ * Shift+Tab is the only way to change mode, and which modes are in the cycle depends on the session,
+ * so the target is reached by stepping and re-reading the screen rather than by counting presses.
+ */
+export async function setPermissionMode(
+  terminalId: string,
+  target: PermissionMode,
+): Promise<ModeResult> {
+  let mode = await readPermissionMode(terminalId);
+  if (mode === null) return { mode: null, warning: "the terminal is not showing an interactive CLI" };
+  for (let step = 0; step < MODE_CYCLE_LIMIT && mode !== target; step += 1) {
+    await sendKeys(terminalId, [SHIFT_TAB], true);
+    await delay(MODE_SETTLE_MS);
+    mode = await readPermissionMode(terminalId);
+  }
+  if (mode !== target) {
+    return { mode, warning: `this session does not offer ${target} — Shift+Tab in the terminal to change it` };
+  }
+  return { mode, warning: null };
 }

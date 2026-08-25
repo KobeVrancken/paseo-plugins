@@ -245,6 +245,12 @@ export class TranscriptStore {
     };
   }
 
+  /** The model the session last answered with, for the composer's model control. */
+  async lastModel(workspaceDir: string, sessionId: string): Promise<string | null> {
+    const synced = await this.sync(workspaceDir, sessionId);
+    return synced?.state.builder.lastModel ?? null;
+  }
+
   /** Full, uncapped body of a single entry, for a card the user expanded. */
   async entryAt(workspaceDir: string, sessionId: string, index: number): Promise<RenderEntry | null> {
     const synced = await this.sync(workspaceDir, sessionId);

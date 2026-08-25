@@ -1,13 +1,16 @@
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin";
 import { useRpc, useWorkspace } from "@getpaseo/plugin";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Clipboard, FlatList, Pressable, Text, View } from "react-native";
 import * as contracts from "../contracts.shared.ts";
 import {
   DialogCard,
+  EFFORT_LABELS,
   HooksOnboarding,
   ImageAttachSheet,
+  PERMISSION_MODE_LABELS,
+  PERMISSION_MODES,
   PromptBox,
   ResumeBar,
   SEND_BEHAVIOR_HINTS,
@@ -33,6 +36,11 @@ const DIALOG_WATCH_AFTER_MS = 2000;
 const DIALOG_BACKOFF_AFTER_MS = 45_000;
 const DIALOG_GIVE_UP_AFTER_MS = 120_000;
 const SEND_BEHAVIORS: SendBehavior[] = ["cli_default", "hold_until_idle", "interrupt_first"];
+const COMPOSER_POLL_MS = 5000;
+/** The CLI takes a few seconds to write its settings file after a toggle is confirmed. */
+const SETTINGS_WRITE_MS = 4000;
+/** How long opening a CLI menu keeps the screen watched, so the menu reaches the dialog card. */
+const MENU_WATCH_MS = 60_000;
 
 type TimelineState = {
   key: string;
@@ -60,6 +68,13 @@ function sessionLabel(session: SessionSummary): string {
   return session.title || session.preview || session.sessionId.slice(0, 8);
 }
 
+/** "Off" is a real state of the CLI's thinking toggle, not a missing reading. */
+function effortLabel(state: { thinking: boolean; effortLevel: string | null }): string {
+  if (!state.thinking) return "Off";
+  if (state.effortLevel === null) return "Thinking";
+  return EFFORT_LABELS[state.effortLevel] ?? state.effortLevel;
+}
+
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -82,6 +97,10 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const getDialog = useRpc(contracts.getDialog);
   const answerDialog = useRpc(contracts.answerDialog);
   const attachImage = useRpc(contracts.attachImage);
+  const getComposerState = useRpc(contracts.getComposerState);
+  const openCliMenu = useRpc(contracts.openCliMenu);
+  const toggleFastMode = useRpc(contracts.toggleFastMode);
+  const permissionMode = useRpc(contracts.permissionMode);
 
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -90,6 +109,9 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const [imageSheetOpen, setImageSheetOpen] = useState(false);
   const [imagePaths, setImagePaths] = useState<string[]>([]);
   const [note, setNote] = useState<string | null>(null);
+  const [modeOpen, setModeOpen] = useState(false);
+  const [forceWatchUntil, setForceWatchUntil] = useState(0);
+  const [fastPending, setFastPending] = useState<boolean | null>(null);
   const [windowStart, setWindowStart] = useState<number | null>(null);
 
   const sessionsQuery = useQuery({
@@ -258,6 +280,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
     // Probe once when the session is opened: a question may have been waiting long before that.
     (probedRef.current !== dialogKey ||
       dialogOpenRef.current ||
+      Date.now() < forceWatchUntil ||
       (quietFor > DIALOG_WATCH_AFTER_MS && quietFor < DIALOG_GIVE_UP_AFTER_MS));
 
   const dialogQuery = useQuery({
@@ -299,6 +322,61 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
       setImagePaths((current) => [...current, result.path]);
       setImageSheetOpen(false);
     },
+  });
+
+  // Everything the composer shows is read from files, so it can be polled with the transcript.
+  const composerQuery = useQuery({
+    queryKey: ["claude-code-composer", workspaceDir, activeSessionId],
+    enabled: workspaceDir !== null && activeSessionId !== null,
+    refetchInterval: COMPOSER_POLL_MS,
+    queryFn: () => getComposerState({ workspaceDir: workspaceDir!, sessionId: activeSessionId! }),
+  });
+
+  // The mode is only on the terminal screen, so it is read once per bound session and after a change.
+  const modeQuery = useQuery({
+    queryKey: ["claude-code-mode", activeSessionId, activeSession?.boundTerminalId ?? null],
+    enabled: activeSessionId !== null && (activeSession?.boundTerminalId ?? null) !== null,
+    staleTime: Infinity,
+    queryFn: () => permissionMode({ sessionId: activeSessionId!, mode: null }),
+  });
+
+  const menuMutation = useMutation({
+    mutationFn: (menu: "model" | "thinking") => openCliMenu({ sessionId: activeSessionId!, menu }),
+    onSuccess: (result) => {
+      setNote(result.warning ?? "The CLI's menu is open — pick from it below or in the terminal.");
+      setForceWatchUntil(Date.now() + MENU_WATCH_MS);
+      void dialogQuery.refetch();
+    },
+    onError: (error) => setNote(errorText(error)),
+  });
+
+  // The pill leads the settings file, which the CLI only writes a few seconds after confirming.
+  const fastMutation = useMutation({
+    mutationFn: () => toggleFastMode({ sessionId: activeSessionId! }),
+    onSuccess: (result) => {
+      setNote(result.warning);
+      setTimeout(() => void composerQuery.refetch(), SETTINGS_WRITE_MS);
+    },
+    onError: (error) => {
+      setFastPending(null);
+      setNote(errorText(error));
+    },
+  });
+
+  const fastMode = fastPending ?? composerQuery.data?.fastMode ?? false;
+  useEffect(() => {
+    if (fastPending !== null && composerQuery.data?.fastMode === fastPending) setFastPending(null);
+  }, [composerQuery.data?.fastMode, fastPending]);
+
+  const modeMutation = useMutation({
+    mutationFn: (mode: (typeof PERMISSION_MODES)[number]) =>
+      permissionMode({ sessionId: activeSessionId!, mode }),
+    onSuccess: (result) => {
+      setModeOpen(false);
+      setNote(result.warning);
+      void modeQuery.refetch();
+    },
+    onError: (error) => setNote(errorText(error)),
   });
 
   const attachableQuery = useQuery({
@@ -488,8 +566,27 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           disabled={activeSessionId === null}
           sending={sendMutation.isPending}
           note={note}
-          terminalHint={terminalHint}
           attachments={imagePaths}
+          controls={
+            composerQuery.data?.bound
+              ? {
+                  model: composerQuery.data.model,
+                  effort: effortLabel(composerQuery.data),
+                  fastMode,
+                  mode: modeQuery.data?.mode ? PERMISSION_MODE_LABELS[modeQuery.data.mode]! : null,
+                  onOpenModelMenu: () => menuMutation.mutate("model"),
+                  onOpenThinking: () => menuMutation.mutate("thinking"),
+                  onOpenMode: () => {
+                    setModeOpen(true);
+                    void modeQuery.refetch();
+                  },
+                  onToggleFast: () => {
+                    setFastPending(!fastMode);
+                    fastMutation.mutate();
+                  },
+                }
+              : null
+          }
           onAttachImage={() => setImageSheetOpen(true)}
           onRemoveAttachment={(path) => setImagePaths((current) => current.filter((item) => item !== path))}
           onSend={(text) => sendMutation.mutate(text)}
@@ -564,6 +661,22 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           <SheetNote palette={palette}>No terminals in this workspace.</SheetNote>
         ) : null}
       </Sheet>
+      <Sheet palette={palette} visible={modeOpen} title="Permission mode" onClose={() => setModeOpen(false)}>
+        <SheetNote palette={palette}>
+          Shift+Tab is the only way to change mode, so the panel steps the cycle until the terminal
+          shows the one you picked. A session that does not offer a mode will stop short of it.
+        </SheetNote>
+        {PERMISSION_MODES.map((mode) => (
+          <SheetRow
+            key={mode}
+            palette={palette}
+            selected={modeQuery.data?.mode === mode}
+            label={PERMISSION_MODE_LABELS[mode]!}
+            onPress={() => modeMutation.mutate(mode)}
+          />
+        ))}
+      </Sheet>
+
       <ImageAttachSheet
         palette={palette}
         visible={imageSheetOpen}

@@ -9,6 +9,14 @@ export const PASTE_START = `${ESC}[200~`;
 export const PASTE_END = `${ESC}[201~`;
 
 /**
+ * The CLI's Chat keybindings, read out of Claude Code 2.1.x: a terminal sends Alt as an Escape prefix.
+ * `chat:modelPicker` opens the menu that carries both the model and the effort level.
+ */
+export const MODEL_MENU = `${ESC}p`;
+export const FAST_MODE_TOGGLE = `${ESC}o`;
+export const THINKING_TOGGLE = `${ESC}t`;
+
+/**
  * Keystrokes that answer a CLI option dialog, verified against Claude Code 2.1.x:
  * a digit picks (single-select) or toggles (multi-select) an option, and a multi-select is submitted
  * by moving right to the review tab and choosing its first option.

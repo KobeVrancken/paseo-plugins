@@ -449,6 +449,8 @@ export class TimelineBuilder {
 
   /** Line kinds this build does not know how to render, reported once per session in the plugin log. */
   readonly unknownKinds = new Set<string>();
+  /** The model of the most recent assistant line, which is the model the session is running on. */
+  lastModel: string | null = null;
   cwd: string | null = null;
   title: string | null = null;
   firstUserPrompt: string | null = null;
@@ -705,6 +707,7 @@ export class TimelineBuilder {
     const isSidechain = entry.isSidechain === true;
     const requestId = asString(entry.requestId);
     const model = asString(message?.model);
+    if (model !== null && !isSidechain) this.lastModel = model;
     const cwd = asString(entry.cwd) ?? this.cwd;
 
     for (const block of content) {

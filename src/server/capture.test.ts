@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { looksLikeClaudeSession, parseDialog } from "./capture.server.ts";
+import { looksLikeClaudeSession, parseDialog, parsePermissionMode } from "./capture.server.ts";
 import { answerKeys, ARROW_RIGHT, metaOptionKeys } from "./keymap.server.ts";
 
 const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -82,4 +82,39 @@ test("presses a meta option once instead of answering with it", () => {
 
 test("ignores option numbers the keyboard cannot reach", () => {
   assert.deepEqual(answerKeys([12], false), []);
+});
+
+test("reads the permission mode off the footer", () => {
+  assert.equal(parsePermissionMode(capture("capture-idle.txt")), "auto");
+  assert.equal(parsePermissionMode(["⏵⏵ accept edits on (shift+tab to cycle)"]), "acceptEdits");
+  assert.equal(parsePermissionMode(["⏸ plan mode on (shift+tab to cycle)"]), "plan");
+  assert.equal(parsePermissionMode(["WARNING: Claude Code running in Bypass Permissions mode"]), "bypassPermissions");
+});
+
+test("treats a footer with no mode as the default mode, and a foreign screen as unknown", () => {
+  assert.equal(parsePermissionMode(["  ? for shortcuts", "  8k/200k tokens (4%)"]), "default");
+  assert.equal(parsePermissionMode(["alice@host:~$ ls"]), null);
+});
+
+test("parses the model menu, whose footer scrolls off the screen", () => {
+  const dialog = parseDialog(capture("capture-model-menu.txt"));
+  assert.ok(dialog);
+  assert.equal(dialog.kind, "question");
+  assert.equal(dialog.prompt, "Select model");
+  assert.deepEqual(
+    dialog.options.map((option) => option.label),
+    ["Default (recommended) ✔", "Opus (1M context)", "Fable"],
+  );
+  assert.match(dialog.options[0]!.description ?? "", /Opus 5 with 1M context/);
+});
+
+test("parses the thinking menu the CLI opens on Alt+T", () => {
+  const dialog = parseDialog(capture("capture-thinking-menu.txt"));
+  assert.ok(dialog);
+  assert.equal(dialog.prompt, "Toggle thinking mode");
+  assert.deepEqual(
+    dialog.options.map((option) => option.label),
+    ["Enabled ✔", "Disabled"],
+  );
+  assert.equal(dialog.options[1]!.description, "Claude will respond without extended thinking");
 });

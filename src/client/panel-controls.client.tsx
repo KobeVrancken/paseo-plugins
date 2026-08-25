@@ -27,6 +27,25 @@ export const SEND_BEHAVIOR_HINTS: Record<SendBehavior, string> = {
   interrupt_first: "Press Esc to stop the current turn, then forward.",
 };
 
+/** How the CLI names its effort levels and permission modes, in the CLI's own cycle order. */
+export const EFFORT_LABELS: Record<string, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+};
+
+export const PERMISSION_MODES = ["default", "acceptEdits", "plan", "bypassPermissions", "auto"] as const;
+
+export const PERMISSION_MODE_LABELS: Record<string, string> = {
+  default: "Always ask",
+  acceptEdits: "Accept file edits",
+  plan: "Plan mode",
+  bypassPermissions: "Bypass",
+  auto: "Auto mode",
+};
+
 const STATUS_LABELS: Record<SessionStatus, string> = {
   idle: "idle",
   running: "running",
@@ -72,6 +91,56 @@ export function StatusPill({ status, palette }: { status: SessionStatus; palette
         {STATUS_LABELS[status]}
       </Text>
     </View>
+  );
+}
+
+/** The flat 28px badge paseo uses for every composer control. */
+export function Pill({
+  palette,
+  glyph,
+  label,
+  onPress,
+  disabled,
+  active,
+}: {
+  palette: Palette;
+  glyph?: string;
+  label?: string;
+  onPress: () => void;
+  disabled?: boolean;
+  active?: boolean;
+}) {
+  const color = active ? palette.accent : palette.foregroundMuted;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={label ?? glyph}
+      style={pressable(({ pressed, hovered }) => ({
+        height: controlHeight.tight,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: spacing[1],
+        paddingHorizontal: label === undefined ? 0 : spacing[2],
+        borderRadius: radius["2xl"],
+        backgroundColor: pressed ? palette.surface0 : hovered ? palette.surface2 : "transparent",
+        opacity: disabled ? 0.5 : 1,
+        flexShrink: 1,
+        minWidth: label === undefined ? controlHeight.tight : 0,
+      }))}
+    >
+      {glyph ? <Text style={{ color, fontSize: fontSize.base }}>{glyph}</Text> : null}
+      {label === undefined ? null : (
+        <Text numberOfLines={1} style={{ flexShrink: 1, minWidth: 0, color, fontSize: fontSize.base }}>
+          {label}
+        </Text>
+      )}
+      {label === undefined ? null : (
+        <Text style={{ color: palette.foregroundExtraMuted, fontSize: fontSize.sm }}>⌄</Text>
+      )}
+    </Pressable>
   );
 }
 
@@ -142,14 +211,25 @@ function ComposerFrame({
   );
 }
 
+export type ComposerControls = {
+  model: string | null;
+  effort: string | null;
+  fastMode: boolean;
+  mode: string | null;
+  onOpenModelMenu: () => void;
+  onOpenThinking: () => void;
+  onOpenMode: () => void;
+  onToggleFast: () => void;
+};
+
 export function PromptBox({
   palette,
   compact,
   disabled,
   sending,
   note,
-  terminalHint,
   attachments,
+  controls,
   onSend,
   onAttachImage,
   onRemoveAttachment,
@@ -159,8 +239,8 @@ export function PromptBox({
   disabled: boolean;
   sending: boolean;
   note: string | null;
-  terminalHint: string | null;
   attachments?: string[];
+  controls: ComposerControls | null;
   onSend: (text: string) => void;
   onAttachImage?: () => void;
   onRemoveAttachment?: (path: string) => void;
@@ -248,7 +328,11 @@ export function PromptBox({
             onChangeText={setText}
             editable={!disabled}
             multiline
-            placeholder={disabled ? "Bind a terminal to send prompts" : "Message Claude Code…"}
+            placeholder={
+              disabled
+                ? "Bind a terminal to send prompts"
+                : "Message Claude Code, tag @files, or use /commands and /skills"
+            }
             placeholderTextColor={palette.foregroundMuted}
             onKeyPress={handleKeyPress}
             style={{
@@ -272,27 +356,37 @@ export function PromptBox({
         >
           <View style={{ flexDirection: "row", alignItems: "center", minWidth: 0, flexShrink: 1 }}>
             {onAttachImage ? (
-              <IconButton
-                palette={palette}
-                glyph="＋"
-                accessibilityLabel="Attach an image"
-                onPress={onAttachImage}
-                disabled={disabled}
-              />
+              <Pill palette={palette} glyph="＋" onPress={onAttachImage} disabled={disabled} />
             ) : null}
-            {terminalHint ? (
-              <Text
-                numberOfLines={1}
-                style={{
-                  flexShrink: 1,
-                  minWidth: 0,
-                  marginLeft: spacing[1],
-                  color: palette.foregroundExtraMuted,
-                  fontSize: fontSize.sm,
-                }}
-              >
-                {terminalHint}
-              </Text>
+            {controls ? (
+              <>
+                <Pill
+                  palette={palette}
+                  glyph="✻"
+                  label={controls.model ?? "Model"}
+                  onPress={controls.onOpenModelMenu}
+                  disabled={disabled}
+                />
+                <Pill
+                  palette={palette}
+                  label={controls.effort ?? "Thinking"}
+                  onPress={controls.onOpenThinking}
+                  disabled={disabled}
+                />
+                <Pill
+                  palette={palette}
+                  label={controls.mode ?? "Mode"}
+                  onPress={controls.onOpenMode}
+                  disabled={disabled}
+                />
+                <Pill
+                  palette={palette}
+                  glyph="⚡"
+                  active={controls.fastMode}
+                  onPress={controls.onToggleFast}
+                  disabled={disabled}
+                />
+              </>
             ) : null}
           </View>
           <IconButton
@@ -313,7 +407,7 @@ export type PanelDialog = {
   kind: "permission" | "question";
   prompt: string;
   context: string[];
-  options: { index: number; label: string; checked: boolean; meta: boolean }[];
+  options: { index: number; label: string; description: string | null; checked: boolean; meta: boolean }[];
   multiSelect: boolean;
 };
 
@@ -380,6 +474,7 @@ export function DialogCard({
                 key={option.index}
                 palette={palette}
                 label={`${option.index}. ${option.label}`}
+                description={option.description}
                 control={toggles ? "checkbox" : "none"}
                 selected={toggles && checked.includes(option.index)}
                 disabled={answering}

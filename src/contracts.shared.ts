@@ -128,6 +128,7 @@ export const sendPrompt = defineRpc({
 export const DialogOptionSchema = z.object({
   index: z.number().int(),
   label: z.string(),
+  description: z.string().nullable(),
   checked: z.boolean(),
   meta: z.boolean(),
 });
@@ -174,4 +175,52 @@ export const uploadImage = defineRpc({
   name: "image.upload",
   input: z.object({ fileName: z.string(), base64: z.string() }),
   output: z.object({ path: z.string() }),
+});
+
+export const PermissionModeSchema = z.enum([
+  "default",
+  "acceptEdits",
+  "plan",
+  "bypassPermissions",
+  "auto",
+]);
+
+/**
+ * What the composer's controls display. Everything here is read for free — the model from the
+ * transcript, the rest from Claude Code's own settings files — so it can be polled with the timeline.
+ */
+export const getComposerState = defineRpc({
+  name: "composer.state",
+  input: z.object({ workspaceDir: z.string(), sessionId: z.string() }),
+  output: z.object({
+    model: z.string().nullable(),
+    effortLevel: z.string().nullable(),
+    thinking: z.boolean(),
+    fastMode: z.boolean(),
+    bound: z.boolean(),
+  }),
+});
+
+/**
+ * Opens one of the CLI's own menus, which the panel then reads back like any other dialog rather
+ * than reimplementing. The model menu carries the effort level too.
+ */
+export const openCliMenu = defineRpc({
+  name: "composer.menu",
+  input: z.object({ sessionId: z.string(), menu: z.enum(["model", "thinking"]) }),
+  output: z.object({ opened: z.boolean(), warning: z.string().nullable() }),
+});
+
+/** Fast mode is a confirmation rather than a menu, so it is the one control the panel completes. */
+export const toggleFastMode = defineRpc({
+  name: "composer.fast",
+  input: z.object({ sessionId: z.string() }),
+  output: z.object({ toggled: z.boolean(), warning: z.string().nullable() }),
+});
+
+/** Reads the permission mode off the terminal, and with a `mode` set, Shift+Tabs until it matches. */
+export const permissionMode = defineRpc({
+  name: "composer.mode",
+  input: z.object({ sessionId: z.string(), mode: PermissionModeSchema.nullable().default(null) }),
+  output: z.object({ mode: PermissionModeSchema.nullable(), warning: z.string().nullable() }),
 });

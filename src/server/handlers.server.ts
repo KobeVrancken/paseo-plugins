@@ -9,6 +9,7 @@ import {
   workspaceSessionStatus,
   type PaseoLike,
 } from "./session-status.server.ts";
+import { readCliSettings, modelLabel } from "./cli-settings.server.ts";
 import { attachImagePath, cleanupOldImages, saveBase64Image } from "./images.server.ts";
 import { StateStore } from "./state.server.ts";
 import { TranscriptStore, isRecentlyActive } from "./transcript.server.ts";
@@ -274,4 +275,53 @@ export async function uploadImageHandler(
   input: Input<typeof contracts.uploadImage>,
 ): Promise<Output<typeof contracts.uploadImage>> {
   return { path: await saveBase64Image(input.fileName, input.base64) };
+}
+
+export async function getComposerStateHandler(
+  input: Input<typeof contracts.getComposerState>,
+): Promise<Output<typeof contracts.getComposerState>> {
+  const [settings, model, terminalId] = await Promise.all([
+    readCliSettings(input.workspaceDir),
+    store.lastModel(input.workspaceDir, input.sessionId),
+    boundTerminalId(input.sessionId),
+  ]);
+  return {
+    model: modelLabel(model),
+    effortLevel: settings.effortLevel,
+    thinking: settings.thinking,
+    fastMode: settings.fastMode,
+    bound: terminalId !== null,
+  };
+}
+
+export async function openCliMenuHandler(
+  input: Input<typeof contracts.openCliMenu>,
+): Promise<Output<typeof contracts.openCliMenu>> {
+  const terminalId = await boundTerminalId(input.sessionId);
+  if (!terminalId) return { opened: false, warning: "no terminal is bound to this session" };
+  await control.openCliMenu(terminalId, input.menu);
+  return { opened: true, warning: null };
+}
+
+export async function toggleFastModeHandler(
+  input: Input<typeof contracts.toggleFastMode>,
+): Promise<Output<typeof contracts.toggleFastMode>> {
+  const terminalId = await boundTerminalId(input.sessionId);
+  if (!terminalId) return { toggled: false, warning: "no terminal is bound to this session" };
+  await control.toggleFastMode(terminalId);
+  return { toggled: true, warning: null };
+}
+
+export async function permissionModeHandler(
+  input: Input<typeof contracts.permissionMode>,
+): Promise<Output<typeof contracts.permissionMode>> {
+  const terminalId = await boundTerminalId(input.sessionId);
+  if (!terminalId) return { mode: null, warning: "no terminal is bound to this session" };
+  try {
+    if (input.mode === null) return { mode: await control.readPermissionMode(terminalId), warning: null };
+    return await control.setPermissionMode(terminalId, input.mode);
+  } catch (error) {
+    console.log(`could not read the terminal screen: ${String(error)}`);
+    return { mode: null, warning: "could not read the terminal screen" };
+  }
 }
