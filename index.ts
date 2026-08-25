@@ -15,6 +15,7 @@ import {
   openCliMenuHandler,
   permissionModeHandler,
   listAttachableTerminalsHandler,
+  listCommandsHandler,
   listSessionsHandler,
   resumeSessionHandler,
   searchForgeItemsHandler,
@@ -50,6 +51,7 @@ export default function contribute(plugin: PluginContext) {
   plugin.handle(contracts.uploadFile, (input) => uploadFileHandler(input));
   plugin.handle(contracts.searchForgeItems, (input) => searchForgeItemsHandler(input));
   plugin.handle(contracts.suggestFiles, (input) => suggestFilesHandler(input));
+  plugin.handle(contracts.listCommands, (input) => listCommandsHandler(input));
   plugin.handle(contracts.getComposerState, (input) => getComposerStateHandler(input));
   plugin.handle(contracts.openCliMenu, (input) => openCliMenuHandler(input));
   plugin.handle(contracts.permissionMode, (input) => permissionModeHandler(input));

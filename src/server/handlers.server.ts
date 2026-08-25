@@ -17,6 +17,7 @@ import {
   saveBase64File,
   saveBase64Image,
 } from "./uploads.server.ts";
+import { listSlashCommands } from "./commands.server.ts";
 import { searchWorkspaceEntries } from "./file-search.server.ts";
 import { searchForgeItems } from "./github.server.ts";
 import { StateStore } from "./state.server.ts";
@@ -308,6 +309,12 @@ export async function suggestFilesHandler(
       limit: input.limit,
     }),
   };
+}
+
+export async function listCommandsHandler(
+  input: Input<typeof contracts.listCommands>,
+): Promise<Output<typeof contracts.listCommands>> {
+  return { commands: await listSlashCommands(input.workspaceDir) };
 }
 
 export async function getComposerStateHandler(

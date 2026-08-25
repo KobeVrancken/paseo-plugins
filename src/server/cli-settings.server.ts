@@ -30,6 +30,27 @@ export function mergeCliSettings(files: unknown[]): CliSettings {
   return merged;
 }
 
+/** `enabledPlugins` maps `name@marketplace` onto whether the plugin is on, and layers like the rest. */
+export function mergeEnabledPlugins(files: unknown[]): Set<string> {
+  const enabled = new Set<string>();
+  for (const file of files) {
+    const plugins = asRecord(asRecord(file)?.enabledPlugins);
+    if (!plugins) continue;
+    for (const [key, value] of Object.entries(plugins)) {
+      if (value === true) enabled.add(key);
+      else enabled.delete(key);
+    }
+  }
+  return enabled;
+}
+
+export async function readEnabledPlugins(
+  workspaceDir: string,
+  env: Env = process.env,
+): Promise<Set<string>> {
+  return mergeEnabledPlugins(await readSettingsFiles(workspaceDir, env));
+}
+
 async function readJson(filePath: string): Promise<unknown> {
   try {
     return JSON.parse(await fs.readFile(filePath, "utf8"));
@@ -38,13 +59,16 @@ async function readJson(filePath: string): Promise<unknown> {
   }
 }
 
-export async function readCliSettings(workspaceDir: string, env: Env = process.env): Promise<CliSettings> {
-  const files = await Promise.all([
+function readSettingsFiles(workspaceDir: string, env: Env): Promise<unknown[]> {
+  return Promise.all([
     readJson(path.join(claudeHomeDir(env), "settings.json")),
     readJson(path.join(workspaceDir, ".claude", "settings.json")),
     readJson(path.join(workspaceDir, ".claude", "settings.local.json")),
   ]);
-  return mergeCliSettings(files);
+}
+
+export async function readCliSettings(workspaceDir: string, env: Env = process.env): Promise<CliSettings> {
+  return mergeCliSettings(await readSettingsFiles(workspaceDir, env));
 }
 
 /** Turns the model id on a transcript line into the short name the CLI itself shows. */

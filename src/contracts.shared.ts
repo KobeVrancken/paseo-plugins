@@ -224,6 +224,25 @@ export const suggestFiles = defineRpc({
   }),
 });
 
+/**
+ * The skills and commands the CLI would offer for `/`, read off disk.
+ * The list only changes when a file does, so the panel holds it for the life of the panel.
+ */
+export const listCommands = defineRpc({
+  name: "commands.list",
+  input: z.object({ workspaceDir: z.string() }),
+  output: z.object({
+    commands: z.array(
+      z.object({
+        name: z.string(),
+        description: z.string(),
+        source: z.enum(["user", "project", "plugin"]),
+        kind: z.enum(["skill", "command"]),
+      }),
+    ),
+  }),
+});
+
 export const PermissionModeSchema = z.enum([
   "default",
   "acceptEdits",
