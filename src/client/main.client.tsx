@@ -2,7 +2,7 @@ import type { PluginWorkspacePanelProps } from "@getpaseo/plugin";
 import { useRpc, useWorkspace } from "@getpaseo/plugin";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { Clipboard, FlatList, Platform, Pressable, Text, View } from "react-native";
+import { Clipboard, FlatList, Linking, Platform, Pressable, Text, View } from "react-native";
 import * as contracts from "../contracts.shared.ts";
 import {
   addAttachment,
@@ -14,6 +14,7 @@ import {
 } from "./attachments.client.ts";
 import { base64FromDataUrl } from "./clipboard-image.client.ts";
 import { IMAGE_ACCEPT, pickFiles } from "./file-picker.client.ts";
+import { AttachmentLightbox } from "./lightbox.client.tsx";
 import {
   DialogCard,
   EFFORT_LABELS,
@@ -117,6 +118,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const attachImage = useRpc(contracts.attachImage);
   const uploadImage = useRpc(contracts.uploadImage);
   const uploadFile = useRpc(contracts.uploadFile);
+  const readImage = useRpc(contracts.readImage);
   const searchForgeItems = useRpc(contracts.searchForgeItems);
   const getComposerState = useRpc(contracts.getComposerState);
   const openCliMenu = useRpc(contracts.openCliMenu);
@@ -131,6 +133,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const [forgeOpen, setForgeOpen] = useState(false);
   const [forgeQuery, setForgeQuery] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [openedImage, setOpenedImage] = useState<Attachment | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [modeOpen, setModeOpen] = useState(false);
   const [forceWatchUntil, setForceWatchUntil] = useState(0);
@@ -370,6 +373,25 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
     },
     onSuccess: attach,
     onError: (error) => setNote(errorText(error)),
+  });
+
+  // Opening an attachment means what it means in paseo: an image opens, an issue goes to its forge,
+  // and a file has nowhere to go.
+  const openAttachment = useCallback((attachment: Attachment) => {
+    if (attachment.kind === "image") {
+      setOpenedImage(attachment);
+      return;
+    }
+    if (attachment.kind === "issue" || attachment.kind === "pr") {
+      void Linking.openURL(attachment.reference).catch(() => {});
+    }
+  }, []);
+
+  const openedImageQuery = useQuery({
+    queryKey: ["claude-code-image", openedImage?.reference ?? null],
+    enabled: openedImage !== null && openedImage.previewDataUrl === null,
+    staleTime: Infinity,
+    queryFn: () => readImage({ path: openedImage!.reference }),
   });
 
   const openPicker = useCallback(
@@ -636,6 +658,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
               : null
           }
           onAddAttachment={() => setAddOpen(true)}
+          onOpenAttachment={openAttachment}
           onPasteImages={(files) => uploadMutation.mutate({ files, images: true })}
           onRemoveAttachment={(reference) =>
             setAttachments((current) => current.filter((item) => item.reference !== reference))
@@ -727,6 +750,15 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           />
         ))}
       </Sheet>
+
+      {openedImage ? (
+        <AttachmentLightbox
+          palette={palette}
+          uri={openedImage.previewDataUrl ?? openedImageQuery.data?.dataUrl ?? null}
+          loading={openedImageQuery.isFetching}
+          onClose={() => setOpenedImage(null)}
+        />
+      ) : null}
 
       <Sheet palette={palette} visible={addOpen} title="Add attachment" onClose={() => setAddOpen(false)}>
         <SheetRow

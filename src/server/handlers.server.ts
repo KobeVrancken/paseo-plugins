@@ -13,6 +13,7 @@ import { readCliSettings, modelLabel } from "./cli-settings.server.ts";
 import {
   attachImagePath,
   cleanupOldUploads,
+  fullImageDataUrl,
   imagePreviewDataUrl,
   saveBase64File,
   saveBase64Image,
@@ -285,6 +286,12 @@ export async function uploadImageHandler(
   input: Input<typeof contracts.uploadImage>,
 ): Promise<Output<typeof contracts.uploadImage>> {
   return { path: await saveBase64Image(input.fileName, input.base64) };
+}
+
+export async function readImageHandler(
+  input: Input<typeof contracts.readImage>,
+): Promise<Output<typeof contracts.readImage>> {
+  return { dataUrl: await fullImageDataUrl(input.path) };
 }
 
 export async function uploadFileHandler(

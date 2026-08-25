@@ -241,6 +241,7 @@ export function PromptBox({
   controls,
   onSend,
   onAddAttachment,
+  onOpenAttachment,
   onPasteImages,
   onRemoveAttachment,
 }: {
@@ -254,6 +255,7 @@ export function PromptBox({
   controls: ComposerControls | null;
   onSend: (text: string) => void;
   onAddAttachment?: () => void;
+  onOpenAttachment?: (attachment: Attachment) => void;
   onPasteImages?: (images: { fileName: string; dataUrl: string }[]) => void;
   onRemoveAttachment?: (reference: string) => void;
 }) {
@@ -363,6 +365,7 @@ export function PromptBox({
                 title={file.title}
                 subtitle={file.subtitle}
                 disabled={disabled}
+                onOpen={onOpenAttachment ? () => onOpenAttachment(file) : undefined}
                 onRemove={() => onRemoveAttachment?.(file.reference)}
               />
             ))}

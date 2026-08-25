@@ -153,6 +153,7 @@ export function AttachmentPill({
   title,
   subtitle,
   disabled,
+  onOpen,
   onRemove,
 }: {
   palette: Palette;
@@ -160,11 +161,16 @@ export function AttachmentPill({
   title: string;
   subtitle: string;
   disabled?: boolean;
+  onOpen?: () => void;
   onRemove: () => void;
 }) {
   return (
     <View style={{ position: "relative" }}>
-      <View
+      <Pressable
+        onPress={onOpen}
+        disabled={disabled || !onOpen}
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${title}`}
         style={{
           borderRadius: radius.md,
           borderWidth: 1,
@@ -195,7 +201,7 @@ export function AttachmentPill({
             </Text>
           </View>
         )}
-      </View>
+      </Pressable>
       <Pressable
         onPress={onRemove}
         disabled={disabled}

@@ -179,6 +179,13 @@ export const uploadImage = defineRpc({
   output: z.object({ path: z.string() }),
 });
 
+/** The whole image, for the one attachment the user opened. Null once it is larger than the cap. */
+export const readImage = defineRpc({
+  name: "image.data",
+  input: z.object({ path: z.string() }),
+  output: z.object({ dataUrl: z.string().nullable() }),
+});
+
 /** Anything that is not an image: saved next to the images and named in the prompt the same way. */
 export const uploadFile = defineRpc({
   name: "file.upload",

@@ -21,17 +21,26 @@ export function imageMimeType(filePath: string): string | null {
   return IMAGE_MIME_TYPES[path.extname(filePath).toLowerCase()] ?? null;
 }
 
-/** The thumbnail the composer shows next to a prompt, inlined because the panel cannot read files. */
-export async function imagePreviewDataUrl(filePath: string): Promise<string | null> {
+/** The panel cannot read a file itself, so an image it has to draw travels inline. */
+export async function imageDataUrl(filePath: string, maxBytes: number): Promise<string | null> {
   const mimeType = imageMimeType(filePath);
   if (!mimeType) return null;
   try {
     const stat = await fs.stat(filePath);
-    if (stat.size > PREVIEW_MAX_BYTES) return null;
+    if (stat.size > maxBytes) return null;
     return `data:${mimeType};base64,${(await fs.readFile(filePath)).toString("base64")}`;
   } catch {
     return null;
   }
+}
+
+/** The thumbnail beside the prompt. The full image is only worth sending once it is opened. */
+export function imagePreviewDataUrl(filePath: string): Promise<string | null> {
+  return imageDataUrl(filePath, PREVIEW_MAX_BYTES);
+}
+
+export function fullImageDataUrl(filePath: string): Promise<string | null> {
+  return imageDataUrl(filePath, MAX_BYTES);
 }
 
 /** Uploads land in a shared directory, so the timestamp is what keeps two of the same name apart. */

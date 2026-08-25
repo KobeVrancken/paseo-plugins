@@ -14,6 +14,7 @@ import {
   getTimelineHandler,
   openCliMenuHandler,
   permissionModeHandler,
+  readImageHandler,
   listAttachableTerminalsHandler,
   listCommandsHandler,
   listSessionsHandler,
@@ -49,6 +50,7 @@ export default function contribute(plugin: PluginContext) {
   plugin.handle(contracts.attachImage, (input) => attachImageHandler(input));
   plugin.handle(contracts.uploadImage, (input) => uploadImageHandler(input));
   plugin.handle(contracts.uploadFile, (input) => uploadFileHandler(input));
+  plugin.handle(contracts.readImage, (input) => readImageHandler(input));
   plugin.handle(contracts.searchForgeItems, (input) => searchForgeItemsHandler(input));
   plugin.handle(contracts.suggestFiles, (input) => suggestFilesHandler(input));
   plugin.handle(contracts.listCommands, (input) => listCommandsHandler(input));
