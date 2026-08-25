@@ -20,7 +20,7 @@ import {
   EFFORT_LABELS,
   ForgePickerSheet,
   HooksOnboarding,
-  ImageAttachSheet,
+  AttachPathSheet,
   PERMISSION_MODE_LABELS,
   PERMISSION_MODES,
   PromptBox,
@@ -115,7 +115,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const getTimelineEntry = useRpc(contracts.getTimelineEntry);
   const getDialog = useRpc(contracts.getDialog);
   const answerDialog = useRpc(contracts.answerDialog);
-  const attachImage = useRpc(contracts.attachImage);
+  const attachPath = useRpc(contracts.attachPath);
   const uploadImage = useRpc(contracts.uploadImage);
   const uploadFile = useRpc(contracts.uploadFile);
   const readImage = useRpc(contracts.readImage);
@@ -128,7 +128,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const [pickerOpen, setPickerOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
-  const [imageSheetOpen, setImageSheetOpen] = useState(false);
+  const [pathSheetOpen, setPathSheetOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [forgeOpen, setForgeOpen] = useState(false);
   const [forgeQuery, setForgeQuery] = useState("");
@@ -345,11 +345,15 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
     setAttachments((current) => next.reduce(addAttachment, current));
   }, []);
 
-  const imageMutation = useMutation({
-    mutationFn: (path: string) => attachImage({ path }),
+  const pathMutation = useMutation({
+    mutationFn: (path: string) => attachPath({ path }),
     onSuccess: (result) => {
-      attach([imageAttachment(result.path, result.previewDataUrl)]);
-      setImageSheetOpen(false);
+      attach([
+        result.kind === "image"
+          ? imageAttachment(result.path, result.previewDataUrl)
+          : fileAttachment(result.path),
+      ]);
+      setPathSheetOpen(false);
     },
   });
 
@@ -398,7 +402,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
     (images: boolean) => {
       setAddOpen(false);
       if (Platform.OS !== "web") {
-        setImageSheetOpen(true);
+        setPathSheetOpen(true);
         return;
       }
       void pickFiles({ accept: images ? IMAGE_ACCEPT : "", multiple: true }).then((files) => {
@@ -782,15 +786,15 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           detail="Send any other file for the CLI to read"
           onPress={() => openPicker(false)}
         />
-        {/* The file picker reaches the machine showing the panel; a typed path reaches the one paseo runs on. */}
+        {/* The file dialog reaches the machine showing the panel; a typed path reaches the one paseo runs on. */}
         {Platform.OS === "web" ? (
           <SheetRow
             palette={palette}
             label="Attach by path…"
-            detail="Name an image on the machine running paseo"
+            detail="Name any file on the machine running paseo"
             onPress={() => {
               setAddOpen(false);
-              setImageSheetOpen(true);
+              setPathSheetOpen(true);
             }}
           />
         ) : null}
@@ -811,13 +815,13 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         }}
       />
 
-      <ImageAttachSheet
+      <AttachPathSheet
         palette={palette}
-        visible={imageSheetOpen}
-        busy={imageMutation.isPending}
-        error={imageMutation.error ? errorText(imageMutation.error) : null}
-        onClose={() => setImageSheetOpen(false)}
-        onAttach={(path) => imageMutation.mutate(path)}
+        visible={pathSheetOpen}
+        busy={pathMutation.isPending}
+        error={pathMutation.error ? errorText(pathMutation.error) : null}
+        onClose={() => setPathSheetOpen(false)}
+        onAttach={(path) => pathMutation.mutate(path)}
         onPasteFromClipboard={(setPath) => {
           void Clipboard.getString()
             .then((value) => setPath(value.trim()))

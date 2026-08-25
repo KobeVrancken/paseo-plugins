@@ -166,11 +166,19 @@ export const answerDialog = defineRpc({
   }),
 });
 
-export const attachImage = defineRpc({
-  name: "image.attach",
+/**
+ * A file named by its path on the machine paseo runs on, which the file dialog cannot reach.
+ * The preview only comes back for an image, and an upload carries none: the panel already holds
+ * the bytes it just sent.
+ */
+export const attachPath = defineRpc({
+  name: "file.attach",
   input: z.object({ path: z.string() }),
-  /** An upload does not carry one back: the panel already holds the bytes it just sent. */
-  output: z.object({ path: z.string(), previewDataUrl: z.string().nullable() }),
+  output: z.object({
+    path: z.string(),
+    kind: z.enum(["image", "file"]),
+    previewDataUrl: z.string().nullable(),
+  }),
 });
 
 export const uploadImage = defineRpc({

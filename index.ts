@@ -2,7 +2,7 @@ import type { PluginContext } from "@getpaseo/plugin";
 import * as contracts from "./src/contracts.shared.ts";
 import {
   answerDialogHandler,
-  attachImageHandler,
+  attachPathHandler,
   attachTerminalHandler,
   detachTerminalHandler,
   enableHooksHandler,
@@ -47,7 +47,7 @@ export default function contribute(plugin: PluginContext) {
   plugin.handle(contracts.sendPrompt, (input, context) => sendPromptHandler(input, context));
   plugin.handle(contracts.getDialog, (input) => getDialogHandler(input));
   plugin.handle(contracts.answerDialog, (input) => answerDialogHandler(input));
-  plugin.handle(contracts.attachImage, (input) => attachImageHandler(input));
+  plugin.handle(contracts.attachPath, (input) => attachPathHandler(input));
   plugin.handle(contracts.uploadImage, (input) => uploadImageHandler(input));
   plugin.handle(contracts.uploadFile, (input) => uploadFileHandler(input));
   plugin.handle(contracts.readImage, (input) => readImageHandler(input));

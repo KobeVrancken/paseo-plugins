@@ -111,18 +111,24 @@ export async function saveBase64File(
   return target;
 }
 
-/** Copies an image the user pointed at into the cache so the path stays valid for the CLI. */
-export async function attachImagePath(sourcePath: string, env: Env = process.env): Promise<string> {
+export type AttachedFile = { path: string; kind: "image" | "file" };
+
+/**
+ * Copies a file the user pointed at into the cache, so the path the prompt names stays valid for as
+ * long as the CLI might read it, whatever happens to the original.
+ */
+export async function attachFilePath(
+  sourcePath: string,
+  env: Env = process.env,
+): Promise<AttachedFile> {
   const resolved = sourcePath.replace(/^~(?=\/)/, env.HOME ?? "~").trim();
   const stat = await fs.stat(resolved);
   if (!stat.isFile()) throw new Error("not a file");
-  if (stat.size > MAX_BYTES) throw new Error("image is larger than 10 MB");
-  if (!IMAGE_EXTENSIONS.has(path.extname(resolved).toLowerCase())) {
-    throw new Error("not a png, jpg, gif or webp file");
-  }
-  const dir = imagesDir(env);
+  if (stat.size > MAX_BYTES) throw new Error("the file is larger than 10 MB");
+  const isImage = IMAGE_EXTENSIONS.has(path.extname(resolved).toLowerCase());
+  const dir = isImage ? imagesDir(env) : filesDir(env);
   await fs.mkdir(dir, { recursive: true });
-  const target = path.join(dir, safeName(path.basename(resolved), ".png"));
+  const target = path.join(dir, safeName(path.basename(resolved), null));
   await fs.copyFile(resolved, target);
-  return target;
+  return { path: target, kind: isImage ? "image" : "file" };
 }

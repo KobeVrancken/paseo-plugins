@@ -11,7 +11,7 @@ import {
 } from "./session-status.server.ts";
 import { readCliSettings, modelLabel } from "./cli-settings.server.ts";
 import {
-  attachImagePath,
+  attachFilePath,
   cleanupOldUploads,
   fullImageDataUrl,
   imagePreviewDataUrl,
@@ -275,11 +275,11 @@ export async function answerDialogHandler(
   return control.answerDialog({ terminalId, dialog, optionIndices });
 }
 
-export async function attachImageHandler(
-  input: Input<typeof contracts.attachImage>,
-): Promise<Output<typeof contracts.attachImage>> {
-  const attached = await attachImagePath(input.path);
-  return { path: attached, previewDataUrl: await imagePreviewDataUrl(attached) };
+export async function attachPathHandler(
+  input: Input<typeof contracts.attachPath>,
+): Promise<Output<typeof contracts.attachPath>> {
+  const attached = await attachFilePath(input.path);
+  return { ...attached, previewDataUrl: await imagePreviewDataUrl(attached.path) };
 }
 
 export async function uploadImageHandler(

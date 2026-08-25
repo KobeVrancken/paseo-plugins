@@ -573,7 +573,7 @@ export function DialogCard({
   );
 }
 
-export function ImageAttachSheet({
+export function AttachPathSheet({
   palette,
   visible,
   busy,
@@ -592,16 +592,17 @@ export function ImageAttachSheet({
 }) {
   const [path, setPath] = useState("");
   return (
-    <Sheet palette={palette} visible={visible} title="Attach an image" onClose={onClose}>
+    <Sheet palette={palette} visible={visible} title="Attach a file by path" onClose={onClose}>
       <View style={{ padding: spacing[4], gap: spacing[3] }}>
         <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.base, lineHeight: 20 }}>
-          Point at an image file on the machine running paseo. It is copied into the plugin cache and
-          its path is appended to the prompt, which is how the CLI picks images up.
+          Point at any file on the machine running paseo. It is copied into the plugin cache and its
+          path is appended to the prompt, which is how the CLI picks an attachment up: an image is
+          read as an image, anything else as a file to open.
         </Text>
         <TextInput
           value={path}
           onChangeText={setPath}
-          placeholder="/home/you/screenshot.png"
+          placeholder="/home/you/notes.md"
           placeholderTextColor={palette.foregroundMuted}
           autoCapitalize="none"
           autoCorrect={false}

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-  attachImagePath,
+  attachFilePath,
   cleanupOldUploads,
   imagePreviewDataUrl,
   saveBase64File,
@@ -41,16 +41,22 @@ test("sanitizes hostile file names", async () => {
   assert.match(path.basename(written), /passwd\.png$/);
 });
 
-test("copies an existing image and rejects other files", async () => {
-  const { env, imagesDir } = await tempEnv();
-  const source = path.join(env.XDG_CACHE_HOME!, "picture.png");
-  await writeFile(source, Buffer.from(PNG_BASE64, "base64"));
-  const copied = await attachImagePath(source, env);
-  assert.equal(path.dirname(copied), imagesDir);
+test("copies a file the user named, filing an image as an image", async () => {
+  const { env, imagesDir, filesDir } = await tempEnv();
+  const picture = path.join(env.XDG_CACHE_HOME!, "picture.png");
+  await writeFile(picture, Buffer.from(PNG_BASE64, "base64"));
+  const image = await attachFilePath(picture, env);
+  assert.equal(path.dirname(image.path), imagesDir);
+  assert.equal(image.kind, "image");
 
-  const notAnImage = path.join(env.XDG_CACHE_HOME!, "notes.txt");
-  await writeFile(notAnImage, "hello");
-  await assert.rejects(() => attachImagePath(notAnImage, env), /png, jpg/);
+  const notes = path.join(env.XDG_CACHE_HOME!, "notes.txt");
+  await writeFile(notes, "hello");
+  const file = await attachFilePath(notes, env);
+  assert.equal(path.dirname(file.path), filesDir);
+  assert.equal(file.kind, "file");
+  assert.match(path.basename(file.path), /^\d+-notes\.txt$/);
+
+  await assert.rejects(() => attachFilePath(env.XDG_CACHE_HOME!, env), /not a file/);
 });
 
 test("deletes cached images older than a week", async () => {
