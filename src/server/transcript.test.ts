@@ -121,3 +121,24 @@ test("returns the full body of a single entry", async () => {
   assert.equal(entry?.body.kind === "user_text" && entry.body.text, "first");
   assert.equal(await store.entryAt(workspaceDir, SESSION_ID, 99), null);
 });
+
+test("reads the tail once when two callers poll at the same time", async () => {
+  const { env, file, workspaceDir } = await setupWorkspace();
+  const store = new TranscriptStore(env);
+  await store.timelineSince(workspaceDir, SESSION_ID, 0);
+
+  await appendFile(file, userLine("second"));
+  // The panel polls the timeline and the composer independently, and both of them sync the file.
+  await Promise.all([
+    store.timelineSince(workspaceDir, SESSION_ID, 0),
+    store.lastModel(workspaceDir, SESSION_ID),
+    store.timelineSince(workspaceDir, SESSION_ID, 0),
+  ]);
+  const timeline = await store.timelineSince(workspaceDir, SESSION_ID, 0);
+  assert.ok(timeline);
+  assert.equal(timeline.total, 2);
+  assert.deepEqual(
+    timeline.entries.map((entry) => (entry.body.kind === "user_text" ? entry.body.text : entry.body.kind)),
+    ["first", "second"],
+  );
+});

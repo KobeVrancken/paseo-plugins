@@ -114,6 +114,7 @@ export function isRecentlyActive(mtime: number, now = Date.now()): boolean {
 export class TranscriptStore {
   private states = new Map<string, SessionState>();
   private projectDirs = new Map<string, string>();
+  private syncing = new Map<string, Promise<unknown>>();
   private readonly env: Env;
 
   constructor(env: Env = process.env) {
@@ -153,7 +154,28 @@ export class TranscriptStore {
     return path.join(projectDir, `${sessionId}.jsonl`);
   }
 
-  private async sync(workspaceDir: string, sessionId: string): Promise<{ state: SessionState; mtime: number } | null> {
+  /**
+   * A sync reads the file from the offset it last stopped at and moves the offset afterwards, so two
+   * of them running at once would both read, and both append, the same tail.
+   * The panel polls the timeline and the composer on separate clocks, so they are queued per session.
+   */
+  private sync(workspaceDir: string, sessionId: string): Promise<{ state: SessionState; mtime: number } | null> {
+    const key = `${workspaceDir}\u0000${sessionId}`;
+    const queued = (this.syncing.get(key) ?? Promise.resolve()).then(
+      () => this.syncOnce(workspaceDir, sessionId),
+      () => this.syncOnce(workspaceDir, sessionId),
+    );
+    this.syncing.set(
+      key,
+      queued.catch(() => {}),
+    );
+    return queued;
+  }
+
+  private async syncOnce(
+    workspaceDir: string,
+    sessionId: string,
+  ): Promise<{ state: SessionState; mtime: number } | null> {
     const filePath = await this.sessionFilePath(workspaceDir, sessionId);
     if (!filePath) return null;
     let stat;
