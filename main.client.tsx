@@ -5,7 +5,9 @@ import React, { useCallback, useMemo, useRef, useState } from "react";
 import { FlatList, Modal, Pressable, Text, View } from "react-native";
 import * as contracts from "./contracts.shared.ts";
 import type { RenderEntry, SessionSummary } from "./render-types.shared.ts";
-import { Card, Mono, Tint, relativeTimeFrom } from "./ui.client.tsx";
+import { groupEntries } from "./timeline-model.client.ts";
+import { TimelineItemView } from "./timeline.client.tsx";
+import { Tint, relativeTimeFrom } from "./ui.client.tsx";
 
 const SESSION_POLL_MS = 2000;
 const TIMELINE_POLL_MS = 750;
@@ -79,6 +81,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
     () => (timelineQuery.data?.entries ?? []).filter((entry): entry is RenderEntry => entry !== undefined),
     [timelineQuery.data],
   );
+  const items = useMemo(() => groupEntries(entries), [entries]);
 
   const onSelectSession = useCallback((sessionId: string) => {
     setSelectedSessionId(sessionId);
@@ -114,12 +117,14 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         />
       ) : (
         <FlatList
-          data={entries}
-          keyExtractor={(entry) => `${entry.index}:${entry.id}`}
+          data={items}
+          keyExtractor={(item) => item.key}
           contentContainerStyle={{ padding: layout.compact ? 10 : 16, gap: 10 }}
-          initialNumToRender={30}
+          initialNumToRender={20}
+          maxToRenderPerBatch={20}
           windowSize={11}
-          renderItem={({ item }) => <TimelineRow entry={item} theme={theme} />}
+          removeClippedSubviews
+          renderItem={({ item }) => <TimelineItemView item={item} theme={theme} />}
           ListEmptyComponent={
             <Text style={{ color: theme.colors.foregroundMuted }}>
               {timelineQuery.isPending ? "Loading transcript…" : "This session has no rendered entries."}
@@ -279,76 +284,4 @@ function SessionPicker({
       </Pressable>
     </Modal>
   );
-}
-
-function TimelineRow({
-  entry,
-  theme,
-}: {
-  entry: RenderEntry;
-  theme: PluginWorkspacePanelProps["theme"];
-}) {
-  const body = entry.body;
-  switch (body.kind) {
-    case "user_text":
-      return (
-        <Card theme={theme} tone="accent">
-          <Text style={{ color: theme.colors.foreground }}>{body.text}</Text>
-        </Card>
-      );
-    case "assistant_markdown":
-      return <Text style={{ color: theme.colors.foreground }}>{body.text}</Text>;
-    case "thinking":
-      return (
-        <Text style={{ color: theme.colors.foregroundMuted, fontStyle: "italic" }}>{body.text}</Text>
-      );
-    case "tool_call":
-      return (
-        <Card theme={theme} tone={body.status === "error" ? "danger" : "raised"}>
-          <Text style={{ color: theme.colors.foreground, fontWeight: "600" }}>{body.title}</Text>
-          {body.summary ? <Mono theme={theme} color={theme.colors.foregroundMuted}>{body.summary}</Mono> : null}
-        </Card>
-      );
-    case "todo_list":
-      return (
-        <Card theme={theme}>
-          {body.todos.map((todo, index) => (
-            <Text key={index} style={{ color: theme.colors.foreground }}>
-              {todo.status === "completed" ? "☑" : todo.status === "in_progress" ? "▸" : "☐"} {todo.content}
-            </Text>
-          ))}
-        </Card>
-      );
-    case "question":
-      return (
-        <Card theme={theme} tone="accent">
-          {body.questions.map((question, index) => (
-            <Text key={index} style={{ color: theme.colors.foreground }}>
-              {question.question}
-            </Text>
-          ))}
-        </Card>
-      );
-    case "activity":
-      return (
-        <Text
-          style={{
-            color: body.tone === "danger" ? theme.colors.statusDanger : theme.colors.foregroundMuted,
-            fontSize: 12,
-          }}
-        >
-          {body.label}
-        </Text>
-      );
-    case "image":
-      return (
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
-          {body.note ?? "image"}
-        </Text>
-      );
-    case "unsupported":
-      return null;
-    default:
-      return null;
-  }
 }
