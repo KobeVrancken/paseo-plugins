@@ -196,7 +196,6 @@ export const getComposerState = defineRpc({
     model: z.string().nullable(),
     effortLevel: z.string().nullable(),
     thinking: z.boolean(),
-    fastMode: z.boolean(),
     bound: z.boolean(),
   }),
 });
@@ -209,13 +208,6 @@ export const openCliMenu = defineRpc({
   name: "composer.menu",
   input: z.object({ sessionId: z.string(), menu: z.enum(["model", "thinking"]) }),
   output: z.object({ opened: z.boolean(), warning: z.string().nullable() }),
-});
-
-/** Fast mode is a confirmation rather than a menu, so it is the one control the panel completes. */
-export const toggleFastMode = defineRpc({
-  name: "composer.fast",
-  input: z.object({ sessionId: z.string() }),
-  output: z.object({ toggled: z.boolean(), warning: z.string().nullable() }),
 });
 
 /** Reads the permission mode off the terminal, and with a `mode` set, Shift+Tabs until it matches. */

@@ -289,7 +289,6 @@ export async function getComposerStateHandler(
     model: modelLabel(model),
     effortLevel: settings.effortLevel,
     thinking: settings.thinking,
-    fastMode: settings.fastMode,
     bound: terminalId !== null,
   };
 }
@@ -301,15 +300,6 @@ export async function openCliMenuHandler(
   if (!terminalId) return { opened: false, warning: "no terminal is bound to this session" };
   await control.openCliMenu(terminalId, input.menu);
   return { opened: true, warning: null };
-}
-
-export async function toggleFastModeHandler(
-  input: Input<typeof contracts.toggleFastMode>,
-): Promise<Output<typeof contracts.toggleFastMode>> {
-  const terminalId = await boundTerminalId(input.sessionId);
-  if (!terminalId) return { toggled: false, warning: "no terminal is bound to this session" };
-  await control.toggleFastMode(terminalId);
-  return { toggled: true, warning: null };
 }
 
 export async function permissionModeHandler(

@@ -4,18 +4,17 @@ import { mergeCliSettings, modelLabel } from "./cli-settings.server.ts";
 
 test("layers settings files with the later one winning", () => {
   const merged = mergeCliSettings([
-    { effortLevel: "high", alwaysThinkingEnabled: true, fastMode: true },
+    { effortLevel: "high", alwaysThinkingEnabled: true },
     { effortLevel: "max" },
-    { fastMode: false },
+    { alwaysThinkingEnabled: false },
   ]);
-  assert.deepEqual(merged, { effortLevel: "max", thinking: true, fastMode: false });
+  assert.deepEqual(merged, { effortLevel: "max", thinking: false });
 });
 
 test("ignores files that are missing or malformed", () => {
   assert.deepEqual(mergeCliSettings([null, "nope", [], { effortLevel: 7 }]), {
     effortLevel: null,
     thinking: false,
-    fastMode: false,
   });
 });
 

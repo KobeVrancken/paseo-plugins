@@ -13,7 +13,6 @@ export const PASTE_END = `${ESC}[201~`;
  * `chat:modelPicker` opens the menu that carries both the model and the effort level.
  */
 export const MODEL_MENU = `${ESC}p`;
-export const FAST_MODE_TOGGLE = `${ESC}o`;
 export const THINKING_TOGGLE = `${ESC}t`;
 
 /**

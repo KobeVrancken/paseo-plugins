@@ -10,7 +10,6 @@ import { claudeHomeDir, type Env } from "./paths.server.ts";
 export type CliSettings = {
   effortLevel: string | null;
   thinking: boolean;
-  fastMode: boolean;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -21,13 +20,12 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 /** Claude Code layers settings user < project < project-local, with the later file winning. */
 export function mergeCliSettings(files: unknown[]): CliSettings {
-  const merged: CliSettings = { effortLevel: null, thinking: false, fastMode: false };
+  const merged: CliSettings = { effortLevel: null, thinking: false };
   for (const file of files) {
     const record = asRecord(file);
     if (!record) continue;
     if (typeof record.effortLevel === "string") merged.effortLevel = record.effortLevel;
     if (typeof record.alwaysThinkingEnabled === "boolean") merged.thinking = record.alwaysThinkingEnabled;
-    if (typeof record.fastMode === "boolean") merged.fastMode = record.fastMode;
   }
   return merged;
 }

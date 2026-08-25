@@ -1,7 +1,7 @@
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin";
 import { useRpc, useWorkspace } from "@getpaseo/plugin";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { Clipboard, FlatList, Pressable, Text, View } from "react-native";
 import * as contracts from "../contracts.shared.ts";
 import {
@@ -37,8 +37,6 @@ const DIALOG_BACKOFF_AFTER_MS = 45_000;
 const DIALOG_GIVE_UP_AFTER_MS = 120_000;
 const SEND_BEHAVIORS: SendBehavior[] = ["cli_default", "hold_until_idle", "interrupt_first"];
 const COMPOSER_POLL_MS = 5000;
-/** The CLI takes a few seconds to write its settings file after a toggle is confirmed. */
-const SETTINGS_WRITE_MS = 4000;
 /** How long opening a CLI menu keeps the screen watched, so the menu reaches the dialog card. */
 const MENU_WATCH_MS = 60_000;
 
@@ -99,7 +97,6 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const attachImage = useRpc(contracts.attachImage);
   const getComposerState = useRpc(contracts.getComposerState);
   const openCliMenu = useRpc(contracts.openCliMenu);
-  const toggleFastMode = useRpc(contracts.toggleFastMode);
   const permissionMode = useRpc(contracts.permissionMode);
 
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -111,7 +108,6 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const [note, setNote] = useState<string | null>(null);
   const [modeOpen, setModeOpen] = useState(false);
   const [forceWatchUntil, setForceWatchUntil] = useState(0);
-  const [fastPending, setFastPending] = useState<boolean | null>(null);
   const [windowStart, setWindowStart] = useState<number | null>(null);
 
   const sessionsQuery = useQuery({
@@ -350,24 +346,6 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
     onError: (error) => setNote(errorText(error)),
   });
 
-  // The pill leads the settings file, which the CLI only writes a few seconds after confirming.
-  const fastMutation = useMutation({
-    mutationFn: () => toggleFastMode({ sessionId: activeSessionId! }),
-    onSuccess: (result) => {
-      setNote(result.warning);
-      setTimeout(() => void composerQuery.refetch(), SETTINGS_WRITE_MS);
-    },
-    onError: (error) => {
-      setFastPending(null);
-      setNote(errorText(error));
-    },
-  });
-
-  const fastMode = fastPending ?? composerQuery.data?.fastMode ?? false;
-  useEffect(() => {
-    if (fastPending !== null && composerQuery.data?.fastMode === fastPending) setFastPending(null);
-  }, [composerQuery.data?.fastMode, fastPending]);
-
   const modeMutation = useMutation({
     mutationFn: (mode: (typeof PERMISSION_MODES)[number]) =>
       permissionMode({ sessionId: activeSessionId!, mode }),
@@ -572,17 +550,12 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
               ? {
                   model: composerQuery.data.model,
                   effort: effortLabel(composerQuery.data),
-                  fastMode,
                   mode: modeQuery.data?.mode ? PERMISSION_MODE_LABELS[modeQuery.data.mode]! : null,
                   onOpenModelMenu: () => menuMutation.mutate("model"),
                   onOpenThinking: () => menuMutation.mutate("thinking"),
                   onOpenMode: () => {
                     setModeOpen(true);
                     void modeQuery.refetch();
-                  },
-                  onToggleFast: () => {
-                    setFastPending(!fastMode);
-                    fastMutation.mutate();
                   },
                 }
               : null

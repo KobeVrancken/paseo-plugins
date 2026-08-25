@@ -214,12 +214,10 @@ function ComposerFrame({
 export type ComposerControls = {
   model: string | null;
   effort: string | null;
-  fastMode: boolean;
   mode: string | null;
   onOpenModelMenu: () => void;
   onOpenThinking: () => void;
   onOpenMode: () => void;
-  onToggleFast: () => void;
 };
 
 export function PromptBox({
@@ -377,13 +375,6 @@ export function PromptBox({
                   palette={palette}
                   label={controls.mode ?? "Mode"}
                   onPress={controls.onOpenMode}
-                  disabled={disabled}
-                />
-                <Pill
-                  palette={palette}
-                  glyph="⚡"
-                  active={controls.fastMode}
-                  onPress={controls.onToggleFast}
                   disabled={disabled}
                 />
               </>

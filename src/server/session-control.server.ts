@@ -8,7 +8,6 @@ import {
 } from "./capture.server.ts";
 import {
   answerKeys,
-  FAST_MODE_TOGGLE,
   metaOptionKeys,
   MODEL_MENU,
   PASTE_END,
@@ -214,16 +213,6 @@ export async function answerDialog(options: {
 export async function openCliMenu(terminalId: string, menu: "model" | "thinking"): Promise<void> {
   await sendKeys(terminalId, [menu === "model" ? MODEL_MENU : THINKING_TOGGLE], true);
   await delay(MENU_SETTLE_MS);
-}
-
-/** Alt+O opens a confirmation rather than a menu: Tab flips the switch and Enter commits it. */
-export async function toggleFastMode(terminalId: string): Promise<void> {
-  await sendKeys(terminalId, [FAST_MODE_TOGGLE], true);
-  await delay(MENU_SETTLE_MS);
-  await sendKeys(terminalId, ["Tab"]);
-  await delay(MODE_SETTLE_MS);
-  await sendKeys(terminalId, ["Enter"]);
-  await delay(MODE_SETTLE_MS);
 }
 
 export async function readPermissionMode(terminalId: string): Promise<PermissionMode | null> {
