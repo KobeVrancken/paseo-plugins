@@ -25,6 +25,7 @@ import {
   startSessionHandler,
   suggestFilesHandler,
   uploadFileHandler,
+  watchTerminalHandler,
   uploadImageHandler,
 } from "./src/server/handlers.server.ts";
 import { ClaudeCodePanel } from "./src/client/main.client.tsx";
@@ -54,6 +55,7 @@ export default function contribute(plugin: PluginContext) {
   plugin.handle(contracts.searchForgeItems, (input) => searchForgeItemsHandler(input));
   plugin.handle(contracts.suggestFiles, (input) => suggestFilesHandler(input));
   plugin.handle(contracts.listCommands, (input) => listCommandsHandler(input));
+  plugin.handle(contracts.watchTerminal, (input) => watchTerminalHandler(input));
   plugin.handle(contracts.getComposerState, (input) => getComposerStateHandler(input));
   plugin.handle(contracts.openCliMenu, (input) => openCliMenuHandler(input));
   plugin.handle(contracts.permissionMode, (input) => permissionModeHandler(input));

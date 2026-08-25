@@ -16,7 +16,7 @@ import {
 import { base64FromDataUrl } from "./clipboard-image.client.ts";
 import { IMAGE_ACCEPT, pickFiles } from "./file-picker.client.ts";
 import { AttachmentLightbox } from "./lightbox.client.tsx";
-import { isPanelWatching, useMutedTerminalNotifications, type MuteStatus } from "./notifications.client.ts";
+import { isPanelWatching, useWatchingPing } from "./notifications.client.ts";
 import {
   DialogCard,
   EFFORT_LABELS,
@@ -112,13 +112,8 @@ function effortLabel(state: { thinking: boolean; effortLevel: string | null }): 
   return EFFORT_LABELS[state.effortLevel] ?? state.effortLevel;
 }
 
-/** Silent when there is nothing to say: the mute only has to explain itself when it did not take. */
-const MUTE_NOTES: Record<MuteStatus, string | null> = {
-  off: null,
-  muted: null,
-  blocked: "paseo's notification bridge is sealed, so it still notifies about the bound terminal.",
-  unavailable: "Notifications about the bound terminal can only be muted in the desktop app.",
-};
+const NO_PRESENCE_NOTE =
+  "This paseo build does not let the panel say it is watching, so it still notifies about the bound terminal.";
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -149,6 +144,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const getComposerState = useRpc(contracts.getComposerState);
   const openCliMenu = useRpc(contracts.openCliMenu);
   const permissionMode = useRpc(contracts.permissionMode);
+  const watchTerminal = useRpc(contracts.watchTerminal);
 
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -528,7 +524,11 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   // Paseo cannot know a panel is showing the terminal it is about to shout about, so the panel says
   // so itself for as long as it is the thing on screen.
   const watching = useCallback(() => isPanelWatching(rootRef.current), []);
-  const muteStatus = useMutedTerminalNotifications(activeSession?.boundTerminalId ?? null, watching);
+  const claimed = useWatchingPing({
+    terminalId: activeSession?.boundTerminalId ?? null,
+    watching,
+    claim: (terminalId) => watchTerminal({ terminalId }),
+  });
 
   const attachableQuery = useQuery({
     queryKey: ["claude-code-attachable", workspaceDir, attachOpen],
@@ -792,9 +792,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
             void hooksQuery.refetch();
           }}
         />
-        {MUTE_NOTES[muteStatus] ? (
-          <SheetNote palette={palette}>{MUTE_NOTES[muteStatus]}</SheetNote>
-        ) : null}
+        {claimed ? null : <SheetNote palette={palette}>{NO_PRESENCE_NOTE}</SheetNote>}
       </Sheet>
 
       <Sheet palette={palette} visible={attachOpen} title="Attach to terminal" onClose={() => setAttachOpen(false)}>

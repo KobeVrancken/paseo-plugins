@@ -265,6 +265,17 @@ export const listCommands = defineRpc({
   }),
 });
 
+/**
+ * The panel saying it is looking at the terminal it is bound to, which is what stops paseo notifying
+ * about a session the user is already reading.
+ * It is repeated while the panel is watched rather than latched, so looking away is enough to stop it.
+ */
+export const watchTerminal = defineRpc({
+  name: "presence.watch",
+  input: z.object({ terminalId: z.string() }),
+  output: z.object({ claimed: z.boolean() }),
+});
+
 export const PermissionModeSchema = z.enum([
   "default",
   "acceptEdits",

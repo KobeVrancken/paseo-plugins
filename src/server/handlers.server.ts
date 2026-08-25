@@ -20,6 +20,7 @@ import {
 } from "./uploads.server.ts";
 import { listSlashCommands } from "./commands.server.ts";
 import { snapshotFile, waitForFileChange } from "./file-events.server.ts";
+import { sendWatchingFrame } from "./presence.server.ts";
 import { searchWorkspaceEntries } from "./file-search.server.ts";
 import { searchForgeItems } from "./github.server.ts";
 import { StateStore } from "./state.server.ts";
@@ -328,6 +329,12 @@ export async function suggestFilesHandler(
       limit: input.limit,
     }),
   };
+}
+
+export async function watchTerminalHandler(
+  input: Input<typeof contracts.watchTerminal>,
+): Promise<Output<typeof contracts.watchTerminal>> {
+  return { claimed: await sendWatchingFrame(input.terminalId) };
 }
 
 export async function listCommandsHandler(
