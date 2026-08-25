@@ -5,7 +5,6 @@ import React, { useCallback, useMemo, useRef, useState } from "react";
 import { Clipboard, FlatList, Pressable, Text, View } from "react-native";
 import * as contracts from "../contracts.shared.ts";
 import {
-  ActionButton,
   DialogCard,
   HooksOnboarding,
   ImageAttachSheet,
@@ -14,13 +13,15 @@ import {
   SEND_BEHAVIOR_HINTS,
   SEND_BEHAVIOR_LABELS,
   Sheet,
+  SheetNote,
   SheetRow,
   StatusPill,
 } from "./panel-controls.client.tsx";
 import type { RenderEntry, SendBehavior, SessionStatus, SessionSummary } from "../render-types.shared.ts";
+import { fontSize, HEADER_HEIGHT, MAX_CONTENT_WIDTH, radius, spacing, type Palette } from "./theme.client.ts";
 import { groupEntries, type TimelineItem } from "./timeline-model.client.ts";
 import { TimelineItemView } from "./timeline.client.tsx";
-import { Tint, relativeTimeFrom } from "./ui.client.tsx";
+import { Button, IconButton, pressable, usePalette, relativeTimeFrom } from "./ui.client.tsx";
 
 const SESSION_POLL_MS = 2000;
 const TIMELINE_POLL_MS = 750;
@@ -64,6 +65,7 @@ function errorText(error: unknown): string {
 }
 
 export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspacePanelProps) {
+  const palette = usePalette(theme);
   const workspaceDir = useWorkspace(workspaceId, (workspace) => workspace.directory);
   const listSessions = useRpc(contracts.listSessions);
   const getTimeline = useRpc(contracts.getTimeline);
@@ -307,8 +309,8 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
 
   if (workspaceDir === null) {
     return (
-      <View style={{ flex: 1, backgroundColor: theme.colors.surface0, padding: 16 }}>
-        <Text style={{ color: theme.colors.foregroundMuted }}>Loading workspace…</Text>
+      <View style={{ flex: 1, backgroundColor: palette.surface0, padding: spacing[4] }}>
+        <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.base }}>Loading workspace…</Text>
       </View>
     );
   }
@@ -318,56 +320,85 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
     : null;
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
+    <View style={{ flex: 1, backgroundColor: palette.surface0 }}>
       <View
         style={{
+          height: HEADER_HEIGHT,
           flexDirection: "row",
           alignItems: "center",
-          gap: 8,
-          paddingHorizontal: layout.compact ? 10 : 16,
-          paddingVertical: 10,
+          justifyContent: "space-between",
+          gap: spacing[2],
+          paddingHorizontal: layout.compact ? spacing[2] : spacing[3],
+          borderBottomWidth: 1,
+          borderBottomColor: palette.border,
         }}
       >
         <Pressable
           onPress={() => setPickerOpen(true)}
-          style={{ flex: 1, borderRadius: 8, overflow: "hidden", padding: 8 }}
+          style={pressable(({ hovered }) => ({
+            flex: 1,
+            minWidth: 0,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: spacing[1],
+            paddingHorizontal: spacing[2],
+            paddingVertical: spacing[1],
+            borderRadius: radius.md,
+            backgroundColor: hovered ? palette.surface2 : "transparent",
+          }))}
         >
-          <Tint color={theme.colors.foreground} opacity={0.08} />
-          <Text numberOfLines={1} style={{ color: theme.colors.foreground, fontWeight: "600" }}>
+          <Text
+            numberOfLines={1}
+            style={{
+              flexShrink: 1,
+              minWidth: 0,
+              color: palette.foreground,
+              fontSize: fontSize.base,
+              fontWeight: layout.compact ? "400" : "300",
+            }}
+          >
             {activeSession ? sessionLabel(activeSession) : "No session"}
           </Text>
-          <Text numberOfLines={1} style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
-            {activeSession
-              ? layout.compact
-                ? relativeTimeFrom(activeSession.mtime)
-                : `${relativeTimeFrom(activeSession.mtime)} · ${sessions.length} session${sessions.length === 1 ? "" : "s"}`
-              : "tap to pick a session"}
-          </Text>
+          {activeSession && !layout.compact ? (
+            <Text numberOfLines={1} style={{ color: palette.foregroundExtraMuted, fontSize: fontSize.sm }}>
+              {relativeTimeFrom(activeSession.mtime)}
+            </Text>
+          ) : null}
+          <Text style={{ color: palette.foregroundExtraMuted, fontSize: fontSize.sm }}>⌄</Text>
         </Pressable>
-        <StatusPill status={dialog ? "needs_input" : status} theme={theme} />
-        <ActionButton
-          theme={theme}
-          label={layout.compact ? "＋" : "New"}
-          disabled={startMutation.isPending}
-          onPress={() => startMutation.mutate()}
-        />
-        <ActionButton theme={theme} label="⋯" onPress={() => setMenuOpen(true)} />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[1], flexShrink: 0 }}>
+          <StatusPill status={dialog ? "needs_input" : status} palette={palette} />
+          <IconButton
+            palette={palette}
+            glyph="＋"
+            accessibilityLabel="New session"
+            disabled={startMutation.isPending}
+            onPress={() => startMutation.mutate()}
+          />
+          <IconButton
+            palette={palette}
+            glyph="⋯"
+            accessibilityLabel="Panel options"
+            onPress={() => setMenuOpen(true)}
+          />
+        </View>
       </View>
 
       {activeSessionId === null ? (
         <EmptyState
-          theme={theme}
+          palette={palette}
           title="No Claude Code sessions yet"
           body={
             sessionsQuery.data?.projectDir === null
               ? "No transcript directory exists for this workspace yet. Start a session to create one."
-              : 'Start one with "New", or run `claude` in a paseo terminal in this workspace.'
+              : 'Start one with the + button, or run `claude` in a paseo terminal in this workspace.'
           }
         />
       ) : (
         <FlatList
           ref={listRef}
           data={items}
+          style={{ flex: 1 }}
           onContentSizeChange={() => {
             if (followRef.current) listRef.current?.scrollToEnd({ animated: false });
           }}
@@ -378,53 +409,65 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           }}
           scrollEventThrottle={200}
           keyExtractor={(item) => item.key}
-          contentContainerStyle={{ padding: layout.compact ? 10 : 16, gap: 10 }}
+          contentContainerStyle={{
+            flexGrow: 1,
+            paddingHorizontal: layout.compact ? spacing[3] : spacing[4],
+            paddingVertical: spacing[4],
+          }}
           initialNumToRender={20}
           maxToRenderPerBatch={20}
           windowSize={11}
           removeClippedSubviews
           renderItem={({ item }) => (
-            <TimelineItemView
-              item={item}
-              theme={theme}
-              answerPending={answerMutation.isPending}
-              onAnswerQuestion={(_entry, labels) => answerMutation.mutate({ labels })}
-              loadEntry={loadEntry}
-            />
+            <ContentColumn>
+              <TimelineItemView
+                item={item}
+                palette={palette}
+                answerPending={answerMutation.isPending}
+                onAnswerQuestion={(_entry, labels) => answerMutation.mutate({ labels })}
+                loadEntry={loadEntry}
+              />
+            </ContentColumn>
           )}
           ListHeaderComponent={
             (timelineQuery.data?.windowStart ?? 0) > 0 ? (
-              <View style={{ alignItems: "center", paddingBottom: 8 }}>
-                <ActionButton
-                  theme={theme}
-                  label={`Load ${Math.min(200, timelineQuery.data?.windowStart ?? 0)} older entries`}
-                  onPress={() =>
-                    setWindowStart(Math.max(0, (timelineQuery.data?.windowStart ?? 0) - 200))
-                  }
-                />
-              </View>
+              <ContentColumn>
+                <View style={{ alignItems: "center", paddingBottom: spacing[2] }}>
+                  <Button
+                    palette={palette}
+                    size="xs"
+                    label={`Load ${Math.min(200, timelineQuery.data?.windowStart ?? 0)} older entries`}
+                    onPress={() => setWindowStart(Math.max(0, (timelineQuery.data?.windowStart ?? 0) - 200))}
+                  />
+                </View>
+              </ContentColumn>
             ) : null
           }
           ListEmptyComponent={
-            <Text style={{ color: theme.colors.foregroundMuted }}>
-              {timelineQuery.isPending
-                ? "Loading transcript…"
-                : "No transcript yet — this session has not received a prompt."}
-            </Text>
+            <EmptyState
+              palette={palette}
+              title={timelineQuery.isPending ? "Loading transcript…" : "Nothing here yet"}
+              body={
+                timelineQuery.isPending
+                  ? "Reading this session's transcript."
+                  : "This session has not received a prompt."
+              }
+            />
           }
         />
       )}
 
       {!hooksReady ? (
         <HooksOnboarding
-          theme={theme}
+          palette={palette}
           enabling={enableHooksMutation.isPending}
           error={enableHooksMutation.error ? errorText(enableHooksMutation.error) : null}
           onEnable={() => enableHooksMutation.mutate()}
         />
       ) : dialog || status === "needs_input" ? (
         <DialogCard
-          theme={theme}
+          palette={palette}
+          compact={layout.compact}
           dialog={dialog}
           terminalHint={terminalHint}
           answering={answerMutation.isPending}
@@ -433,13 +476,14 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         />
       ) : status === "detached" ? (
         <ResumeBar
-          theme={theme}
+          palette={palette}
+          compact={layout.compact}
           resuming={resumeMutation.isPending}
           onResume={() => resumeMutation.mutate()}
         />
       ) : (
         <PromptBox
-          theme={theme}
+          palette={palette}
           compact={layout.compact}
           disabled={activeSessionId === null}
           sending={sendMutation.isPending}
@@ -452,25 +496,23 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         />
       )}
 
-      <Sheet theme={theme} visible={pickerOpen} title="Sessions" onClose={() => setPickerOpen(false)}>
+      <Sheet palette={palette} visible={pickerOpen} title="Sessions" onClose={() => setPickerOpen(false)}>
         {sessions.map((session) => (
           <SheetRow
             key={session.sessionId}
-            theme={theme}
+            palette={palette}
             selected={session.sessionId === activeSessionId}
             label={sessionLabel(session)}
             detail={`${session.boundTerminalId ? "bound · " : session.isLive ? "live · " : ""}${relativeTimeFrom(session.mtime)} · ${session.sessionId.slice(0, 8)}`}
             onPress={() => selectSession(session.sessionId)}
           />
         ))}
-        {sessions.length === 0 ? (
-          <Text style={{ color: theme.colors.foregroundMuted, padding: 10 }}>No sessions found.</Text>
-        ) : null}
+        {sessions.length === 0 ? <SheetNote palette={palette}>No sessions found.</SheetNote> : null}
       </Sheet>
 
-      <Sheet theme={theme} visible={menuOpen} title="Claude Code" onClose={() => setMenuOpen(false)}>
+      <Sheet palette={palette} visible={menuOpen} title="Claude Code" onClose={() => setMenuOpen(false)}>
         <SheetRow
-          theme={theme}
+          palette={palette}
           label="Attach to a terminal…"
           detail="Bind the prompt box to a terminal already running claude"
           onPress={() => {
@@ -481,7 +523,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         {SEND_BEHAVIORS.map((behavior) => (
           <SheetRow
             key={behavior}
-            theme={theme}
+            palette={palette}
             selected={behavior === sendBehavior}
             label={`Send: ${SEND_BEHAVIOR_LABELS[behavior]}`}
             detail={SEND_BEHAVIOR_HINTS[behavior]}
@@ -489,7 +531,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           />
         ))}
         <SheetRow
-          theme={theme}
+          palette={palette}
           label={hooksReady ? "Terminal agent hooks are on" : "Terminal agent hooks are off"}
           detail={
             hooksReady
@@ -504,11 +546,11 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         />
       </Sheet>
 
-      <Sheet theme={theme} visible={attachOpen} title="Attach to terminal" onClose={() => setAttachOpen(false)}>
+      <Sheet palette={palette} visible={attachOpen} title="Attach to terminal" onClose={() => setAttachOpen(false)}>
         {(attachableQuery.data?.terminals ?? []).map((terminal) => (
           <SheetRow
             key={terminal.id}
-            theme={theme}
+            palette={palette}
             selected={terminal.id === activeSession?.boundTerminalId}
             label={terminal.name}
             detail={`${terminal.looksLikeClaude ? "claude detected · " : ""}${terminal.id.slice(0, 8)}`}
@@ -516,16 +558,14 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           />
         ))}
         {attachableQuery.isPending ? (
-          <Text style={{ color: theme.colors.foregroundMuted, padding: 10 }}>Looking for terminals…</Text>
+          <SheetNote palette={palette}>Looking for terminals…</SheetNote>
         ) : null}
         {attachableQuery.data?.terminals.length === 0 ? (
-          <Text style={{ color: theme.colors.foregroundMuted, padding: 10 }}>
-            No terminals in this workspace.
-          </Text>
+          <SheetNote palette={palette}>No terminals in this workspace.</SheetNote>
         ) : null}
       </Sheet>
       <ImageAttachSheet
-        theme={theme}
+        palette={palette}
         visible={imageSheetOpen}
         busy={imageMutation.isPending}
         error={imageMutation.error ? errorText(imageMutation.error) : null}
@@ -541,19 +581,47 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   );
 }
 
+/** Transcript content stays in a centered reading column, as it does in paseo's own agent view. */
+function ContentColumn({ children }: { children: React.ReactNode }) {
+  return (
+    <View
+      style={{
+        width: "100%",
+        maxWidth: MAX_CONTENT_WIDTH,
+        alignSelf: "center",
+        paddingHorizontal: spacing[2],
+      }}
+    >
+      {children}
+    </View>
+  );
+}
+
 function EmptyState({
-  theme,
+  palette,
   title,
   body,
 }: {
-  theme: PluginWorkspacePanelProps["theme"];
+  palette: Palette;
   title: string;
   body: string;
 }) {
   return (
-    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 6 }}>
-      <Text style={{ color: theme.colors.foreground, fontWeight: "600" }}>{title}</Text>
-      <Text style={{ color: theme.colors.foregroundMuted, textAlign: "center" }}>{body}</Text>
+    <View
+      style={{
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        padding: spacing[6],
+        gap: spacing[2],
+      }}
+    >
+      <Text style={{ color: palette.foreground, fontSize: fontSize.base, fontWeight: "600", textAlign: "center" }}>
+        {title}
+      </Text>
+      <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.base, textAlign: "center" }}>
+        {body}
+      </Text>
     </View>
   );
 }

@@ -1,9 +1,19 @@
-import type { PluginTheme } from "@getpaseo/plugin";
 import type { TextInputKeyPressEvent } from "react-native";
 import React, { useState } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { SendBehavior, SessionStatus } from "../render-types.shared.ts";
-import { Card, Tint } from "./ui.client.tsx";
+import {
+  controlHeight,
+  fontSize,
+  leading,
+  MAX_CONTENT_WIDTH,
+  radius,
+  spacing,
+  STATUS_DOT_SIZE,
+  type Palette,
+} from "./theme.client.ts";
+import { QuestionOption } from "./timeline.client.tsx";
+import { Button, Card, IconButton, NO_OUTLINE, pressable } from "./ui.client.tsx";
 
 export const SEND_BEHAVIOR_LABELS: Record<SendBehavior, string> = {
   cli_default: "CLI default",
@@ -24,52 +34,44 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
   detached: "no terminal",
 };
 
-export function StatusPill({ status, theme }: { status: SessionStatus; theme: PluginTheme }) {
+export function StatusPill({ status, palette }: { status: SessionStatus; palette: Palette }) {
   const color =
     status === "running"
-      ? theme.colors.accent
+      ? palette.accent
       : status === "needs_input"
-        ? theme.colors.statusDanger
-        : theme.colors.foregroundMuted;
+        ? palette.statusDanger
+        : palette.foregroundMuted;
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 999, overflow: "hidden" }}>
-      <Tint color={color} opacity={0.15} />
-      <Text style={{ color, fontSize: 10 }}>●</Text>
-      <Text style={{ color, fontSize: 11 }}>{STATUS_LABELS[status]}</Text>
-    </View>
-  );
-}
-
-export function ActionButton({
-  theme,
-  label,
-  onPress,
-  disabled,
-  tone = "muted",
-}: {
-  theme: PluginTheme;
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  tone?: "muted" | "accent";
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={{ borderRadius: 6, overflow: "hidden", paddingHorizontal: 10, paddingVertical: 7, opacity: disabled ? 0.5 : 1 }}
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        paddingHorizontal: spacing[2],
+        paddingVertical: 3,
+        borderRadius: radius.full,
+        borderWidth: 1,
+        borderColor: palette.border,
+        backgroundColor: palette.surface3,
+      }}
     >
-      <Tint color={tone === "accent" ? theme.colors.accent : theme.colors.foreground} opacity={tone === "accent" ? 0.9 : 0.1} />
+      <View
+        style={{
+          width: STATUS_DOT_SIZE,
+          height: STATUS_DOT_SIZE,
+          borderRadius: radius.full,
+          backgroundColor: color,
+        }}
+      />
       <Text
         style={{
-          color: tone === "accent" ? theme.colors.accentForeground : theme.colors.foreground,
-          fontSize: 12,
-          fontWeight: "600",
+          color: status === "needs_input" ? palette.statusDanger : palette.foregroundMuted,
+          fontSize: fontSize.sm,
         }}
       >
-        {label}
+        {STATUS_LABELS[status]}
       </Text>
-    </Pressable>
+    </View>
   );
 }
 
@@ -78,44 +80,70 @@ export function ActionButton({
  * agent hooks. Without them the panel stays a read-only viewer.
  */
 export function HooksOnboarding({
-  theme,
+  palette,
   onEnable,
   enabling,
   error,
 }: {
-  theme: PluginTheme;
+  palette: Palette;
   onEnable: () => void;
   enabling: boolean;
   error: string | null;
 }) {
   return (
-    <Card theme={theme} style={{ margin: 10 }}>
-      <View style={{ gap: 6 }}>
-        <Text style={{ color: theme.colors.foreground, fontWeight: "600" }}>
+    <ComposerFrame palette={palette} compact={false}>
+      <Card palette={palette} style={{ gap: spacing[3] }}>
+        <Text style={{ color: palette.foreground, fontSize: fontSize.base, fontWeight: "500", lineHeight: 22 }}>
           Enable terminal agent hooks to talk to this session
         </Text>
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 17 }}>
+        <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.base, lineHeight: 20 }}>
           Paseo installs Claude Code hooks into your global ~/.claude/settings.json. They only report
           running / idle / needs-input for terminals paseo owns, and no-op everywhere else. Until they
           are on, this panel stays read-only.
         </Text>
-        {error ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{error}</Text> : null}
+        {error ? (
+          <Text style={{ color: palette.statusDanger, fontSize: fontSize.base }}>{error}</Text>
+        ) : null}
         <View style={{ flexDirection: "row" }}>
-          <ActionButton
-            theme={theme}
-            tone="accent"
+          <Button
+            palette={palette}
+            variant="default"
             label={enabling ? "Enabling…" : "Enable hooks"}
             disabled={enabling}
             onPress={onEnable}
           />
         </View>
-      </View>
-    </Card>
+      </Card>
+    </ComposerFrame>
+  );
+}
+
+/** The footer rail every composer state shares: centered, capped to the reading column. */
+function ComposerFrame({
+  palette,
+  compact,
+  children,
+}: {
+  palette: Palette;
+  compact: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <View
+      style={{
+        alignItems: "center",
+        paddingHorizontal: compact ? spacing[3] : spacing[4],
+        paddingBottom: compact ? spacing[2] : spacing[4],
+        paddingTop: spacing[2],
+      }}
+    >
+      <View style={{ width: "100%", maxWidth: MAX_CONTENT_WIDTH, gap: spacing[3] }}>{children}</View>
+    </View>
   );
 }
 
 export function PromptBox({
-  theme,
+  palette,
   compact,
   disabled,
   sending,
@@ -126,7 +154,7 @@ export function PromptBox({
   onAttachImage,
   onRemoveAttachment,
 }: {
-  theme: PluginTheme;
+  palette: Palette;
   compact: boolean;
   disabled: boolean;
   sending: boolean;
@@ -159,63 +187,125 @@ export function PromptBox({
   };
 
   return (
-    <View style={{ padding: compact ? 8 : 12, gap: 6 }}>
-      {note ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{note}</Text> : null}
-      {files.length > 0 ? (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-          {files.map((file) => (
-            <Pressable
-              key={file}
-              onPress={() => onRemoveAttachment?.(file)}
-              style={{ borderRadius: 6, overflow: "hidden", paddingHorizontal: 8, paddingVertical: 4 }}
-            >
-              <Tint color={theme.colors.foreground} opacity={0.1} />
-              <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
-                {file.split("/").pop()} ✕
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+    <ComposerFrame palette={palette} compact={compact}>
+      {note ? (
+        <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.sm }}>{note}</Text>
       ) : null}
-      <View style={{ borderRadius: 8, overflow: "hidden", padding: 8, gap: 6 }}>
-        <Tint color={theme.colors.foreground} opacity={0.08} />
-        <TextInput
-          value={text}
-          onChangeText={setText}
-          editable={!disabled}
-          multiline
-          placeholder={
-            disabled
-              ? "Bind a terminal to send prompts"
-              : Platform.OS === "web"
-                ? "Message Claude Code…  (Enter to send, Shift+Enter for a new line)"
-                : "Message Claude Code…"
-          }
-          placeholderTextColor={theme.colors.foregroundMuted}
-          onKeyPress={handleKeyPress}
-          style={{ color: theme.colors.foreground, fontSize: 14, maxHeight: 140, minHeight: 36 }}
-        />
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          {onAttachImage ? (
-            <ActionButton theme={theme} label="Image" onPress={onAttachImage} disabled={disabled} />
-          ) : null}
-          {terminalHint ? (
-            <Text numberOfLines={1} style={{ color: theme.colors.foregroundMuted, fontSize: 11, flex: 1 }}>
-              {terminalHint}
+      <View
+        style={{
+          gap: spacing[3],
+          backgroundColor: palette.surface1,
+          borderWidth: 1,
+          borderColor: palette.borderAccent,
+          borderRadius: radius["2xl"],
+          paddingVertical: compact ? spacing[2] : spacing[4],
+          paddingHorizontal: compact ? spacing[3] : spacing[4],
+        }}
+      >
+        {files.length > 0 ? (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing[2] }}>
+            {files.map((file) => (
+              <Pressable
+                key={file}
+                onPress={() => onRemoveAttachment?.(file)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: spacing[1],
+                  paddingHorizontal: spacing[2],
+                  paddingVertical: spacing[1],
+                  borderRadius: radius.md,
+                  borderWidth: 1,
+                  borderColor: palette.border,
+                  backgroundColor: palette.surface2,
+                }}
+              >
+                <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.sm }}>
+                  {file.split("/").pop()}
+                </Text>
+                <Text style={{ color: palette.foregroundExtraMuted, fontSize: fontSize.sm }}>✕</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+        <View style={{ position: "relative" }}>
+          {Platform.OS === "web" && text === "" ? (
+            <Text
+              style={{
+                position: "absolute",
+                top: 0,
+                right: 0,
+                color: palette.foregroundMuted,
+                fontSize: fontSize.sm,
+                opacity: 0.5,
+              }}
+            >
+              ↵ to send
             </Text>
-          ) : (
-            <View style={{ flex: 1 }} />
-          )}
-          <ActionButton
-            theme={theme}
+          ) : null}
+          <TextInput
+            value={text}
+            onChangeText={setText}
+            editable={!disabled}
+            multiline
+            placeholder={disabled ? "Bind a terminal to send prompts" : "Message Claude Code…"}
+            placeholderTextColor={palette.foregroundMuted}
+            onKeyPress={handleKeyPress}
+            style={{
+              width: "100%",
+              color: palette.foreground,
+              fontSize: fontSize.content,
+              lineHeight: leading(fontSize.content),
+              maxHeight: 140,
+              minHeight: 24,
+              ...NO_OUTLINE,
+            }}
+          />
+        </View>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "flex-end",
+            justifyContent: "space-between",
+            marginHorizontal: -6,
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", minWidth: 0, flexShrink: 1 }}>
+            {onAttachImage ? (
+              <IconButton
+                palette={palette}
+                glyph="＋"
+                accessibilityLabel="Attach an image"
+                onPress={onAttachImage}
+                disabled={disabled}
+              />
+            ) : null}
+            {terminalHint ? (
+              <Text
+                numberOfLines={1}
+                style={{
+                  flexShrink: 1,
+                  minWidth: 0,
+                  marginLeft: spacing[1],
+                  color: palette.foregroundExtraMuted,
+                  fontSize: fontSize.sm,
+                }}
+              >
+                {terminalHint}
+              </Text>
+            ) : null}
+          </View>
+          <IconButton
+            palette={palette}
+            glyph={sending ? "…" : "↑"}
             tone="accent"
-            label={sending ? "Sending…" : "Send"}
+            accessibilityLabel="Send"
             disabled={!canSend}
             onPress={submit}
           />
         </View>
       </View>
-    </View>
+    </ComposerFrame>
   );
 }
 
@@ -232,14 +322,16 @@ export type PanelDialog = {
  * the terminal hint stays visible because capture parsing can go stale with a CLI update.
  */
 export function DialogCard({
-  theme,
+  palette,
+  compact,
   dialog,
   terminalHint,
   answering,
   warning,
   onAnswer,
 }: {
-  theme: PluginTheme;
+  palette: Palette;
+  compact: boolean;
   dialog: PanelDialog | null;
   terminalHint: string | null;
   answering: boolean;
@@ -250,69 +342,67 @@ export function DialogCard({
 
   if (!dialog) {
     return (
-      <Card theme={theme} tone="danger" style={{ margin: 10 }}>
-        <Text style={{ color: theme.colors.foreground, fontWeight: "600" }}>
-          Claude is waiting for input
-        </Text>
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
-          The prompt could not be read from the screen — answer it in {terminalHint ?? "the terminal"}.
-        </Text>
-      </Card>
+      <ComposerFrame palette={palette} compact={compact}>
+        <Card palette={palette} tone="danger">
+          <Text style={{ color: palette.foreground, fontSize: fontSize.base, fontWeight: "500", lineHeight: 22 }}>
+            Claude is waiting for input
+          </Text>
+          <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.base, lineHeight: 20 }}>
+            The prompt could not be read from the screen — answer it in {terminalHint ?? "the terminal"}.
+          </Text>
+        </Card>
+      </ComposerFrame>
     );
   }
 
   return (
-    <Card theme={theme} tone="danger" style={{ margin: 10 }}>
-      <View style={{ gap: 6 }}>
-        {dialog.context.map((line, index) => (
-          <Text key={index} style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
-            {line}
-          </Text>
-        ))}
-        <Text style={{ color: theme.colors.foreground, fontWeight: "600" }}>{dialog.prompt}</Text>
-        {dialog.options.map((option) => {
-          const selected = checked.includes(option.index);
-          // "Type something" and "Chat about this" open a field in the CLI rather than answering,
-          // so they are always a single press, even in a multi-select.
-          const toggles = dialog.multiSelect && !option.meta;
-          return (
-            <Pressable
-              key={option.index}
-              disabled={answering}
-              onPress={() => {
-                if (!toggles) {
-                  onAnswer([option.index]);
-                  return;
-                }
-                setChecked((current) =>
-                  current.includes(option.index)
-                    ? current.filter((value) => value !== option.index)
-                    : [...current, option.index],
-                );
-              }}
-              style={{ padding: 8, borderRadius: 6, overflow: "hidden" }}
-            >
-              <Tint
-                color={selected ? theme.colors.accent : theme.colors.foreground}
-                opacity={selected ? 0.2 : option.meta ? 0.05 : 0.1}
-              />
-              <Text
-                style={{
-                  color: option.meta ? theme.colors.foregroundMuted : theme.colors.foreground,
-                  fontSize: 13,
-                }}
-              >
-                {toggles ? (selected ? "☑ " : "☐ ") : ""}
-                {option.index}. {option.label}
+    <ComposerFrame palette={palette} compact={compact}>
+      <Card palette={palette} style={{ gap: spacing[3] }}>
+        {dialog.context.length > 0 ? (
+          <View style={{ gap: spacing[1] }}>
+            {dialog.context.map((line, index) => (
+              <Text key={index} style={{ color: palette.foregroundMuted, fontSize: fontSize.base, lineHeight: 20 }}>
+                {line}
               </Text>
-            </Pressable>
-          );
-        })}
+            ))}
+          </View>
+        ) : null}
+        <Text style={{ color: palette.foreground, fontSize: fontSize.base, fontWeight: "500", lineHeight: 22 }}>
+          {dialog.prompt}
+        </Text>
+        <View style={{ gap: spacing[1] }}>
+          {dialog.options.map((option) => {
+            // "Type something" and "Chat about this" open a field in the CLI rather than answering,
+            // so they are always a single press, even in a multi-select.
+            const toggles = dialog.multiSelect && !option.meta;
+            return (
+              <QuestionOption
+                key={option.index}
+                palette={palette}
+                label={`${option.index}. ${option.label}`}
+                control={toggles ? "checkbox" : "none"}
+                selected={toggles && checked.includes(option.index)}
+                disabled={answering}
+                onPress={() => {
+                  if (!toggles) {
+                    onAnswer([option.index]);
+                    return;
+                  }
+                  setChecked((current) =>
+                    current.includes(option.index)
+                      ? current.filter((value) => value !== option.index)
+                      : [...current, option.index],
+                  );
+                }}
+              />
+            );
+          })}
+        </View>
         {dialog.multiSelect ? (
           <View style={{ flexDirection: "row" }}>
-            <ActionButton
-              theme={theme}
-              tone="accent"
+            <Button
+              palette={palette}
+              variant="default"
               label={answering ? "Sending…" : "Submit answers"}
               disabled={answering || checked.length === 0}
               onPress={() => onAnswer(checked)}
@@ -320,18 +410,18 @@ export function DialogCard({
           </View>
         ) : null}
         {warning ? (
-          <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{warning}</Text>
+          <Text style={{ color: palette.statusDanger, fontSize: fontSize.base }}>{warning}</Text>
         ) : null}
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
+        <Text style={{ color: palette.foregroundExtraMuted, fontSize: fontSize.sm }}>
           Or answer in {terminalHint ?? "the terminal"}.
         </Text>
-      </View>
-    </Card>
+      </Card>
+    </ComposerFrame>
   );
 }
 
 export function ImageAttachSheet({
-  theme,
+  palette,
   visible,
   busy,
   error,
@@ -339,7 +429,7 @@ export function ImageAttachSheet({
   onAttach,
   onPasteFromClipboard,
 }: {
-  theme: PluginTheme;
+  palette: Palette;
   visible: boolean;
   busy: boolean;
   error: string | null;
@@ -349,63 +439,76 @@ export function ImageAttachSheet({
 }) {
   const [path, setPath] = useState("");
   return (
-    <Sheet theme={theme} visible={visible} title="Attach an image" onClose={onClose}>
-      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
-        Point at an image file on the machine running paseo. It is copied into the plugin cache and
-        its path is appended to the prompt, which is how the CLI picks images up.
-      </Text>
-      <View style={{ borderRadius: 8, overflow: "hidden", padding: 8 }}>
-        <Tint color={theme.colors.foreground} opacity={0.08} />
+    <Sheet palette={palette} visible={visible} title="Attach an image" onClose={onClose}>
+      <View style={{ padding: spacing[4], gap: spacing[3] }}>
+        <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.base, lineHeight: 20 }}>
+          Point at an image file on the machine running paseo. It is copied into the plugin cache and
+          its path is appended to the prompt, which is how the CLI picks images up.
+        </Text>
         <TextInput
           value={path}
           onChangeText={setPath}
           placeholder="/home/you/screenshot.png"
-          placeholderTextColor={theme.colors.foregroundMuted}
+          placeholderTextColor={palette.foregroundMuted}
           autoCapitalize="none"
           autoCorrect={false}
-          style={{ color: theme.colors.foreground, fontSize: 13 }}
-        />
-      </View>
-      {error ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{error}</Text> : null}
-      <View style={{ flexDirection: "row", gap: 8 }}>
-        <ActionButton theme={theme} label="Paste path" onPress={() => onPasteFromClipboard(setPath)} />
-        <ActionButton
-          theme={theme}
-          tone="accent"
-          label={busy ? "Attaching…" : "Attach"}
-          disabled={busy || path.trim() === ""}
-          onPress={() => {
-            onAttach(path.trim());
-            setPath("");
+          style={{
+            minHeight: controlHeight.compact,
+            paddingHorizontal: spacing[3],
+            borderRadius: radius.md,
+            borderWidth: 1,
+            borderColor: palette.border,
+            backgroundColor: palette.surface2,
+            color: palette.foreground,
+            fontSize: fontSize.base,
+            ...NO_OUTLINE,
           }}
         />
+        {error ? <Text style={{ color: palette.statusDanger, fontSize: fontSize.base }}>{error}</Text> : null}
+        <View style={{ flexDirection: "row", gap: spacing[2] }}>
+          <Button palette={palette} label="Paste path" onPress={() => onPasteFromClipboard(setPath)} />
+          <Button
+            palette={palette}
+            variant="default"
+            label={busy ? "Attaching…" : "Attach"}
+            disabled={busy || path.trim() === ""}
+            onPress={() => {
+              onAttach(path.trim());
+              setPath("");
+            }}
+          />
+        </View>
       </View>
     </Sheet>
   );
 }
 
 export function ResumeBar({
-  theme,
+  palette,
+  compact,
   onResume,
   resuming,
 }: {
-  theme: PluginTheme;
+  palette: Palette;
+  compact: boolean;
   onResume: () => void;
   resuming: boolean;
 }) {
   return (
-    <View style={{ padding: 12, flexDirection: "row", alignItems: "center", gap: 10 }}>
-      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, flex: 1 }}>
-        This session is not running in a paseo terminal.
-      </Text>
-      <ActionButton
-        theme={theme}
-        tone="accent"
-        label={resuming ? "Resuming…" : "Resume session"}
-        disabled={resuming}
-        onPress={onResume}
-      />
-    </View>
+    <ComposerFrame palette={palette} compact={compact}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[3] }}>
+        <Text style={{ flex: 1, color: palette.foregroundMuted, fontSize: fontSize.base }}>
+          This session is not running in a paseo terminal.
+        </Text>
+        <Button
+          palette={palette}
+          variant="default"
+          label={resuming ? "Resuming…" : "Resume session"}
+          disabled={resuming}
+          onPress={onResume}
+        />
+      </View>
+    </ComposerFrame>
   );
 }
 
@@ -414,13 +517,13 @@ export function ResumeBar({
  * app, and the backdrop is a sibling of the content so a press inside the sheet cannot close it.
  */
 export function Sheet({
-  theme,
+  palette,
   visible,
   title,
   onClose,
   children,
 }: {
-  theme: PluginTheme;
+  palette: Palette;
   visible: boolean;
   title: string;
   onClose: () => void;
@@ -428,49 +531,104 @@ export function Sheet({
 }) {
   if (!visible) return null;
   return (
-    <View style={[StyleSheet.absoluteFill, { justifyContent: "center", padding: 16 }]}>
-      <Pressable style={StyleSheet.absoluteFill} onPress={onClose}>
-        <Tint color="#000000" opacity={0.5} />
-      </Pressable>
+    <View
+      style={[
+        StyleSheet.absoluteFill,
+        { justifyContent: "center", alignItems: "center", padding: spacing[6] },
+      ]}
+    >
+      <Pressable
+        style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0, 0, 0, 0.55)" }]}
+        onPress={onClose}
+      />
       <View
         style={{
-          maxHeight: "80%",
-          borderRadius: 12,
-          backgroundColor: theme.colors.surface0,
-          padding: 12,
-          gap: 8,
+          width: "100%",
+          maxWidth: 520,
+          maxHeight: "85%",
+          flexShrink: 1,
+          minHeight: 0,
+          backgroundColor: palette.surface1,
+          borderRadius: radius.xl,
+          borderWidth: 1,
+          borderColor: palette.surface2,
+          overflow: "hidden",
         }}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Text style={{ color: theme.colors.foreground, fontWeight: "600", flex: 1 }}>{title}</Text>
-          <Pressable onPress={onClose} hitSlop={8}>
-            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 14 }}>✕</Text>
-          </Pressable>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: spacing[2],
+            paddingHorizontal: spacing[4],
+            paddingVertical: spacing[3],
+            borderBottomWidth: 1,
+            borderBottomColor: palette.surface2,
+          }}
+        >
+          <Text style={{ flex: 1, color: palette.foreground, fontSize: fontSize.base, fontWeight: "500" }}>
+            {title}
+          </Text>
+          <IconButton palette={palette} glyph="✕" accessibilityLabel="Close" onPress={onClose} />
         </View>
-        <ScrollView contentContainerStyle={{ gap: 6 }}>{children}</ScrollView>
+        <ScrollView contentContainerStyle={{ paddingVertical: spacing[1] }}>{children}</ScrollView>
       </View>
     </View>
   );
 }
 
 export function SheetRow({
-  theme,
+  palette,
   label,
   detail,
   onPress,
   selected,
 }: {
-  theme: PluginTheme;
+  palette: Palette;
   label: string;
   detail?: string;
   onPress: () => void;
   selected?: boolean;
 }) {
   return (
-    <Pressable onPress={onPress} style={{ padding: 10, borderRadius: 8, overflow: "hidden" }}>
-      <Tint color={selected ? theme.colors.accent : theme.colors.foreground} opacity={selected ? 0.18 : 0.06} />
-      <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>{label}</Text>
-      {detail ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{detail}</Text> : null}
+    <Pressable
+      onPress={onPress}
+      style={pressable(({ pressed, hovered }) => ({
+        flexDirection: "row",
+        alignItems: "center",
+        gap: spacing[2],
+        minHeight: controlHeight.compact,
+        marginHorizontal: spacing[1],
+        paddingHorizontal: spacing[2],
+        paddingVertical: spacing[1],
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: "transparent",
+        backgroundColor: selected || hovered || pressed ? palette.surface2 : "transparent",
+      }))}
+    >
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={{ color: palette.foreground, fontSize: fontSize.base, lineHeight: 18 }}>{label}</Text>
+        {detail ? (
+          <Text style={{ marginTop: 2, color: palette.foregroundMuted, fontSize: fontSize.sm }}>{detail}</Text>
+        ) : null}
+      </View>
+      {selected ? <Text style={{ color: palette.accent, fontSize: fontSize.base }}>✓</Text> : null}
     </Pressable>
+  );
+}
+
+export function SheetNote({ palette, children }: { palette: Palette; children: React.ReactNode }) {
+  return (
+    <Text
+      style={{
+        color: palette.foregroundMuted,
+        fontSize: fontSize.base,
+        paddingHorizontal: spacing[3],
+        paddingVertical: spacing[2],
+      }}
+    >
+      {children}
+    </Text>
   );
 }

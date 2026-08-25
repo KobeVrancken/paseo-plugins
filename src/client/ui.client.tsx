@@ -1,53 +1,177 @@
 import type { PluginTheme } from "@getpaseo/plugin";
-import React from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
+import type { StyleProp, TextStyle, ViewStyle } from "react-native";
+import React, { useMemo } from "react";
+import { Platform, Pressable, Text, View } from "react-native";
+import {
+  controlHeight,
+  derivePalette,
+  fontSize,
+  leading,
+  radius,
+  spacing,
+  type Palette,
+} from "./theme.client.ts";
 
-/**
- * The theme exposes six flat colors, so every raised or muted surface is drawn as a
- * translucent layer of an existing token instead of a hardcoded shade.
- */
-export function Tint({ color, opacity }: { color: string; opacity: number }) {
-  return (
-    <View
-      pointerEvents="none"
-      style={[StyleSheet.absoluteFill, { backgroundColor: color, opacity, borderRadius: 8 }]}
-    />
+export function usePalette(theme: PluginTheme): Palette {
+  const colors = theme.colors;
+  return useMemo(
+    () => derivePalette(theme),
+    [colors.surface0, colors.foreground, colors.foregroundMuted, colors.accent, colors.accentForeground, colors.statusDanger],
   );
 }
 
+/**
+ * React Native types a pressable's style callback without `hovered`, which the web renderer does pass
+ * and which every paseo control styles itself with.
+ */
+export type PressState = { pressed: boolean; hovered?: boolean };
+
+export function pressable(style: (state: PressState) => ViewStyle): (state: { pressed: boolean }) => StyleProp<ViewStyle> {
+  return style as (state: { pressed: boolean }) => StyleProp<ViewStyle>;
+}
+
+/** Web focus rings do not belong on a control that already draws its own border. */
+export const NO_OUTLINE = (Platform.OS === "web"
+  ? ({ outlineStyle: "none", outlineWidth: 0 } as unknown as TextStyle)
+  : null) as TextStyle | null;
+
+export type ButtonVariant = "default" | "secondary" | "outline" | "ghost" | "destructive";
+export type ButtonSize = "xs" | "sm";
+
+export function Button({
+  palette,
+  label,
+  onPress,
+  disabled,
+  variant = "outline",
+  size = "sm",
+  style,
+}: {
+  palette: Palette;
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  style?: object;
+}) {
+  const surface = {
+    default: { backgroundColor: palette.accent, borderColor: palette.accent },
+    secondary: { backgroundColor: palette.surface3, borderColor: palette.surface3 },
+    outline: { backgroundColor: "transparent", borderColor: palette.borderAccent },
+    ghost: { backgroundColor: "transparent", borderColor: "transparent" },
+    destructive: { backgroundColor: palette.statusDanger, borderColor: palette.statusDanger },
+  }[variant];
+  const color =
+    variant === "default" || variant === "destructive" ? palette.accentForeground : palette.foreground;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={({ pressed }) => [
+        {
+          minHeight: size === "xs" ? controlHeight.tight : controlHeight.compact,
+          paddingHorizontal: spacing[3],
+          borderRadius: radius.md,
+          borderWidth: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          flexDirection: "row",
+          gap: spacing[2],
+          opacity: disabled ? 0.5 : pressed ? 0.85 : 1,
+        },
+        surface,
+        style,
+      ]}
+    >
+      <Text style={{ color, fontSize: size === "xs" ? fontSize.sm : fontSize.base }}>{label}</Text>
+    </Pressable>
+  );
+}
+
+/** The round 28px glyph button paseo uses for every toolbar and composer action. */
+export function IconButton({
+  palette,
+  glyph,
+  onPress,
+  disabled,
+  tone = "muted",
+  accessibilityLabel,
+}: {
+  palette: Palette;
+  glyph: string;
+  onPress: () => void;
+  disabled?: boolean;
+  tone?: "muted" | "accent";
+  accessibilityLabel?: string;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      style={pressable(({ pressed, hovered }) => ({
+        width: controlHeight.tight,
+        height: controlHeight.tight,
+        borderRadius: radius.full,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor:
+          tone === "accent" ? palette.accent : hovered || pressed ? palette.surface2 : "transparent",
+        opacity: disabled ? 0.5 : 1,
+      }))}
+    >
+      <Text
+        style={{
+          color: tone === "accent" ? palette.accentForeground : palette.foregroundMuted,
+          fontSize: fontSize.base,
+        }}
+      >
+        {glyph}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** The bordered surface1 block paseo uses for cards that sit inside the transcript. */
 export function Card({
-  theme,
+  palette,
   tone = "raised",
   children,
   style,
 }: {
-  theme: PluginTheme;
-  tone?: "raised" | "accent" | "danger";
+  palette: Palette;
+  tone?: "raised" | "danger";
   children: React.ReactNode;
   style?: object;
 }) {
-  const color =
-    tone === "accent"
-      ? theme.colors.accent
-      : tone === "danger"
-        ? theme.colors.statusDanger
-        : theme.colors.foreground;
-  const opacity = tone === "raised" ? 0.06 : 0.12;
   return (
-    <View style={[{ borderRadius: 8, padding: 10, overflow: "hidden" }, style]}>
-      <Tint color={color} opacity={opacity} />
+    <View
+      style={[
+        {
+          padding: spacing[3],
+          gap: spacing[2],
+          borderRadius: radius.lg,
+          borderWidth: 1,
+          backgroundColor: palette.surface1,
+          borderColor: tone === "danger" ? palette.statusDanger : palette.border,
+        },
+        style,
+      ]}
+    >
       {children}
     </View>
   );
 }
 
 export function Mono({
-  theme,
+  palette,
   children,
   color,
-  size = 12,
+  size = fontSize.code,
 }: {
-  theme: PluginTheme;
+  palette: Palette;
   children: React.ReactNode;
   color?: string;
   size?: number;
@@ -57,9 +181,39 @@ export function Mono({
       style={{
         fontFamily: MONO_FONT,
         fontSize: size,
-        lineHeight: size * 1.45,
-        color: color ?? theme.colors.foreground,
+        lineHeight: Math.round(size * 1.35),
+        color: color ?? palette.foreground,
       }}
+    >
+      {children}
+    </Text>
+  );
+}
+
+export function Body({
+  palette,
+  children,
+  muted,
+  style,
+  numberOfLines,
+}: {
+  palette: Palette;
+  children: React.ReactNode;
+  muted?: boolean;
+  style?: object;
+  numberOfLines?: number;
+}) {
+  return (
+    <Text
+      numberOfLines={numberOfLines}
+      style={[
+        {
+          color: muted ? palette.foregroundMuted : palette.foreground,
+          fontSize: fontSize.base,
+          lineHeight: leading(fontSize.base),
+        },
+        style,
+      ]}
     >
       {children}
     </Text>
@@ -70,7 +224,7 @@ export const MONO_FONT =
   Platform.select({
     ios: "Menlo",
     android: "monospace",
-    default: "Menlo, Monaco, Consolas, monospace",
+    default: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
   }) ?? "monospace";
 
 export function relativeTime(iso: string | null): string {

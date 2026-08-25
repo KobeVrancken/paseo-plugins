@@ -1,21 +1,26 @@
-import type { PluginTheme } from "@getpaseo/plugin";
 import React from "react";
 import { Linking, ScrollView, Text, View } from "react-native";
 import type { Block, Inline } from "./markdown.client.ts";
 import { parseMarkdown } from "./markdown.client.ts";
-import { MONO_FONT, Tint } from "./ui.client.tsx";
+import { fontSize, leading, radius, spacing, type Palette } from "./theme.client.ts";
+import { MONO_FONT } from "./ui.client.tsx";
 
-const HEADING_SIZES = [20, 18, 16, 15, 14, 14];
+const HEADING_SIZES = [20, 18, 16, 15, 15, 15];
 
-function InlineText({ parts, theme, style }: { parts: Inline[]; theme: PluginTheme; style?: object }) {
+function InlineText({ parts, palette, style }: { parts: Inline[]; palette: Palette; style?: object }) {
   return (
-    <Text style={[{ color: theme.colors.foreground, fontSize: 14, lineHeight: 20 }, style]}>
+    <Text
+      style={[
+        { color: palette.foreground, fontSize: fontSize.content, lineHeight: leading(fontSize.content) },
+        style,
+      ]}
+    >
       {parts.map((part, index) => {
         if (part.kind === "link") {
           return (
             <Text
               key={index}
-              style={{ color: theme.colors.accent, textDecorationLine: "underline" }}
+              style={{ color: palette.accent, textDecorationLine: "underline" }}
               onPress={() => {
                 void Linking.openURL(part.href).catch(() => {});
               }}
@@ -28,10 +33,10 @@ function InlineText({ parts, theme, style }: { parts: Inline[]; theme: PluginThe
           <Text
             key={index}
             style={{
-              fontWeight: part.bold ? "700" : "400",
+              fontWeight: part.bold ? "600" : "normal",
               fontStyle: part.italic ? "italic" : "normal",
               ...(part.code
-                ? { fontFamily: MONO_FONT, fontSize: 13, color: theme.colors.accent }
+                ? { fontFamily: MONO_FONT, fontSize: fontSize.base, color: palette.accent }
                 : null),
             }}
           >
@@ -45,23 +50,44 @@ function InlineText({ parts, theme, style }: { parts: Inline[]; theme: PluginThe
 
 export function CodeBlock({
   text,
-  theme,
+  palette,
   language,
 }: {
   text: string;
-  theme: PluginTheme;
+  palette: Palette;
   language?: string | null;
 }) {
   return (
-    <View style={{ borderRadius: 6, overflow: "hidden", paddingVertical: 6 }}>
-      <Tint color={theme.colors.foreground} opacity={0.07} />
+    <View
+      style={{
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: palette.border,
+        backgroundColor: palette.surface2,
+        overflow: "hidden",
+      }}
+    >
       {language ? (
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 10, paddingHorizontal: 8 }}>
+        <Text
+          style={{
+            color: palette.foregroundMuted,
+            fontSize: fontSize.sm,
+            paddingHorizontal: spacing[2],
+            paddingTop: spacing[1],
+          }}
+        >
           {language}
         </Text>
       ) : null}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: 8 }}>
-        <Text style={{ fontFamily: MONO_FONT, fontSize: 12, lineHeight: 17, color: theme.colors.foreground }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: spacing[2] }}>
+        <Text
+          style={{
+            fontFamily: MONO_FONT,
+            fontSize: fontSize.code,
+            lineHeight: 16,
+            color: palette.foreground,
+          }}
+        >
           {text}
         </Text>
       </ScrollView>
@@ -69,34 +95,42 @@ export function CodeBlock({
   );
 }
 
-function BlockView({ block, theme }: { block: Block; theme: PluginTheme }) {
+function BlockView({ block, palette }: { block: Block; palette: Palette }) {
   switch (block.kind) {
     case "heading":
       return (
         <InlineText
           parts={block.inline}
-          theme={theme}
+          palette={palette}
           style={{
-            fontSize: HEADING_SIZES[block.level - 1] ?? 14,
-            fontWeight: "700",
-            marginTop: 4,
+            fontSize: HEADING_SIZES[block.level - 1] ?? fontSize.content,
+            lineHeight: leading(HEADING_SIZES[block.level - 1] ?? fontSize.content),
+            fontWeight: "600",
+            marginTop: spacing[1],
           }}
         />
       );
     case "paragraph":
-      return <InlineText parts={block.inline} theme={theme} />;
+      return <InlineText parts={block.inline} palette={palette} />;
     case "code":
-      return <CodeBlock text={block.text} theme={theme} language={block.language} />;
+      return <CodeBlock text={block.text} palette={palette} language={block.language} />;
     case "list":
       return (
         <View style={{ gap: 2 }}>
           {block.items.map((item, index) => (
-            <View key={index} style={{ flexDirection: "row", paddingLeft: item.depth * 14 }}>
-              <Text style={{ color: theme.colors.foregroundMuted, width: 18, fontSize: 14, lineHeight: 20 }}>
+            <View key={index} style={{ flexDirection: "row", paddingLeft: item.depth * spacing[4] }}>
+              <Text
+                style={{
+                  color: palette.foregroundMuted,
+                  width: 18,
+                  fontSize: fontSize.content,
+                  lineHeight: leading(fontSize.content),
+                }}
+              >
                 {item.marker}
               </Text>
               <View style={{ flex: 1 }}>
-                <InlineText parts={item.inline} theme={theme} />
+                <InlineText parts={item.inline} palette={palette} />
               </View>
             </View>
           ))}
@@ -104,41 +138,30 @@ function BlockView({ block, theme }: { block: Block; theme: PluginTheme }) {
       );
     case "quote":
       return (
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <View style={{ width: 2, borderRadius: 1, overflow: "hidden" }}>
-            <Tint color={theme.colors.accent} opacity={0.6} />
-          </View>
-          <View style={{ flex: 1, gap: 6 }}>
+        <View style={{ flexDirection: "row", gap: spacing[2] }}>
+          <View style={{ width: 2, borderRadius: 1, backgroundColor: palette.borderAccent }} />
+          <View style={{ flex: 1, gap: spacing[2] }}>
             {block.blocks.map((child, index) => (
-              <BlockView key={index} block={child} theme={theme} />
+              <BlockView key={index} block={child} palette={palette} />
             ))}
           </View>
         </View>
       );
     case "table":
-      return (
-        <CodeBlock
-          theme={theme}
-          text={block.rows.map((row) => row.join("  |  ")).join("\n")}
-        />
-      );
+      return <CodeBlock palette={palette} text={block.rows.map((row) => row.join("  |  ")).join("\n")} />;
     case "rule":
-      return (
-        <View style={{ height: 1, borderRadius: 1, overflow: "hidden", marginVertical: 4 }}>
-          <Tint color={theme.colors.foreground} opacity={0.2} />
-        </View>
-      );
+      return <View style={{ height: 1, backgroundColor: palette.border, marginVertical: spacing[1] }} />;
     default:
       return null;
   }
 }
 
-export function Markdown({ text, theme }: { text: string; theme: PluginTheme }) {
+export function Markdown({ text, palette }: { text: string; palette: Palette }) {
   const blocks = React.useMemo(() => parseMarkdown(text), [text]);
   return (
-    <View style={{ gap: 6 }}>
+    <View style={{ gap: spacing[2] }}>
       {blocks.map((block, index) => (
-        <BlockView key={index} block={block} theme={theme} />
+        <BlockView key={index} block={block} palette={palette} />
       ))}
     </View>
   );
