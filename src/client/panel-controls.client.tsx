@@ -8,7 +8,7 @@ import {
   type Attachment,
   type ForgeItem,
 } from "./attachments.client.ts";
-import { AutocompleteList } from "./autocomplete-view.client.tsx";
+import { AutocompleteList, type AutocompleteOption } from "./autocomplete-view.client.tsx";
 import { pastedImageName, pastedImages } from "./clipboard-image.client.ts";
 import { useComposerAutocomplete } from "./composer-autocomplete.client.ts";
 import { readFileDataUrl } from "./file-picker.client.ts";
@@ -283,6 +283,13 @@ export function PromptBox({
     setCursorIndex(next.length);
   };
   const autocomplete = useComposerAutocomplete({ workspaceDir, text, cursorIndex, setText: changeText });
+  // Paseo holds the menu back until a row is selected, so it never flashes an unselected list.
+  const menuOpen = autocomplete.visible && (autocomplete.options.length === 0 || autocomplete.selectedIndex >= 0);
+
+  const applySuggestion = (option: AutocompleteOption) => {
+    autocomplete.select(option);
+    inputRef.current?.focus();
+  };
 
   // A pasted screenshot never reaches React Native's TextInput, so the DOM node is asked directly.
   useEffect(() => {
@@ -334,127 +341,143 @@ export function PromptBox({
       {note ? (
         <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.sm }}>{note}</Text>
       ) : null}
-      {autocomplete.visible ? (
-        <AutocompleteList
-          palette={palette}
-          options={autocomplete.options}
-          selectedIndex={autocomplete.selectedIndex}
-          loading={autocomplete.loading}
-          emptyText={autocomplete.emptyText}
-          onSelect={autocomplete.select}
-        />
-      ) : null}
-      <View
-        style={{
-          gap: spacing[3],
-          backgroundColor: palette.surface1,
-          borderWidth: 1,
-          borderColor: palette.borderAccent,
-          borderRadius: radius["2xl"],
-          paddingVertical: compact ? spacing[2] : spacing[4],
-          paddingHorizontal: compact ? spacing[3] : spacing[4],
-        }}
-      >
-        {files.length > 0 ? (
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing[2] }}>
-            {files.map((file) => (
-              <AttachmentPill
-                key={file.reference}
-                palette={palette}
-                previewDataUrl={file.previewDataUrl}
-                title={file.title}
-                subtitle={file.subtitle}
-                disabled={disabled}
-                onOpen={onOpenAttachment ? () => onOpenAttachment(file) : undefined}
-                onRemove={() => onRemoveAttachment?.(file.reference)}
-              />
-            ))}
+      <View style={{ position: "relative" }}>
+        {/* Over the transcript, anchored to the top of the prompt: opening it never moves the prompt. */}
+        {menuOpen ? (
+          <View
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: "100%",
+              marginBottom: spacing[3],
+              zIndex: 10,
+            }}
+          >
+            <AutocompleteList
+              palette={palette}
+              options={autocomplete.options}
+              selectedIndex={autocomplete.selectedIndex}
+              loading={autocomplete.loading}
+              errorMessage={autocomplete.errorMessage}
+              loadingText={autocomplete.loadingText}
+              emptyText={autocomplete.emptyText}
+              onSelect={applySuggestion}
+            />
           </View>
         ) : null}
-        <View style={{ position: "relative" }}>
-          {Platform.OS === "web" && text === "" ? (
-            <Text
-              style={{
-                position: "absolute",
-                top: 0,
-                right: 0,
-                color: palette.foregroundMuted,
-                fontSize: fontSize.sm,
-                opacity: 0.5,
-              }}
-            >
-              ↵ to send
-            </Text>
-          ) : null}
-          <TextInput
-            ref={inputRef}
-            value={text}
-            onChangeText={typeText}
-            onSelectionChange={(event) => setCursorIndex(event.nativeEvent.selection.start)}
-            editable={!disabled}
-            multiline
-            placeholder={
-              disabled
-                ? "Bind a terminal to send prompts"
-                : "Message Claude Code, tag @files, or use /commands and /skills"
-            }
-            placeholderTextColor={palette.foregroundMuted}
-            onKeyPress={handleKeyPress}
-            style={{
-              width: "100%",
-              color: palette.foreground,
-              fontSize: fontSize.content,
-              lineHeight: leading(fontSize.content),
-              maxHeight: 140,
-              minHeight: 24,
-              ...NO_OUTLINE,
-            }}
-          />
-        </View>
         <View
           style={{
-            flexDirection: "row",
-            alignItems: "flex-end",
-            justifyContent: "space-between",
-            marginHorizontal: -6,
+            gap: spacing[3],
+            backgroundColor: palette.surface1,
+            borderWidth: 1,
+            borderColor: palette.borderAccent,
+            borderRadius: radius["2xl"],
+            paddingVertical: compact ? spacing[2] : spacing[4],
+            paddingHorizontal: compact ? spacing[3] : spacing[4],
           }}
         >
-          <View style={{ flexDirection: "row", alignItems: "center", minWidth: 0, flexShrink: 1 }}>
-            {onAddAttachment ? (
-              <Pill palette={palette} glyph="＋" onPress={onAddAttachment} disabled={disabled} />
+          {files.length > 0 ? (
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing[2] }}>
+              {files.map((file) => (
+                <AttachmentPill
+                  key={file.reference}
+                  palette={palette}
+                  previewDataUrl={file.previewDataUrl}
+                  title={file.title}
+                  subtitle={file.subtitle}
+                  disabled={disabled}
+                  onOpen={onOpenAttachment ? () => onOpenAttachment(file) : undefined}
+                  onRemove={() => onRemoveAttachment?.(file.reference)}
+                />
+              ))}
+            </View>
+          ) : null}
+          <View style={{ position: "relative" }}>
+            {Platform.OS === "web" && text === "" ? (
+              <Text
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  right: 0,
+                  color: palette.foregroundMuted,
+                  fontSize: fontSize.sm,
+                  opacity: 0.5,
+                }}
+              >
+                ↵ to send
+              </Text>
             ) : null}
-            {controls ? (
-              <>
-                <Pill
-                  palette={palette}
-                  glyph="✻"
-                  label={controls.model ?? "Model"}
-                  onPress={controls.onOpenModelMenu}
-                  disabled={disabled}
-                />
-                <Pill
-                  palette={palette}
-                  label={controls.effort ?? "Thinking"}
-                  onPress={controls.onOpenThinking}
-                  disabled={disabled}
-                />
-                <Pill
-                  palette={palette}
-                  label={controls.mode ?? "Mode"}
-                  onPress={controls.onOpenMode}
-                  disabled={disabled}
-                />
-              </>
-            ) : null}
+            <TextInput
+              ref={inputRef}
+              value={text}
+              onChangeText={typeText}
+              onSelectionChange={(event) => setCursorIndex(event.nativeEvent.selection.start)}
+              editable={!disabled}
+              multiline
+              placeholder={
+                disabled
+                  ? "Bind a terminal to send prompts"
+                  : "Message Claude Code, tag @files, or use /commands and /skills"
+              }
+              placeholderTextColor={palette.foregroundMuted}
+              onKeyPress={handleKeyPress}
+              style={{
+                width: "100%",
+                color: palette.foreground,
+                fontSize: fontSize.content,
+                lineHeight: leading(fontSize.content),
+                maxHeight: 140,
+                minHeight: 24,
+                ...NO_OUTLINE,
+              }}
+            />
           </View>
-          <IconButton
-            palette={palette}
-            glyph={sending ? "…" : "↑"}
-            tone="accent"
-            accessibilityLabel="Send"
-            disabled={!canSend}
-            onPress={submit}
-          />
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "flex-end",
+              justifyContent: "space-between",
+              marginHorizontal: -6,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", minWidth: 0, flexShrink: 1 }}>
+              {onAddAttachment ? (
+                <Pill palette={palette} glyph="＋" onPress={onAddAttachment} disabled={disabled} />
+              ) : null}
+              {controls ? (
+                <>
+                  <Pill
+                    palette={palette}
+                    glyph="✻"
+                    label={controls.model ?? "Model"}
+                    onPress={controls.onOpenModelMenu}
+                    disabled={disabled}
+                  />
+                  <Pill
+                    palette={palette}
+                    label={controls.effort ?? "Thinking"}
+                    onPress={controls.onOpenThinking}
+                    disabled={disabled}
+                  />
+                  <Pill
+                    palette={palette}
+                    label={controls.mode ?? "Mode"}
+                    onPress={controls.onOpenMode}
+                    disabled={disabled}
+                  />
+                </>
+              ) : null}
+            </View>
+            <IconButton
+              palette={palette}
+              glyph={sending ? "…" : "↑"}
+              tone="accent"
+              accessibilityLabel="Send"
+              disabled={!canSend}
+              onPress={submit}
+            />
+          </View>
         </View>
       </View>
     </ComposerFrame>

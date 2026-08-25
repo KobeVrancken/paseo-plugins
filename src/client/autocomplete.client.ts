@@ -52,25 +52,45 @@ export function findActiveSlashCommand(input: { text: string; cursorIndex: numbe
 }
 
 /**
- * A file closes the menu behind a trailing space; a directory keeps it open on its own contents,
- * which is how you walk down a tree without typing the separators.
+ * Picking replaces the whole trigger, and a pick that ends the prompt leaves a space behind it, so
+ * the menu closes and the next word starts clean. Paseo quotes the path where the CLI wants a bare
+ * one; here it keeps its `@`, which is what makes it a mention to Claude Code rather than prose.
  */
-export function applyFileMention(input: {
-  text: string;
-  mention: Range;
-  path: string;
-  kind: "file" | "directory";
-}): string {
+export function applyFileMention(input: { text: string; mention: Range; path: string }): string {
   const before = input.text.slice(0, input.mention.start);
   const after = input.text.slice(input.mention.end);
-  const inserted = input.kind === "directory" ? `@${input.path}/` : `@${input.path} `;
-  return `${before}${inserted}${after}`;
+  return `${before}@${input.path}${after}${after === "" ? " " : ""}`;
 }
 
 export function applySlashCommand(input: { text: string; command: Range; name: string }): string {
   const before = input.text.slice(0, input.command.start);
   const after = input.text.slice(input.command.end);
   return `${before}/${input.name}${after}${after === "" ? " " : ""}`;
+}
+
+/** Keeps the active row in view without moving the list any further than it has to. */
+export function scrollOffsetFor(input: {
+  currentOffset: number;
+  viewportHeight: number;
+  itemTop: number;
+  itemHeight: number;
+}): number {
+  if (input.viewportHeight <= 0) return input.currentOffset;
+  const itemBottom = input.itemTop + input.itemHeight;
+  if (input.itemTop < input.currentOffset) return Math.max(0, input.itemTop);
+  if (itemBottom > input.currentOffset + input.viewportHeight) {
+    return Math.max(0, itemBottom - input.viewportHeight);
+  }
+  return input.currentOffset;
+}
+
+const BOLT_GLYPHS = /\u26A1|\uFE0F/gu;
+
+/** Some commands decorate their name with a bolt; the menu shows the name. */
+export function withoutBoltGlyphs(value: string | undefined): string | undefined {
+  if (value === undefined) return value;
+  const cleaned = value.replace(BOLT_GLYPHS, "").trim();
+  return cleaned.length > 0 ? cleaned : undefined;
 }
 
 /** The list sits above the input, so it reads bottom-up and starts on its last row. */

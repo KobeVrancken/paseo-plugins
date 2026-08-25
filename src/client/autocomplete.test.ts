@@ -8,6 +8,8 @@ import {
   findActiveSlashCommand,
   nextIndex,
   orderOptions,
+  scrollOffsetFor,
+  withoutBoltGlyphs,
 } from "./autocomplete.client.ts";
 
 test("finds the mention the cursor is sitting in", () => {
@@ -36,17 +38,28 @@ test("opens the command menu only at the start of a word", () => {
   assert.equal(findActiveSlashCommand({ text: "/a/b", cursorIndex: 4 }), null);
 });
 
-test("replaces a mention, and keeps the menu open on a directory", () => {
+test("replaces a mention, leaving a space when it ends the prompt", () => {
   const text = "look at @src/pa";
   const mention = findActiveFileMention({ text, cursorIndex: text.length })!;
-  assert.equal(
-    applyFileMention({ text, mention, path: "src/panel.ts", kind: "file" }),
-    "look at @src/panel.ts ",
-  );
-  assert.equal(
-    applyFileMention({ text, mention, path: "src/parts", kind: "directory" }),
-    "look at @src/parts/",
-  );
+  assert.equal(applyFileMention({ text, mention, path: "src/panel.ts" }), "look at @src/panel.ts ");
+
+  const middle = "look at @src/pa now";
+  const inner = findActiveFileMention({ text: middle, cursorIndex: 15 })!;
+  assert.equal(applyFileMention({ text: middle, mention: inner, path: "src/panel.ts" }), "look at @src/panel.ts now");
+});
+
+test("scrolls no further than it takes to show the active row", () => {
+  const viewport = { currentOffset: 40, viewportHeight: 100 };
+  assert.equal(scrollOffsetFor({ ...viewport, itemTop: 60, itemHeight: 36 }), 40);
+  assert.equal(scrollOffsetFor({ ...viewport, itemTop: 20, itemHeight: 36 }), 20);
+  assert.equal(scrollOffsetFor({ ...viewport, itemTop: 120, itemHeight: 36 }), 56);
+  assert.equal(scrollOffsetFor({ ...viewport, viewportHeight: 0, itemTop: 999, itemHeight: 36 }), 40);
+});
+
+test("drops a decorative bolt from a label", () => {
+  assert.equal(withoutBoltGlyphs("\u26A1 Fast"), "Fast");
+  assert.equal(withoutBoltGlyphs("\u26A1"), undefined);
+  assert.equal(withoutBoltGlyphs(undefined), undefined);
 });
 
 test("replaces a command and leaves room for its arguments", () => {

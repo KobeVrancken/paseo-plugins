@@ -14,6 +14,18 @@ export const MAX_CONTENT_WIDTH = 820;
 export const HEADER_HEIGHT = 36;
 export const STATUS_DOT_SIZE = 6;
 
+/** Paseo's `shadow.md`, the one every floating surface in its composer uses. */
+export function shadowMd(isDark: boolean): {
+  shadowColor: string;
+  shadowOffset: { width: number; height: number };
+  shadowRadius: number;
+  elevation: number;
+} {
+  return isDark
+    ? { shadowColor: "rgba(0, 0, 0, 0.20)", shadowOffset: { width: 0, height: 4 }, shadowRadius: 8, elevation: 8 }
+    : { shadowColor: "rgba(0, 0, 0, 0.04)", shadowOffset: { width: 0, height: 4 }, shadowRadius: 16, elevation: 4 };
+}
+
 /** Paseo derives every text line height from its font size this way. */
 export function leading(size: number): number {
   return Math.round(size * 1.4);
