@@ -107,6 +107,9 @@ export const RenderEntrySchema = z.object({
 });
 export type RenderEntry = z.infer<typeof RenderEntrySchema>;
 
+export const SendBehaviorSchema = z.enum(["cli_default", "hold_until_idle", "interrupt_first"]);
+export type SendBehavior = z.infer<typeof SendBehaviorSchema>;
+
 export const SessionStatusSchema = z.enum(["idle", "running", "needs_input", "detached"]);
 export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 
