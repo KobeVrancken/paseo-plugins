@@ -51,6 +51,23 @@ The panel probes once when a session is opened and then only while the transcrip
 Claude Code writes `~/.claude/projects/<cwd with every non-alphanumeric replaced by a dash>/<session-id>.jsonl`, and the file does not exist until the session's first prompt.
 In its option dialogs a digit selects an option in a single-select and toggles it in a multi-select, which is then submitted with the right arrow followed by `1`.
 
+A prompt whose caret ends inside an `@` mention or a `/` command opens the CLI's own suggestion list, and bracketed paste does not prevent that — the caret position is what decides it.
+Enter still submits the line while either list is open rather than accepting the highlighted row, so forwarding a prompt needs no guard against them.
+A trailing space closes the `@` list; it does not close the `/` list.
+
+## What the CLI calls a skill or a command
+
+The command name comes from where the file lives, and only a plugin skill takes it from frontmatter.
+A directory under `~/.claude/skills/` or `.claude/skills/` is named after the directory, a file under `.claude/commands/` after its filename, and a plugin's skill after `<plugin>:<frontmatter name or directory name>`.
+Personal beats project, a skill beats a command of the same name, and a plugin is namespaced so it never takes part.
+Project skills load from the working directory and every parent up to the repository root; a plugin contributes only while `enabledPlugins` in the settings has it switched on, at the `installPath` recorded in `~/.claude/plugins/installed_plugins.json`.
+The built-in commands live in the binary, so the panel cannot enumerate them and does not try.
+
+## Where paseo's own answer lives
+
+Paseo is open source at `github.com/getpaseo/paseo`, and its composer is `packages/app/src/composer`, with the autocomplete in `src/utils/*-autocomplete.ts`, `src/hooks/use-*-autocomplete.ts` and `src/components/ui/autocomplete*.tsx`.
+Read it before rebuilding a behaviour by eye: the host hands plugins no components, but the range arithmetic, the ranking tiers and the pill geometry are all there to be reproduced exactly.
+
 ## Coverage of the transcript format
 
 Anything the Claude Code terminal puts on screen belongs in the timeline; anything it only injects into the model's context does not.
