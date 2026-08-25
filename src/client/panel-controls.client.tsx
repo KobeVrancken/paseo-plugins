@@ -263,10 +263,21 @@ export function PromptBox({
   const files = attachments ?? [];
   const canSend = !disabled && !sending && (text.trim() !== "" || files.length > 0);
 
+  // Which `@` or `/` the menu belongs to depends on the caret, and a web textarea only reports a
+  // selection when there is one to report, so the caret is read off the element while typing.
+  const caretAfter = (fallback: number): number => {
+    const node = inputRef.current as unknown as { selectionStart?: number | null } | null;
+    return typeof node?.selectionStart === "number" ? node.selectionStart : fallback;
+  };
+
+  const typeText = (next: string) => {
+    setText(next);
+    setCursorIndex(caretAfter(next.length));
+  };
+
   const changeText = (next: string) => {
     setText(next);
-    // A replacement leaves the caret at the end of what was inserted, which is where the browser
-    // puts it too; without this the menu would go on matching the query that was just replaced.
+    // Replacing the value leaves the caret at the end of it, which is where the browser puts it too.
     setCursorIndex(next.length);
   };
   const autocomplete = useComposerAutocomplete({ workspaceDir, text, cursorIndex, setText: changeText });
@@ -375,7 +386,7 @@ export function PromptBox({
           <TextInput
             ref={inputRef}
             value={text}
-            onChangeText={setText}
+            onChangeText={typeText}
             onSelectionChange={(event) => setCursorIndex(event.nativeEvent.selection.start)}
             editable={!disabled}
             multiline
