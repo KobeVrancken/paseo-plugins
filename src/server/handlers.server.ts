@@ -17,6 +17,7 @@ import {
   saveBase64File,
   saveBase64Image,
 } from "./uploads.server.ts";
+import { searchWorkspaceEntries } from "./file-search.server.ts";
 import { searchForgeItems } from "./github.server.ts";
 import { StateStore } from "./state.server.ts";
 import { TranscriptStore, isRecentlyActive } from "./transcript.server.ts";
@@ -295,6 +296,18 @@ export async function searchForgeItemsHandler(
   input: Input<typeof contracts.searchForgeItems>,
 ): Promise<Output<typeof contracts.searchForgeItems>> {
   return searchForgeItems(input.workspaceDir, input.query, input.limit);
+}
+
+export async function suggestFilesHandler(
+  input: Input<typeof contracts.suggestFiles>,
+): Promise<Output<typeof contracts.suggestFiles>> {
+  return {
+    entries: await searchWorkspaceEntries({
+      root: input.workspaceDir,
+      query: input.query,
+      limit: input.limit,
+    }),
+  };
 }
 
 export async function getComposerStateHandler(

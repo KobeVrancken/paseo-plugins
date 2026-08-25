@@ -618,6 +618,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           disabled={activeSessionId === null}
           sending={sendMutation.isPending}
           note={note}
+          workspaceDir={workspaceDir}
           attachments={attachments}
           controls={
             composerQuery.data?.bound

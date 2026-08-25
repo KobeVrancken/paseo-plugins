@@ -211,6 +211,19 @@ export const searchForgeItems = defineRpc({
   }),
 });
 
+/** Files and directories for the composer's `@` menu, ranked the way paseo's own picker ranks them. */
+export const suggestFiles = defineRpc({
+  name: "files.suggest",
+  input: z.object({
+    workspaceDir: z.string(),
+    query: z.string().default(""),
+    limit: z.number().int().min(1).max(100).default(30),
+  }),
+  output: z.object({
+    entries: z.array(z.object({ path: z.string(), kind: z.enum(["file", "directory"]) })),
+  }),
+});
+
 export const PermissionModeSchema = z.enum([
   "default",
   "acceptEdits",

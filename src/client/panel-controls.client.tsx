@@ -8,7 +8,9 @@ import {
   type Attachment,
   type ForgeItem,
 } from "./attachments.client.ts";
+import { AutocompleteList } from "./autocomplete-view.client.tsx";
 import { pastedImageName, pastedImages } from "./clipboard-image.client.ts";
+import { useComposerAutocomplete } from "./composer-autocomplete.client.ts";
 import { readFileDataUrl } from "./file-picker.client.ts";
 import {
   controlHeight,
@@ -234,6 +236,7 @@ export function PromptBox({
   disabled,
   sending,
   note,
+  workspaceDir,
   attachments,
   controls,
   onSend,
@@ -246,6 +249,7 @@ export function PromptBox({
   disabled: boolean;
   sending: boolean;
   note: string | null;
+  workspaceDir: string | null;
   attachments?: Attachment[];
   controls: ComposerControls | null;
   onSend: (text: string) => void;
@@ -254,9 +258,18 @@ export function PromptBox({
   onRemoveAttachment?: (reference: string) => void;
 }) {
   const [text, setText] = useState("");
+  const [cursorIndex, setCursorIndex] = useState(0);
   const inputRef = useRef<TextInput | null>(null);
   const files = attachments ?? [];
   const canSend = !disabled && !sending && (text.trim() !== "" || files.length > 0);
+
+  const changeText = (next: string) => {
+    setText(next);
+    // A replacement leaves the caret at the end of what was inserted, which is where the browser
+    // puts it too; without this the menu would go on matching the query that was just replaced.
+    setCursorIndex(next.length);
+  };
+  const autocomplete = useComposerAutocomplete({ workspaceDir, text, cursorIndex, setText: changeText });
 
   // A pasted screenshot never reaches React Native's TextInput, so the DOM node is asked directly.
   useEffect(() => {
@@ -284,14 +297,20 @@ export function PromptBox({
     if (!canSend) return;
     onSend(text);
     setText("");
+    setCursorIndex(0);
   };
 
   // Enter sends and shift+Enter breaks the line, as everywhere else you type at an agent.
   // Only on web: a soft keyboard has no shift+Enter, so on a phone Enter keeps inserting a newline
   // and the send button is the way to send.
+  // The open menu gets first refusal on every key, so Enter takes the highlighted row instead.
   const handleKeyPress = (event: TextInputKeyPressEvent) => {
     if (Platform.OS !== "web") return;
     const native = event.nativeEvent as { key: string; shiftKey?: boolean };
+    if (native.shiftKey !== true && autocomplete.handleKey(native.key)) {
+      event.preventDefault();
+      return;
+    }
     if (native.key !== "Enter" || native.shiftKey === true) return;
     event.preventDefault();
     submit();
@@ -301,6 +320,16 @@ export function PromptBox({
     <ComposerFrame palette={palette} compact={compact}>
       {note ? (
         <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.sm }}>{note}</Text>
+      ) : null}
+      {autocomplete.visible ? (
+        <AutocompleteList
+          palette={palette}
+          options={autocomplete.options}
+          selectedIndex={autocomplete.selectedIndex}
+          loading={autocomplete.loading}
+          emptyText={autocomplete.emptyText}
+          onSelect={autocomplete.select}
+        />
       ) : null}
       <View
         style={{
@@ -347,6 +376,7 @@ export function PromptBox({
             ref={inputRef}
             value={text}
             onChangeText={setText}
+            onSelectionChange={(event) => setCursorIndex(event.nativeEvent.selection.start)}
             editable={!disabled}
             multiline
             placeholder={

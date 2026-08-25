@@ -21,6 +21,7 @@ import {
   sendPromptHandler,
   setSettingsHandler,
   startSessionHandler,
+  suggestFilesHandler,
   uploadFileHandler,
   uploadImageHandler,
 } from "./src/server/handlers.server.ts";
@@ -48,6 +49,7 @@ export default function contribute(plugin: PluginContext) {
   plugin.handle(contracts.uploadImage, (input) => uploadImageHandler(input));
   plugin.handle(contracts.uploadFile, (input) => uploadFileHandler(input));
   plugin.handle(contracts.searchForgeItems, (input) => searchForgeItemsHandler(input));
+  plugin.handle(contracts.suggestFiles, (input) => suggestFilesHandler(input));
   plugin.handle(contracts.getComposerState, (input) => getComposerStateHandler(input));
   plugin.handle(contracts.openCliMenu, (input) => openCliMenuHandler(input));
   plugin.handle(contracts.permissionMode, (input) => permissionModeHandler(input));
