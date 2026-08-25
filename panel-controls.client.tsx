@@ -1,6 +1,7 @@
 import type { PluginTheme } from "@getpaseo/plugin";
+import type { TextInputKeyPressEvent } from "react-native";
 import React, { useState } from "react";
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import type { SendBehavior, SessionStatus } from "./render-types.shared.ts";
 import { Card, Tint } from "./ui.client.tsx";
 
@@ -140,6 +141,23 @@ export function PromptBox({
   const files = attachments ?? [];
   const canSend = !disabled && !sending && (text.trim() !== "" || files.length > 0);
 
+  const submit = () => {
+    if (!canSend) return;
+    onSend(text);
+    setText("");
+  };
+
+  // Enter sends and shift+Enter breaks the line, as everywhere else you type at an agent.
+  // Only on web: a soft keyboard has no shift+Enter, so on a phone Enter keeps inserting a newline
+  // and the send button is the way to send.
+  const handleKeyPress = (event: TextInputKeyPressEvent) => {
+    if (Platform.OS !== "web") return;
+    const native = event.nativeEvent as { key: string; shiftKey?: boolean };
+    if (native.key !== "Enter" || native.shiftKey === true) return;
+    event.preventDefault();
+    submit();
+  };
+
   return (
     <View style={{ padding: compact ? 8 : 12, gap: 6 }}>
       {note ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{note}</Text> : null}
@@ -166,8 +184,15 @@ export function PromptBox({
           onChangeText={setText}
           editable={!disabled}
           multiline
-          placeholder={disabled ? "Bind a terminal to send prompts" : "Message Claude Code…"}
+          placeholder={
+            disabled
+              ? "Bind a terminal to send prompts"
+              : Platform.OS === "web"
+                ? "Message Claude Code…  (Enter to send, Shift+Enter for a new line)"
+                : "Message Claude Code…"
+          }
           placeholderTextColor={theme.colors.foregroundMuted}
+          onKeyPress={handleKeyPress}
           style={{ color: theme.colors.foreground, fontSize: 14, maxHeight: 140, minHeight: 36 }}
         />
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -186,10 +211,7 @@ export function PromptBox({
             tone="accent"
             label={sending ? "Sending…" : "Send"}
             disabled={!canSend}
-            onPress={() => {
-              onSend(text);
-              setText("");
-            }}
+            onPress={submit}
           />
         </View>
       </View>
