@@ -2,7 +2,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import type { TextInputKeyPressEvent } from "react-native";
 import React, { useState } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import type { SendBehavior, SessionStatus } from "./render-types.shared.ts";
+import type { SendBehavior, SessionStatus } from "../render-types.shared.ts";
 import { Card, Tint } from "./ui.client.tsx";
 
 export const SEND_BEHAVIOR_LABELS: Record<SendBehavior, string> = {

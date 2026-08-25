@@ -1,4 +1,4 @@
-import type { SessionStatus } from "./render-types.shared.ts";
+import type { SessionStatus } from "../render-types.shared.ts";
 
 /**
  * Minimal shape of the `PaseoApi` handed to plugin handlers.

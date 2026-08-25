@@ -49,7 +49,7 @@ paseo plugin reload paseo-claude-code-cli-plugin # after every edit; there is no
 paseo plugin logs paseo-claude-code-cli-plugin
 ```
 
-The daemon compiles `index.ts` into two bundles.
+The daemon compiles `index.ts` into two bundles. `index.ts` and `paseo-plugin.json` have to stay at the plugin root; the rest of the code lives under `src/`, split into `src/server`, `src/client` and the shared contracts.
 
 `*.client.tsx` runs inside the paseo app and may only import `react`, `react-native`, `@tanstack/react-query`, `zod` and `@getpaseo/plugin`. That is why the markdown renderer and the diff are hand-rolled, and why everything is pure React Native, which is what lets the panel work on iOS and Android. `*.server.ts` runs as an unsandboxed Node subprocess beside the daemon. `*.shared.ts` holds the zod contracts that both sides use. Relative imports carry their `.ts` or `.tsx` extension so the same modules run unchanged under `node --test`.
 

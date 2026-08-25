@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { diffLines, trimDiffContext } from "../diff.server.ts";
+import { diffLines, trimDiffContext } from "../src/server/diff.server.ts";
 
 test("keeps unchanged lines as context", () => {
   assert.deepEqual(diffLines("a\nb\nc", "a\nB\nc"), [

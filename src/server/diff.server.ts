@@ -1,4 +1,4 @@
-import type { DiffLine } from "./render-types.shared.ts";
+import type { DiffLine } from "../render-types.shared.ts";
 
 const MAX_LCS_CELLS = 400_000;
 

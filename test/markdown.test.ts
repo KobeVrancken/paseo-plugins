@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseInline, parseMarkdown } from "../markdown.client.ts";
+import { parseInline, parseMarkdown } from "../src/client/markdown.client.ts";
 
 test("parses headings and paragraphs", () => {
   assert.deepEqual(parseMarkdown("# Title\n\nSome text"), [

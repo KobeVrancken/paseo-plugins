@@ -1,5 +1,5 @@
 import type { PluginContext } from "@getpaseo/plugin";
-import * as contracts from "./contracts.shared.ts";
+import * as contracts from "./src/contracts.shared.ts";
 import {
   answerDialogHandler,
   attachImageHandler,
@@ -18,8 +18,8 @@ import {
   setSettingsHandler,
   startSessionHandler,
   uploadImageHandler,
-} from "./handlers.server.ts";
-import { ClaudeCodePanel } from "./main.client.tsx";
+} from "./src/server/handlers.server.ts";
+import { ClaudeCodePanel } from "./src/client/main.client.tsx";
 
 export const PANEL_ID = "claude-code-cli";
 

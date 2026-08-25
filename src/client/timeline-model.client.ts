@@ -1,4 +1,4 @@
-import type { RenderEntry, ToolKind } from "./render-types.shared.ts";
+import type { RenderEntry, ToolKind } from "../render-types.shared.ts";
 
 export type TimelineItem =
   | { kind: "entry"; key: string; entry: RenderEntry }

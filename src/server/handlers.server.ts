@@ -1,7 +1,7 @@
 import { z } from "zod";
-import * as contracts from "./contracts.shared.ts";
+import * as contracts from "../contracts.shared.ts";
 import { listTerminals } from "./paseo-cli.server.ts";
-import type { SessionStatus } from "./render-types.shared.ts";
+import type { SessionStatus } from "../render-types.shared.ts";
 import * as control from "./session-control.server.ts";
 import {
   enableHooks as patchHooks,

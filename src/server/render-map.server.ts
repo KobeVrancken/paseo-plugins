@@ -6,7 +6,7 @@ import type {
   RenderEntry,
   Todo,
   ToolKind,
-} from "./render-types.shared.ts";
+} from "../render-types.shared.ts";
 
 export type RawEntry = Record<string, unknown>;
 

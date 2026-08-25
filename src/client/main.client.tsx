@@ -3,7 +3,7 @@ import { useRpc, useWorkspace } from "@getpaseo/plugin";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { Clipboard, FlatList, Pressable, Text, View } from "react-native";
-import * as contracts from "./contracts.shared.ts";
+import * as contracts from "../contracts.shared.ts";
 import {
   ActionButton,
   DialogCard,
@@ -17,7 +17,7 @@ import {
   SheetRow,
   StatusPill,
 } from "./panel-controls.client.tsx";
-import type { RenderEntry, SendBehavior, SessionStatus, SessionSummary } from "./render-types.shared.ts";
+import type { RenderEntry, SendBehavior, SessionStatus, SessionSummary } from "../render-types.shared.ts";
 import { groupEntries, type TimelineItem } from "./timeline-model.client.ts";
 import { TimelineItemView } from "./timeline.client.tsx";
 import { Tint, relativeTimeFrom } from "./ui.client.tsx";

@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { capEntryForList, parseQuestionAnswers, TimelineBuilder } from "../render-map.server.ts";
-import type { RenderBody, RenderEntry } from "../render-types.shared.ts";
+import { capEntryForList, parseQuestionAnswers, TimelineBuilder } from "../src/server/render-map.server.ts";
+import type { RenderBody, RenderEntry } from "../src/render-types.shared.ts";
 
 const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 

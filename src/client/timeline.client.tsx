@@ -2,7 +2,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import React, { useEffect, useState } from "react";
 import { Image, Pressable, ScrollView, Text, View } from "react-native";
 import { CodeBlock, Markdown } from "./markdown-view.client.tsx";
-import type { DetailBlock, RenderBody, RenderEntry } from "./render-types.shared.ts";
+import type { DetailBlock, RenderBody, RenderEntry } from "../render-types.shared.ts";
 import { statusGlyph, todoGlyph, toolGlyph, type TimelineItem } from "./timeline-model.client.ts";
 import { Card, MONO_FONT, Mono, Tint } from "./ui.client.tsx";
 

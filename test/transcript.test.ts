@@ -3,8 +3,8 @@ import { appendFile, mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { escapeProjectDirName } from "../paths.server.ts";
-import { TranscriptStore, readSessionSummary } from "../transcript.server.ts";
+import { escapeProjectDirName } from "../src/server/paths.server.ts";
+import { TranscriptStore, readSessionSummary } from "../src/server/transcript.server.ts";
 
 const SESSION_ID = "22222222-2222-4222-8222-222222222222";
 

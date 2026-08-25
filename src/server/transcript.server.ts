@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { capEntryForList, TimelineBuilder } from "./render-map.server.ts";
 import { resolveProjectDir, type Env } from "./paths.server.ts";
-import type { RenderEntry } from "./render-types.shared.ts";
+import type { RenderEntry } from "../render-types.shared.ts";
 
 const HEAD_SCAN_BYTES = 128 * 1024;
 const SIGNATURE_BYTES = 256;

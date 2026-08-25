@@ -17,6 +17,9 @@ No top-level `const handlers = createHandlers()`, no helper that registers handl
 
 The entry must default-export exactly one function taking one named parameter and having a block body, or the plugin fails to load.
 
+`index.ts` and `paseo-plugin.json` have to sit at the plugin root, because the loader stats exactly those names and the entry filename is not configurable.
+Everything else lives under `src/`; esbuild resolves from the plugin directory, and the client/server boundary is keyed on the `.client` / `.server` filename suffix rather than on the directory, so nesting is free.
+
 RPC names must match `^[a-z][a-z0-9._-]*$`, so `sessions.list`, never `listSessions`; a capital letter fails the load with "Invalid plugin RPC method".
 
 The client bundle treats only `react`, `react-native`, `react/jsx-runtime`, `@tanstack/react-query`, `zod` and `@getpaseo/plugin` as external, and stubs `node:*` imports to an empty object rather than failing the build, so an accidental Node import only shows up at runtime.

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { looksLikeClaudeSession } from "../capture.server.ts";
-import { composePrompt } from "../session-control.server.ts";
-import { resolvePaseoBinary } from "../paseo-cli.server.ts";
+import { looksLikeClaudeSession } from "../src/server/capture.server.ts";
+import { composePrompt } from "../src/server/session-control.server.ts";
+import { resolvePaseoBinary } from "../src/server/paseo-cli.server.ts";
 
 test("normalizes newlines and trims the prompt", () => {
   assert.equal(composePrompt("  hello\r\nworld  ", []), "hello\nworld");

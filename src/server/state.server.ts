@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { cacheDir, stateFilePath, type Env } from "./paths.server.ts";
-import type { SendBehavior } from "./render-types.shared.ts";
+import type { SendBehavior } from "../render-types.shared.ts";
 
 export type { SendBehavior };
 

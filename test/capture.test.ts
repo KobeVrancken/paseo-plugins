@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { looksLikeClaudeSession, parseDialog } from "../capture.server.ts";
-import { answerKeys, ARROW_RIGHT } from "../keymap.server.ts";
+import { looksLikeClaudeSession, parseDialog } from "../src/server/capture.server.ts";
+import { answerKeys, ARROW_RIGHT } from "../src/server/keymap.server.ts";
 
 const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 
