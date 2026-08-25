@@ -1,9 +1,12 @@
 import type { PluginContext } from "@getpaseo/plugin";
 import * as contracts from "./contracts.shared.ts";
 import {
+  answerDialogHandler,
+  attachImageHandler,
   attachTerminalHandler,
   detachTerminalHandler,
   enableHooksHandler,
+  getDialogHandler,
   getHooksStatusHandler,
   getSettingsHandler,
   getTimelineHandler,
@@ -13,6 +16,7 @@ import {
   sendPromptHandler,
   setSettingsHandler,
   startSessionHandler,
+  uploadImageHandler,
 } from "./handlers.server.ts";
 import { ClaudeCodePanel } from "./main.client.tsx";
 
@@ -31,6 +35,10 @@ export default function contribute(plugin: PluginContext) {
   plugin.handle(contracts.attachTerminal, (input) => attachTerminalHandler(input));
   plugin.handle(contracts.detachTerminal, (input) => detachTerminalHandler(input));
   plugin.handle(contracts.sendPrompt, (input, context) => sendPromptHandler(input, context));
+  plugin.handle(contracts.getDialog, (input) => getDialogHandler(input));
+  plugin.handle(contracts.answerDialog, (input) => answerDialogHandler(input));
+  plugin.handle(contracts.attachImage, (input) => attachImageHandler(input));
+  plugin.handle(contracts.uploadImage, (input) => uploadImageHandler(input));
 
   plugin.addWorkspacePanel({
     id: PANEL_ID,

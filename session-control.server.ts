@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { looksLikeClaudeSession } from "./capture.server.ts";
+import { looksLikeClaudeSession, parseDialog, type ParsedDialog } from "./capture.server.ts";
+import { answerKeys, PASTE_END, PASTE_START } from "./keymap.server.ts";
 import {
   captureTerminal,
   createTerminal,
@@ -9,11 +10,9 @@ import {
 } from "./paseo-cli.server.ts";
 import type { SendBehavior } from "./state.server.ts";
 
-const ESC = String.fromCharCode(27);
-const PASTE_START = `${ESC}[200~`;
-const PASTE_END = `${ESC}[201~`;
-
 const TERMINAL_NAME = "Claude Code";
+const ANSWER_KEY_GAP_MS = 120;
+const ANSWER_VERIFY_MS = 700;
 const IDLE_WAIT_TIMEOUT_MS = 120_000;
 const IDLE_POLL_MS = 750;
 const INTERRUPT_SETTLE_MS = 300;
@@ -113,4 +112,47 @@ export async function sendPrompt(options: {
   await delay(SUBMIT_SETTLE_MS);
   await sendKeys(options.terminalId, ["Enter"]);
   return { delivered: true, note };
+}
+
+export async function readDialog(terminalId: string): Promise<ParsedDialog | null> {
+  return parseDialog(await captureTerminal(terminalId));
+}
+
+/** Maps the option labels the panel rendered onto the digits the CLI is currently showing. */
+export function optionIndicesForLabels(dialog: ParsedDialog, labels: string[]): number[] {
+  const indices: number[] = [];
+  for (const label of labels) {
+    const wanted = label.trim().toLowerCase();
+    const match = dialog.options.find((option) => option.label.trim().toLowerCase() === wanted);
+    if (match) indices.push(match.index);
+  }
+  return indices;
+}
+
+export type AnswerResult = { answered: boolean; verified: boolean; warning: string | null };
+
+export async function answerDialog(options: {
+  terminalId: string;
+  optionIndices: number[];
+  multiSelect: boolean;
+  previousPrompt: string;
+}): Promise<AnswerResult> {
+  const keys = answerKeys(options.optionIndices, options.multiSelect);
+  if (keys.length === 0) {
+    return { answered: false, verified: false, warning: "no option to send" };
+  }
+  for (const key of keys) {
+    await sendKeys(options.terminalId, [key], true);
+    await delay(ANSWER_KEY_GAP_MS);
+  }
+  await delay(ANSWER_VERIFY_MS);
+  const remaining = await readDialog(options.terminalId);
+  if (remaining && remaining.prompt === options.previousPrompt) {
+    return {
+      answered: true,
+      verified: false,
+      warning: "the dialog is still on screen — answer it in the terminal",
+    };
+  }
+  return { answered: true, verified: true, warning: null };
 }

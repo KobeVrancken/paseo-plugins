@@ -2,11 +2,13 @@ import type { PluginWorkspacePanelProps } from "@getpaseo/plugin";
 import { useRpc, useWorkspace } from "@getpaseo/plugin";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { FlatList, Pressable, Text, View } from "react-native";
+import { Clipboard, FlatList, Pressable, Text, View } from "react-native";
 import * as contracts from "./contracts.shared.ts";
 import {
   ActionButton,
+  DialogCard,
   HooksOnboarding,
+  ImageAttachSheet,
   PromptBox,
   ResumeBar,
   SEND_BEHAVIOR_HINTS,
@@ -23,6 +25,7 @@ import { Tint, relativeTimeFrom } from "./ui.client.tsx";
 const SESSION_POLL_MS = 2000;
 const TIMELINE_POLL_MS = 750;
 const HOOKS_POLL_MS = 15_000;
+const DIALOG_POLL_MS = 1000;
 const SEND_BEHAVIORS: SendBehavior[] = ["cli_default", "hold_until_idle", "interrupt_first"];
 
 type TimelineState = {
@@ -59,11 +62,16 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const listAttachable = useRpc(contracts.listAttachableTerminals);
   const attachTerminal = useRpc(contracts.attachTerminal);
   const sendPrompt = useRpc(contracts.sendPrompt);
+  const getDialog = useRpc(contracts.getDialog);
+  const answerDialog = useRpc(contracts.answerDialog);
+  const attachImage = useRpc(contracts.attachImage);
 
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [imageSheetOpen, setImageSheetOpen] = useState(false);
+  const [imagePaths, setImagePaths] = useState<string[]>([]);
   const [note, setNote] = useState<string | null>(null);
 
   const sessionsQuery = useQuery({
@@ -190,10 +198,42 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         workspaceDir: workspaceDir!,
         sessionId: activeSessionId!,
         text,
-        imagePaths: [],
+        imagePaths,
       }),
-    onSuccess: (result) => setNote(result.note ?? (result.delivered ? null : "not delivered")),
+    onSuccess: (result) => {
+      setImagePaths([]);
+      setNote(result.note ?? (result.delivered ? null : "not delivered"));
+    },
     onError: (error) => setNote(errorText(error)),
+  });
+
+  const dialogQuery = useQuery({
+    queryKey: ["claude-code-dialog", activeSessionId],
+    enabled: activeSessionId !== null && status === "needs_input",
+    refetchInterval: DIALOG_POLL_MS,
+    queryFn: () => getDialog({ sessionId: activeSessionId! }),
+  });
+
+  const answerMutation = useMutation({
+    mutationFn: (answer: { optionIndices?: number[]; labels?: string[] }) =>
+      answerDialog({
+        sessionId: activeSessionId!,
+        optionIndices: answer.optionIndices ?? [],
+        labels: answer.labels ?? [],
+      }),
+    onSuccess: (result) => {
+      setNote(result.warning);
+      void dialogQuery.refetch();
+    },
+    onError: (error) => setNote(errorText(error)),
+  });
+
+  const imageMutation = useMutation({
+    mutationFn: (path: string) => attachImage({ path }),
+    onSuccess: (result) => {
+      setImagePaths((current) => [...current, result.path]);
+      setImageSheetOpen(false);
+    },
   });
 
   const attachableQuery = useQuery({
@@ -268,7 +308,14 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           maxToRenderPerBatch={20}
           windowSize={11}
           removeClippedSubviews
-          renderItem={({ item }) => <TimelineItemView item={item} theme={theme} />}
+          renderItem={({ item }) => (
+            <TimelineItemView
+              item={item}
+              theme={theme}
+              answerPending={answerMutation.isPending}
+              onAnswerQuestion={(_entry, labels) => answerMutation.mutate({ labels })}
+            />
+          )}
           ListEmptyComponent={
             <Text style={{ color: theme.colors.foregroundMuted }}>
               {timelineQuery.isPending
@@ -292,6 +339,15 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           error={enableHooksMutation.error ? errorText(enableHooksMutation.error) : null}
           onEnable={() => enableHooksMutation.mutate()}
         />
+      ) : status === "needs_input" ? (
+        <DialogCard
+          theme={theme}
+          dialog={dialogQuery.data?.dialog ?? null}
+          terminalHint={terminalHint}
+          answering={answerMutation.isPending}
+          warning={note}
+          onAnswer={(optionIndices) => answerMutation.mutate({ optionIndices })}
+        />
       ) : status === "detached" ? (
         <ResumeBar
           theme={theme}
@@ -306,6 +362,9 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           sending={sendMutation.isPending}
           note={note}
           terminalHint={terminalHint}
+          attachments={imagePaths}
+          onAttachImage={() => setImageSheetOpen(true)}
+          onRemoveAttachment={(path) => setImagePaths((current) => current.filter((item) => item !== path))}
           onSend={(text) => sendMutation.mutate(text)}
         />
       )}
@@ -372,6 +431,19 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           </Text>
         ) : null}
       </Sheet>
+      <ImageAttachSheet
+        theme={theme}
+        visible={imageSheetOpen}
+        busy={imageMutation.isPending}
+        error={imageMutation.error ? errorText(imageMutation.error) : null}
+        onClose={() => setImageSheetOpen(false)}
+        onAttach={(path) => imageMutation.mutate(path)}
+        onPasteFromClipboard={(setPath) => {
+          void Clipboard.getString()
+            .then((value) => setPath(value.trim()))
+            .catch(() => {});
+        }}
+      />
     </View>
   );
 }

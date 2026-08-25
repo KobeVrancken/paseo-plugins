@@ -197,6 +197,161 @@ export function PromptBox({
   );
 }
 
+export type PanelDialog = {
+  kind: "permission" | "question";
+  prompt: string;
+  context: string[];
+  options: { index: number; label: string; checked: boolean; meta: boolean }[];
+  multiSelect: boolean;
+};
+
+/**
+ * Answering from the panel is a convenience over the terminal, never a replacement:
+ * the terminal hint stays visible because capture parsing can go stale with a CLI update.
+ */
+export function DialogCard({
+  theme,
+  dialog,
+  terminalHint,
+  answering,
+  warning,
+  onAnswer,
+}: {
+  theme: PluginTheme;
+  dialog: PanelDialog | null;
+  terminalHint: string | null;
+  answering: boolean;
+  warning: string | null;
+  onAnswer: (optionIndices: number[]) => void;
+}) {
+  const [checked, setChecked] = useState<number[]>([]);
+
+  if (!dialog) {
+    return (
+      <Card theme={theme} tone="danger" style={{ margin: 10 }}>
+        <Text style={{ color: theme.colors.foreground, fontWeight: "600" }}>
+          Claude is waiting for input
+        </Text>
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
+          The prompt could not be read from the screen — answer it in {terminalHint ?? "the terminal"}.
+        </Text>
+      </Card>
+    );
+  }
+
+  const answerable = dialog.options.filter((option) => !option.meta);
+  return (
+    <Card theme={theme} tone="danger" style={{ margin: 10 }}>
+      <View style={{ gap: 6 }}>
+        {dialog.context.map((line, index) => (
+          <Text key={index} style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
+            {line}
+          </Text>
+        ))}
+        <Text style={{ color: theme.colors.foreground, fontWeight: "600" }}>{dialog.prompt}</Text>
+        {answerable.map((option) => {
+          const selected = checked.includes(option.index);
+          return (
+            <Pressable
+              key={option.index}
+              disabled={answering}
+              onPress={() => {
+                if (!dialog.multiSelect) {
+                  onAnswer([option.index]);
+                  return;
+                }
+                setChecked((current) =>
+                  current.includes(option.index)
+                    ? current.filter((value) => value !== option.index)
+                    : [...current, option.index],
+                );
+              }}
+              style={{ padding: 8, borderRadius: 6, overflow: "hidden" }}
+            >
+              <Tint color={selected ? theme.colors.accent : theme.colors.foreground} opacity={selected ? 0.2 : 0.1} />
+              <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>
+                {dialog.multiSelect ? (selected ? "☑ " : "☐ ") : ""}
+                {option.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+        {dialog.multiSelect ? (
+          <View style={{ flexDirection: "row" }}>
+            <ActionButton
+              theme={theme}
+              tone="accent"
+              label={answering ? "Sending…" : "Submit answers"}
+              disabled={answering || checked.length === 0}
+              onPress={() => onAnswer(checked)}
+            />
+          </View>
+        ) : null}
+        {warning ? (
+          <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{warning}</Text>
+        ) : null}
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
+          Or answer in {terminalHint ?? "the terminal"}.
+        </Text>
+      </View>
+    </Card>
+  );
+}
+
+export function ImageAttachSheet({
+  theme,
+  visible,
+  busy,
+  error,
+  onClose,
+  onAttach,
+  onPasteFromClipboard,
+}: {
+  theme: PluginTheme;
+  visible: boolean;
+  busy: boolean;
+  error: string | null;
+  onClose: () => void;
+  onAttach: (path: string) => void;
+  onPasteFromClipboard: (setPath: (path: string) => void) => void;
+}) {
+  const [path, setPath] = useState("");
+  return (
+    <Sheet theme={theme} visible={visible} title="Attach an image" onClose={onClose}>
+      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
+        Point at an image file on the machine running paseo. It is copied into the plugin cache and
+        its path is appended to the prompt, which is how the CLI picks images up.
+      </Text>
+      <View style={{ borderRadius: 8, overflow: "hidden", padding: 8 }}>
+        <Tint color={theme.colors.foreground} opacity={0.08} />
+        <TextInput
+          value={path}
+          onChangeText={setPath}
+          placeholder="/home/you/screenshot.png"
+          placeholderTextColor={theme.colors.foregroundMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={{ color: theme.colors.foreground, fontSize: 13 }}
+        />
+      </View>
+      {error ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{error}</Text> : null}
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <ActionButton theme={theme} label="Paste path" onPress={() => onPasteFromClipboard(setPath)} />
+        <ActionButton
+          theme={theme}
+          tone="accent"
+          label={busy ? "Attaching…" : "Attach"}
+          disabled={busy || path.trim() === ""}
+          onPress={() => {
+            onAttach(path.trim());
+            setPath("");
+          }}
+        />
+      </View>
+    </Sheet>
+  );
+}
+
 export function ResumeBar({
   theme,
   onResume,

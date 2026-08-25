@@ -110,3 +110,53 @@ export const sendPrompt = defineRpc({
   }),
   output: z.object({ delivered: z.boolean(), note: z.string().nullable() }),
 });
+
+export const DialogOptionSchema = z.object({
+  index: z.number().int(),
+  label: z.string(),
+  checked: z.boolean(),
+  meta: z.boolean(),
+});
+
+export const getDialog = defineRpc({
+  name: "dialog.get",
+  input: z.object({ sessionId: z.string() }),
+  output: z.object({
+    dialog: z
+      .object({
+        kind: z.enum(["permission", "question"]),
+        prompt: z.string(),
+        context: z.array(z.string()),
+        options: z.array(DialogOptionSchema),
+        multiSelect: z.boolean(),
+      })
+      .nullable(),
+    terminalId: z.string().nullable(),
+  }),
+});
+
+export const answerDialog = defineRpc({
+  name: "dialog.answer",
+  input: z.object({
+    sessionId: z.string(),
+    optionIndices: z.array(z.number().int()).default([]),
+    labels: z.array(z.string()).default([]),
+  }),
+  output: z.object({
+    answered: z.boolean(),
+    verified: z.boolean(),
+    warning: z.string().nullable(),
+  }),
+});
+
+export const attachImage = defineRpc({
+  name: "image.attach",
+  input: z.object({ path: z.string() }),
+  output: z.object({ path: z.string() }),
+});
+
+export const uploadImage = defineRpc({
+  name: "image.upload",
+  input: z.object({ fileName: z.string(), base64: z.string() }),
+  output: z.object({ path: z.string() }),
+});

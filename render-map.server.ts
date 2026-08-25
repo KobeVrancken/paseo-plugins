@@ -146,6 +146,18 @@ function parseQuestions(value: unknown): Question[] | null {
   return questions;
 }
 
+/** The CLI reports answers as `"question"="answer"` pairs; only the answers are worth rendering. */
+export function parseQuestionAnswers(text: string): string[] {
+  const answers: string[] = [];
+  const pattern = /="([^"]*)"/g;
+  let match = pattern.exec(text);
+  while (match) {
+    answers.push(match[1]!);
+    match = pattern.exec(text);
+  }
+  return answers.length > 0 ? answers : text === "" ? [] : [text];
+}
+
 function describeTool(
   name: string,
   input: RawEntry,
@@ -507,7 +519,7 @@ export class TimelineBuilder {
       return;
     }
     if (body.kind === "question") {
-      this.replaceBody(index, { ...body, answers: text === "" ? [] : [text] });
+      this.replaceBody(index, { ...body, answers: parseQuestionAnswers(text) });
     }
   }
 

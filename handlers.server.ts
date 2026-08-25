@@ -9,6 +9,7 @@ import {
   workspaceSessionStatus,
   type PaseoLike,
 } from "./session-status.server.ts";
+import { attachImagePath, cleanupOldImages, saveBase64Image } from "./images.server.ts";
 import { StateStore } from "./state.server.ts";
 import { TranscriptStore, isRecentlyActive } from "./transcript.server.ts";
 
@@ -20,6 +21,10 @@ type Output<Contract extends { output: z.ZodType }> = z.input<Contract["output"]
 type Context = { paseo: PaseoLike };
 
 let prunedBindings = false;
+
+void cleanupOldImages().then((removed) => {
+  if (removed > 0) console.log(`removed ${removed} cached image(s) older than a week`);
+});
 
 /** Bindings survive daemon restarts, so validate them against the live terminals once per process. */
 async function pruneStaleBindingsOnce(): Promise<void> {
@@ -199,4 +204,61 @@ export async function sendPromptHandler(
     behavior: sendBehavior,
     readStatus: () => statusFor(context.paseo, input.sessionId, input.workspaceId),
   });
+}
+
+export async function getDialogHandler(
+  input: Input<typeof contracts.getDialog>,
+): Promise<Output<typeof contracts.getDialog>> {
+  const terminalId = await boundTerminalId(input.sessionId);
+  if (!terminalId) return { dialog: null, terminalId: null };
+  try {
+    return { dialog: await control.readDialog(terminalId), terminalId };
+  } catch (error) {
+    console.log(`could not read the terminal screen: ${String(error)}`);
+    return { dialog: null, terminalId };
+  }
+}
+
+export async function answerDialogHandler(
+  input: Input<typeof contracts.answerDialog>,
+): Promise<Output<typeof contracts.answerDialog>> {
+  const terminalId = await boundTerminalId(input.sessionId);
+  if (!terminalId) {
+    return { answered: false, verified: false, warning: "no terminal is bound to this session" };
+  }
+  const dialog = await control.readDialog(terminalId);
+  if (!dialog) {
+    return {
+      answered: false,
+      verified: false,
+      warning: "no dialog is on screen — answer it in the terminal",
+    };
+  }
+  const optionIndices =
+    input.labels.length > 0 ? control.optionIndicesForLabels(dialog, input.labels) : input.optionIndices;
+  if (optionIndices.length === 0) {
+    return {
+      answered: false,
+      verified: false,
+      warning: "the terminal is showing different options — answer it in the terminal",
+    };
+  }
+  return control.answerDialog({
+    terminalId,
+    optionIndices,
+    multiSelect: dialog.multiSelect,
+    previousPrompt: dialog.prompt,
+  });
+}
+
+export async function attachImageHandler(
+  input: Input<typeof contracts.attachImage>,
+): Promise<Output<typeof contracts.attachImage>> {
+  return { path: await attachImagePath(input.path) };
+}
+
+export async function uploadImageHandler(
+  input: Input<typeof contracts.uploadImage>,
+): Promise<Output<typeof contracts.uploadImage>> {
+  return { path: await saveBase64Image(input.fileName, input.base64) };
 }

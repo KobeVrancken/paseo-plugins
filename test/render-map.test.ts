@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { TimelineBuilder } from "../render-map.server.ts";
+import { parseQuestionAnswers, TimelineBuilder } from "../render-map.server.ts";
 import type { RenderBody, RenderEntry } from "../render-types.shared.ts";
 
 const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -101,6 +101,16 @@ test("ignores injected task notifications when picking the first prompt", () => 
   });
   assert.equal(builder.firstUserPrompt, null);
   assert.equal(builder.total, 0);
+});
+
+test("extracts the chosen answers from a question result", () => {
+  assert.deepEqual(
+    parseQuestionAnswers(
+      'Your questions have been answered: "Do you prefer tabs or spaces?"="Tabs". You can now continue with these answers in mind.',
+    ),
+    ["Tabs"],
+  );
+  assert.deepEqual(parseQuestionAnswers("no pairs here"), ["no pairs here"]);
 });
 
 test("renders a slash command as an activity row", () => {
