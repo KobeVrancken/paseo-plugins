@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { RenderEntry } from "../src/render-types.shared.ts";
-import { groupEntries } from "../src/client/timeline-model.client.ts";
+import type { RenderEntry } from "../render-types.shared.ts";
+import { groupEntries } from "./timeline-model.client.ts";
 
 function entry(index: number, isSidechain: boolean): RenderEntry {
   return {

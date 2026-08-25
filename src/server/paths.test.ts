@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { claudeProjectsDir, escapeProjectDirName, resolveProjectDir } from "../src/server/paths.server.ts";
+import { claudeProjectsDir, escapeProjectDirName, resolveProjectDir } from "./paths.server.ts";
 
 test("escapes every non-alphanumeric character in a workspace path", () => {
   assert.equal(

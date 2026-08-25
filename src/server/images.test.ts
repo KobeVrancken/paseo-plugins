@@ -3,7 +3,7 @@ import { mkdtemp, readFile, stat, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { attachImagePath, cleanupOldImages, saveBase64Image } from "../src/server/images.server.ts";
+import { attachImagePath, cleanupOldImages, saveBase64Image } from "./images.server.ts";
 
 const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUg==";
 

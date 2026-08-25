@@ -44,7 +44,7 @@ The ⋯ menu offers three ways to deliver a prompt.
 
 ```sh
 pnpm typecheck
-pnpm test                                        # node --test, no test dependencies
+pnpm test                                        # node --test, colocated, no test dependencies
 paseo plugin reload paseo-claude-code-cli-plugin # after every edit; there is no hot reload
 paseo plugin logs paseo-claude-code-cli-plugin
 ```

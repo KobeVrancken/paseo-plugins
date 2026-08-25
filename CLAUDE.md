@@ -26,10 +26,12 @@ The client bundle treats only `react`, `react-native`, `react/jsx-runtime`, `@ta
 
 ## Tests
 
-`pnpm test` is `node --test test/*.test.ts`, running the real modules through Node's type stripping, with no test dependencies.
+`pnpm test` is `node --test "src/**/*.test.ts"`, running the real modules through Node's type stripping, with no test dependencies.
 That means no TypeScript syntax that has to be emitted: no parameter properties (`constructor(private x)`), no enums, no namespaces.
 It also means relative imports must carry their `.ts` or `.tsx` extension everywhere in the project, which is why `allowImportingTsExtensions` is on.
 Tests must not import `contracts.shared.ts`, because `@getpaseo/plugin/server` only exists inside the daemon; keep pure logic in modules that do not reach for the SDK.
+Tests sit next to the module they cover, and their fixtures next to them in `src/server/fixtures/`.
+Nothing imports them from `index.ts`, so they never reach either bundle.
 
 ## What the surrounding tools actually do
 

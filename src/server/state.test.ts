@@ -3,7 +3,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { StateStore } from "../src/server/state.server.ts";
+import { StateStore } from "./state.server.ts";
 
 async function tempStore(): Promise<{ store: StateStore; cache: string }> {
   const cache = await mkdtemp(path.join(os.tmpdir(), "claude-plugin-cache-"));
