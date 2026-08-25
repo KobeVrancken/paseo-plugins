@@ -1,6 +1,6 @@
 import { useRpc } from "@getpaseo/plugin";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import * as contracts from "../contracts.shared.ts";
 import { compareMatchScores, scoreFields } from "../text-match.shared.ts";
 import {
@@ -73,6 +73,13 @@ export function useComposerAutocomplete(input: {
   const mode = mention ? "file" : command ? "command" : null;
   const key = active === null ? null : `${mode}:${active.start}`;
   const visible = active !== null && workspaceDir !== null && dismissed !== key;
+
+  // Escape hides the menu for as long as the caret stays in the same @ or /, and no longer.
+  // Keyed on position alone it outlived the mention, and the next @ typed at that offset — the
+  // first character of an emptied prompt, most of the time — came up hidden.
+  useEffect(() => {
+    if (key === null) setDismissed(null);
+  }, [key]);
 
   const fileQuery = useDebounced(mention?.query ?? "", QUERY_DEBOUNCE_MS);
   const filesQuery = useQuery({
