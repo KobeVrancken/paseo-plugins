@@ -54,6 +54,8 @@ import {
 } from "./ui.client.tsx";
 
 const SESSION_POLL_MS = 2000;
+/** How far above the bottom the view may sit and still count as following the transcript. */
+const FOLLOW_SLACK = 120;
 /** Only the fallback for a request that failed; a healthy one waits on the transcript instead. */
 const TIMELINE_POLL_MS = 750;
 /**
@@ -192,6 +194,16 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   const rootRef = useRef<View | null>(null);
   const promptCounter = useRef(0);
   const followRef = useRef(true);
+  /**
+   * Rows have wildly different heights and the list has no `getItemLayout`, so the offset a
+   * `scrollToEnd` derives from the average row height lands short of the bottom, and the scroll event
+   * that follows reads the gap as the user having scrolled away.
+   * The content height layout just measured is exact, and the scroller clamps it for us.
+   */
+  const stickToBottom = useCallback((contentHeight: number) => {
+    if (!followRef.current) return;
+    listRef.current?.scrollToOffset({ offset: contentHeight, animated: false });
+  }, []);
   const timelineRef = useRef<TimelineState>(emptyTimeline(""));
   const timelineKey = `${workspaceDir ?? ""}:${activeSessionId ?? ""}`;
 
@@ -240,6 +252,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   // An echo belongs to the session it was typed into, and nothing else.
   useEffect(() => {
     setPending([]);
+    followRef.current = true;
   }, [timelineKey]);
 
   const status: SessionStatus = timelineQuery.data?.sessionStatus ?? "detached";
@@ -628,15 +641,13 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           ref={listRef}
           data={items}
           style={{ flex: 1 }}
-          onContentSizeChange={() => {
-            if (followRef.current) listRef.current?.scrollToEnd({ animated: false });
-          }}
+          onContentSizeChange={(_width, height) => stickToBottom(height)}
           onScroll={(event) => {
             const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
             const distanceFromBottom = contentSize.height - contentOffset.y - layoutMeasurement.height;
-            followRef.current = distanceFromBottom < 80;
+            followRef.current = distanceFromBottom < FOLLOW_SLACK;
           }}
-          scrollEventThrottle={200}
+          scrollEventThrottle={16}
           keyExtractor={(item) => item.key}
           contentContainerStyle={{
             flexGrow: 1,
