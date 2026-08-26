@@ -62,5 +62,7 @@ test("builds a presence from the live payloads", () => {
   );
   assert.equal(activity?.details, "acme-billing — Invoke mattpocock-skills:wayfinder");
   assert.equal(activity?.state, "3 workspaces · 1 agent running");
-  assert.equal(activity?.smallImageKey, "running");
+  // The running agent's workspace is absent from this capture, so the badge reports the workspace
+  // it actually named rather than borrowing a state from an agent it cannot show.
+  assert.equal(activity?.smallImageKey, "idle");
 });

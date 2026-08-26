@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Renders the four art assets the Discord application needs, from Paseo's own artwork.
+# Renders the six art assets the Discord application needs, from Paseo's own artwork.
 #
 # Usage: scripts/render-assets.sh [path-to-paseo-checkout]
 #
-# The large image is Paseo's app icon. The small images are the status dots Paseo draws on its own
-# favicon, in Paseo's colours, as bare circles: Discord renders the small image at about 20px, where
+# The large image is Paseo's app icon. The small images are the status dots Paseo draws beside its own
+# workspace rows, in Paseo's colours, as bare circles: Discord renders the small image at about 20px, where
 # a whole icon with a dot on it is unreadable.
 #
 # Source: https://github.com/getpaseo/paseo, AGPLv3, packages/app/assets/images.
@@ -38,9 +38,14 @@ dot() {
 SVG
 }
 
-# The same colours Paseo uses for its running and attention favicons.
-dot running "#3b82f6"
-dot attention "#22c55e"
+# Paseo's own status dot colours, dark theme, from packages/app/src/styles/theme.ts.
+# Its favicon collapses needs_input and attention into one green; the sidebar does not, and neither
+# does this: being asked for a permission is not the same as being handed the turn back.
+dot needs_input "#db932e"
+dot failed "#f7796d"
+dot running "#5caaf6"
+dot attention "#35c264"
+# Paseo draws no dot at all for a finished workspace, so grey is this plugin's own.
 dot idle "#6b7280"
 
 echo "Wrote:"

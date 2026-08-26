@@ -68,10 +68,10 @@ export function isProjectMuted(settings: PresenceSettings, projectRootPath: stri
 }
 
 function isLive(status: WorkspaceStatus): boolean {
-  return status === "running" || status === "needs_input" || status === "attention";
+  return status !== "done";
 }
 
-/** A workspace still working or still waiting on you is active now, whatever its last stamp says. */
+/** A workspace that has not finished is active now, whatever its last stamp says. */
 function activeAt(workspace: WorkspaceActivity, now: number): number {
   if (isLive(workspace.status)) return now;
   return Math.max(workspace.activityAt ?? 0, workspace.statusEnteredAt ?? 0);
@@ -115,23 +115,35 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-/** Being blocked on the user outranks work in flight, in both the second line and the small image. */
+function countStatus(workspaces: readonly WorkspaceActivity[], status: WorkspaceStatus): number {
+  return workspaces.filter((workspace) => workspace.status === status).length;
+}
+
+/**
+ * Paseo's own order of demand: a permission prompt outranks a failure, which outranks work still in
+ * flight, which outranks a turn that has merely ended.
+ */
 function activityClause(workspaces: readonly WorkspaceActivity[], agents: AgentTally): string {
-  const waiting =
-    agents.needsAttention +
-    workspaces.filter((workspace) => workspace.status === "needs_input").length;
-  if (waiting > 0) return `${waiting} waiting for input`;
+  const blocked = countStatus(workspaces, "needs_input");
+  if (blocked > 0) return `${blocked} waiting for permission`;
+  const failed = countStatus(workspaces, "failed");
+  if (failed > 0) return `${failed} failed`;
   if (agents.running > 0) return `${plural(agents.running, "agent")} running`;
+  if (agents.needsAttention > 0) return `${agents.needsAttention} waiting for you`;
   return "idle";
 }
 
-function smallImage(active: WorkspaceActivity, agents: AgentTally): { key: string; text: string } {
-  if (agents.needsAttention > 0 || active.status === "needs_input" || active.status === "attention") {
-    return { key: "attention", text: "Waiting for input" };
-  }
-  if (agents.running > 0 || active.status === "running") return { key: "running", text: "Running" };
-  return { key: "idle", text: "Idle" };
-}
+/**
+ * The badge speaks for the workspace on the first line and nothing else. Reading it off a tally
+ * across every project would turn it green for work in a project you muted precisely to hide.
+ */
+const BADGES: Record<WorkspaceStatus, { key: string; text: string }> = {
+  needs_input: { key: "needs_input", text: "Waiting for permission" },
+  failed: { key: "failed", text: "Failed" },
+  running: { key: "running", text: "Running" },
+  attention: { key: "attention", text: "Finished — your turn" },
+  done: { key: "idle", text: "Idle" },
+};
 
 function describeWorkspace(active: WorkspaceActivity): string {
   const { projectDisplayName, workspaceName } = active;
@@ -164,7 +176,7 @@ export function renderActivity(
   const active = pickActive(snapshot.workspaces, settings, now);
   if (!active) return anonymousActivity(startTimestamp);
 
-  const image = smallImage(active, snapshot.agents);
+  const badge = BADGES[active.status];
   const count = plural(snapshot.workspaces.length, "workspace");
   return {
     details:
@@ -175,8 +187,8 @@ export function renderActivity(
         : `${count} · ${activityClause(snapshot.workspaces, snapshot.agents)}`,
     largeImageKey: LARGE_IMAGE_KEY,
     largeImageText: LARGE_IMAGE_TEXT,
-    smallImageKey: image.key,
-    smallImageText: image.text,
+    smallImageKey: badge.key,
+    smallImageText: badge.text,
     startTimestamp,
   };
 }

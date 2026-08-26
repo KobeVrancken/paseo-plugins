@@ -95,21 +95,65 @@ test("reports running agents", () => {
   assert.equal(renderActivity(busy, settings(), START, NOW)?.state, "1 workspace · 2 agents running");
 });
 
-test("prefers waiting for input over work in flight", () => {
-  const blocked = snapshot({ agents: { running: 1, needsAttention: 1 } });
-  const activity = renderActivity(blocked, settings(), START, NOW);
-  assert.equal(activity?.state, "1 workspace · 1 waiting for input");
-  assert.equal(activity?.smallImageKey, "attention");
+test("a permission prompt outranks work in flight", () => {
+  const blocked = snapshot({
+    workspaces: [workspace({ status: "needs_input" })],
+    agents: { running: 1, needsAttention: 0 },
+  });
+  assert.equal(renderActivity(blocked, settings(), START, NOW)?.state, "1 workspace · 1 waiting for permission");
 });
 
-test("counts a workspace needing input even when no agent reports attention", () => {
-  const blocked = snapshot({ workspaces: [workspace({ status: "needs_input" })] });
-  assert.equal(renderActivity(blocked, settings(), START, NOW)?.state, "1 workspace · 1 waiting for input");
+test("work in flight outranks a turn that has merely ended", () => {
+  const busy = snapshot({
+    workspaces: [workspace({ status: "running" })],
+    agents: { running: 1, needsAttention: 1 },
+  });
+  assert.equal(renderActivity(busy, settings(), START, NOW)?.state, "1 workspace · 1 agent running");
 });
 
-test("marks a running workspace with the running image", () => {
-  const running = snapshot({ workspaces: [workspace({ status: "running" })] });
-  assert.equal(renderActivity(running, settings(), START, NOW)?.smallImageKey, "running");
+test("reports a finished turn once nothing is still running", () => {
+  const finished = snapshot({
+    workspaces: [workspace({ status: "attention" })],
+    agents: { running: 0, needsAttention: 2 },
+  });
+  assert.equal(renderActivity(finished, settings(), START, NOW)?.state, "1 workspace · 2 waiting for you");
+});
+
+test("reports a failed workspace", () => {
+  const broken = snapshot({ workspaces: [workspace({ status: "failed" })] });
+  assert.equal(renderActivity(broken, settings(), START, NOW)?.state, "1 workspace · 1 failed");
+});
+
+test("gives every workspace status its own badge", () => {
+  const badges = {
+    needs_input: ["needs_input", "Waiting for permission"],
+    failed: ["failed", "Failed"],
+    running: ["running", "Running"],
+    attention: ["attention", "Finished — your turn"],
+    done: ["idle", "Idle"],
+  } as const;
+  for (const [status, [key, text]] of Object.entries(badges)) {
+    const only = snapshot({
+      workspaces: [workspace({ status: status as WorkspaceActivity["status"] })],
+    });
+    const activity = renderActivity(only, settings(), START, NOW);
+    assert.equal(activity?.smallImageKey, key, status);
+    assert.equal(activity?.smallImageText, text, status);
+  }
+});
+
+test("the badge follows the named workspace, not a tally across muted projects", () => {
+  const many = snapshot({
+    workspaces: [
+      workspace({ projectRootPath: "/work/client", projectDisplayName: "client-work", status: "needs_input" }),
+      workspace({ projectRootPath: "/home/dev/paseo-plugins", status: "running" }),
+    ],
+    agents: { running: 1, needsAttention: 3 },
+  });
+  const muted = settings({ mutedProjects: [{ rootPath: "/work/client", displayName: "client-work" }] });
+  const activity = renderActivity(many, muted, START, NOW);
+  assert.equal(activity?.details, "paseo-plugins — main");
+  assert.equal(activity?.smallImageKey, "running");
 });
 
 test("the projects level keeps the project name and drops the rest", () => {

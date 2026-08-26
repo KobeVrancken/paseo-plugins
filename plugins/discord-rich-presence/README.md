@@ -9,8 +9,21 @@ Shows what you are doing in Paseo on your Discord profile, for as long as Paseo 
         02:14 elapsed
 ```
 
-The first line is the project and workspace Paseo saw activity in most recently, the second counts every open workspace and what its agents are doing, and the badge on the icon is blue while an agent runs, green while one waits for you, and grey when nothing is happening.
+The first line is the project and workspace Paseo saw activity in most recently, the second counts every open workspace and what its agents are doing, and the badge on the icon says which state that workspace is in.
 Half an hour after the last thing happens the first line drops back to *Using Paseo*, so your profile stops advertising a workspace you have long since walked away from.
+
+The badge has one colour per state, matching the dot Paseo draws beside the same workspace in its sidebar:
+
+| Badge | Hover text | What it means |
+| --- | --- | --- |
+| Amber | Waiting for permission | An agent is blocked asking you to approve something. |
+| Red | Failed | An agent errored. |
+| Blue | Running | An agent is working. |
+| Green | Finished — your turn | An agent ended its turn and is waiting on your next message. |
+| Grey | Idle | Nothing is happening in that workspace. |
+
+Green is the one that surprises people: Paseo raises it the moment a turn ends, and clears it once you look at the session, so it flashes up briefly every time a conversation finishes.
+That is Paseo telling you it is your move, not an error.
 
 ## Setup
 
@@ -19,7 +32,7 @@ Discord will not show a presence until you own an application for it, and only y
 1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and press **New Application**.
    Name it **Paseo**: Discord renders the application's name as the bold first line, so anything else is what your friends will read.
 2. On **General Information**, copy the **Application ID**.
-3. Open **Rich Presence → Art Assets** and upload the four files in `assets/`, each keeping its filename as its asset key: `paseo`, `running`, `attention`, `idle`.
+3. Open **Rich Presence → Art Assets** and upload the six files in `assets/`, each keeping its filename as its asset key: `paseo`, `needs_input`, `failed`, `running`, `attention`, `idle`.
    Uploaded art can take a few minutes before Discord serves it.
 4. In Paseo, open **Discord Presence** in the sidebar, paste the Application ID, and press **Save**.
 
@@ -72,5 +85,5 @@ Run `paseo plugin logs discord-rich-presence` for anything else.
 ## Artwork
 
 `assets/` is rendered from Paseo's own artwork in [getpaseo/paseo](https://github.com/getpaseo/paseo) (`packages/app/assets/images`), which is AGPLv3.
-The large image is Paseo's app icon; the status dots are bare circles in the colours Paseo uses on its own favicon.
+The large image is Paseo's app icon; the status dots are bare circles in the colours Paseo uses beside its own workspace rows.
 This repository carries no licence of its own yet, which is worth settling before publishing it anywhere.
