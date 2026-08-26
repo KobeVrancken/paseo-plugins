@@ -64,7 +64,7 @@ Mutes are keyed by the project's root path, and stay in the list after you close
 
 **Turning it off** closes the socket, so Paseo disappears from your profile immediately.
 
-Both live in the sidebar screen, and in the Command Center as *Discord presence: turn off*, *turn on*, *mute this project* and *unmute this project*.
+Both live in the sidebar screen, and in the Command Center as *Discord rich presence: turn off*, *turn on*, *mute this project* and *unmute this project*.
 
 ## Where the settings live
 

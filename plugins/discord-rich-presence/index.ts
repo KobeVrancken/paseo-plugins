@@ -27,7 +27,7 @@ export default function contribute(plugin: PluginContext) {
 
   plugin.addCommandCenterItem({
     id: "discord-rich-presence-off",
-    title: "Discord presence: turn off",
+    title: "Discord rich presence: turn off",
     icon: "EyeOff",
     keywords: ["discord", "presence", "status", "privacy"],
     context: "global",
@@ -38,7 +38,7 @@ export default function contribute(plugin: PluginContext) {
 
   plugin.addCommandCenterItem({
     id: "discord-rich-presence-on",
-    title: "Discord presence: turn on",
+    title: "Discord rich presence: turn on",
     icon: "Eye",
     keywords: ["discord", "presence", "status"],
     context: "global",
@@ -49,7 +49,7 @@ export default function contribute(plugin: PluginContext) {
 
   plugin.addCommandCenterItem({
     id: "discord-rich-presence-mute-project",
-    title: "Discord presence: mute this project",
+    title: "Discord rich presence: mute this project",
     icon: "EyeOff",
     keywords: ["discord", "presence", "mute", "project", "privacy"],
     context: "workspace",
@@ -64,7 +64,7 @@ export default function contribute(plugin: PluginContext) {
 
   plugin.addCommandCenterItem({
     id: "discord-rich-presence-unmute-project",
-    title: "Discord presence: unmute this project",
+    title: "Discord rich presence: unmute this project",
     icon: "Eye",
     keywords: ["discord", "presence", "unmute", "project"],
     context: "workspace",
