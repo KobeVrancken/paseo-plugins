@@ -18,7 +18,7 @@ The panel never replaces the CLI. A real interactive `claude` runs in a normal p
 
    ```sh
    pnpm install
-   paseo plugin install /path/to/paseo-plugins/packages/claude-code-panel
+   paseo plugin install /path/to/paseo-plugins/plugins/claude-code-panel
    ```
 
 3. Open a workspace, then open the **Claude Code** panel, either as a workspace panel or through the command center item "Open Claude Code panel".
