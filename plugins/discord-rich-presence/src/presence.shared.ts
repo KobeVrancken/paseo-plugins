@@ -148,6 +148,15 @@ const BADGES: Record<WorkspaceStatus, { key: string; text: string }> = {
   done: { key: "idle", text: "Idle" },
 };
 
+/** The colours `scripts/render-assets.sh` fills the small images with, so the preview shows the badge Discord does. */
+export const BADGE_COLORS: Record<string, string> = {
+  needs_input: "#db932e",
+  failed: "#f7796d",
+  running: "#5caaf6",
+  attention: "#35c264",
+  idle: "#6b7280",
+};
+
 function describeWorkspace(active: WorkspaceActivity): string {
   const { projectDisplayName, workspaceName } = active;
   if (!workspaceName || workspaceName === projectDisplayName) return projectDisplayName;

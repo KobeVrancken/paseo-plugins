@@ -1,147 +1,119 @@
-import type { PluginSurfaceProps, PluginTheme } from "@getpaseo/plugin";
+import type { PluginSurfaceProps } from "@getpaseo/plugin";
 import { useRpc } from "@getpaseo/plugin";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import React, { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import React, { useMemo, useState } from "react";
+import { ScrollView, Text, TextInput, View } from "react-native";
 import * as contracts from "../contracts.shared.ts";
 import type { PresenceStatusPayload } from "../contracts.shared.ts";
 import {
+  BADGE_COLORS,
   DETAIL_LEVELS,
   DETAIL_LEVEL_LABELS,
   type DetailLevel,
   MANAGED_APPLICATION_ID,
 } from "../presence.shared.ts";
+import { coerceApplicationId } from "../settings.shared.ts";
+import { DiscordPreview } from "./preview.client.tsx";
+import {
+  MAX_CONTENT_WIDTH,
+  controlHeight,
+  fontSize,
+  leading,
+  radius,
+  spacing,
+  type Palette,
+} from "./theme.client.ts";
+import {
+  Button,
+  Card,
+  NO_OUTLINE,
+  Row,
+  Section,
+  SegmentedControl,
+  StatusDot,
+  Switch,
+  usePalette,
+} from "./ui.client.tsx";
 
 const STATUS_QUERY_KEY = ["discord-rich-presence", "status"];
 const REFETCH_MS = 5_000;
 
-type Colors = PluginTheme["colors"];
+type Connection = { text: string; tone: "accent" | "muted" | "danger" };
 
-function connectionLine(status: PresenceStatusPayload): { text: string; tone: keyof Colors } {
+function connectionOf(status: PresenceStatusPayload): Connection {
   if (!status.settings.applicationId) {
-    return { text: "Not set up yet — add an application ID below", tone: "foregroundMuted" };
+    return { text: "No application ID — add one below", tone: "muted" };
   }
-  if (!status.settings.enabled) return { text: "Switched off", tone: "foregroundMuted" };
+  if (!status.settings.enabled) return { text: "Off — your profile shows nothing", tone: "muted" };
   if (status.daemon.status === "failed") {
-    return { text: `Cannot read Paseo: ${status.daemon.error ?? "unknown error"}`, tone: "statusDanger" };
+    return { text: `Cannot read Paseo: ${status.daemon.error ?? "unknown error"}`, tone: "danger" };
   }
   switch (status.discord.status) {
     case "connected":
       return { text: "Connected to Discord", tone: "accent" };
     case "connecting":
-      return { text: "Connecting to Discord…", tone: "foregroundMuted" };
+      return { text: "Connecting to Discord…", tone: "muted" };
     case "unavailable":
-      return { text: `${status.discord.error ?? "Discord not running"} — retrying…`, tone: "foregroundMuted" };
+      return { text: `${status.discord.error ?? "Discord not running"} — retrying…`, tone: "muted" };
     case "rejected":
-      return { text: status.discord.error ?? "Discord refused this application ID", tone: "statusDanger" };
+      return { text: status.discord.error ?? "Discord refused this application ID", tone: "danger" };
     default:
-      return { text: "Idle", tone: "foregroundMuted" };
+      return { text: "Idle", tone: "muted" };
   }
 }
 
-function useElapsed(startTimestamp: number | null): string | null {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (startTimestamp === null) return;
-    const timer = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(timer);
-  }, [startTimestamp]);
-  if (startTimestamp === null) return null;
-  const total = Math.max(0, Math.floor((now - startTimestamp) / 1000));
-  const minutes = Math.floor(total / 60);
-  const seconds = total % 60;
-  const hours = Math.floor(minutes / 60);
-  const body = `${String(minutes % 60).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  return hours > 0 ? `${hours}:${body} elapsed` : `${body} elapsed`;
+function toneColor(palette: Palette, tone: Connection["tone"]): string {
+  if (tone === "accent") return palette.accent;
+  if (tone === "danger") return palette.statusDanger;
+  return palette.foregroundMuted;
 }
 
-function Button({
-  colors,
-  label,
-  onPress,
-  tone = "outline",
+const DETAIL_LEVEL_HINTS: Record<DetailLevel, string> = {
+  detailed: "Your project, the workspace you are in, and what your agents are doing.",
+  projects: "Your project name and how many workspaces are open. Workspace titles stay private.",
+  anonymous: "Only that Paseo is running.",
+};
+
+function ApplicationIdField({
+  palette,
+  value,
+  onChangeText,
+  onSubmit,
 }: {
-  colors: Colors;
-  label: string;
-  onPress: () => void;
-  tone?: "outline" | "accent";
+  palette: Palette;
+  value: string;
+  onChangeText: (value: string) => void;
+  onSubmit: () => void;
 }) {
   return (
-    <Pressable
-      onPress={onPress}
-      style={{
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 6,
-        borderWidth: 1,
-        borderColor: tone === "accent" ? colors.accent : colors.foregroundMuted,
-        backgroundColor: tone === "accent" ? colors.accent : "transparent",
-      }}
-    >
-      <Text style={{ color: tone === "accent" ? colors.accentForeground : colors.foreground, fontSize: 13 }}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function Section({
-  colors,
-  title,
-  children,
-}: {
-  colors: Colors;
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <View style={{ gap: 8 }}>
-      <Text style={{ color: colors.foregroundMuted, fontSize: 12, textTransform: "uppercase" }}>
-        {title}
-      </Text>
-      {children}
-    </View>
-  );
-}
-
-function Preview({ colors, status }: { colors: Colors; status: PresenceStatusPayload }) {
-  const elapsed = useElapsed(status.activity?.startTimestamp ?? null);
-  if (!status.activity) {
-    return (
-      <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
-        Nothing is sent to Discord right now.
-      </Text>
-    );
-  }
-  return (
-    <View
-      style={{
-        borderWidth: 1,
-        borderColor: colors.foregroundMuted,
-        borderRadius: 8,
-        padding: 12,
-        gap: 2,
-      }}
-    >
-      <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>
-        {status.activity.largeImageText}
-      </Text>
-      <Text style={{ color: colors.foreground, fontSize: 13 }}>{status.activity.details}</Text>
-      {status.activity.state ? (
-        <Text style={{ color: colors.foreground, fontSize: 13 }}>{status.activity.state}</Text>
-      ) : null}
-      {elapsed ? <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{elapsed}</Text> : null}
-      {status.activity.smallImageText ? (
-        <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-          Badge: {status.activity.smallImageText}
-        </Text>
-      ) : null}
-    </View>
+    <TextInput
+      value={value}
+      onChangeText={onChangeText}
+      onSubmitEditing={onSubmit}
+      placeholder={MANAGED_APPLICATION_ID}
+      placeholderTextColor={palette.foregroundExtraMuted}
+      accessibilityLabel="Discord application ID"
+      style={[
+        {
+          flex: 1,
+          minWidth: 160,
+          minHeight: controlHeight.compact,
+          color: palette.foreground,
+          backgroundColor: palette.surface0,
+          borderWidth: 1,
+          borderColor: palette.borderAccent,
+          borderRadius: radius.md,
+          paddingHorizontal: spacing[3],
+          fontSize: fontSize.base,
+        },
+        NO_OUTLINE,
+      ]}
+    />
   );
 }
 
 export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
-  const colors = theme.colors;
+  const palette = usePalette(theme);
   const queryClient = useQueryClient();
   const getStatus = useRpc(contracts.getStatus);
   const setSettings = useRpc(contracts.setSettings);
@@ -164,119 +136,195 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
 
   const status = query.data ?? null;
   const [draftId, setDraftId] = useState<string | null>(null);
-  const applicationId = draftId ?? status?.settings.applicationId ?? "";
-  const line = useMemo(() => (status ? connectionLine(status) : null), [status]);
+  const connection = useMemo(() => (status ? connectionOf(status) : null), [status]);
 
-  if (!status || !line) {
+  if (!status || !connection) {
     return (
-      <View style={{ flex: 1, padding: layout.compact ? 16 : 24, backgroundColor: colors.surface0 }}>
-        <Text style={{ color: colors.foregroundMuted }}>Loading…</Text>
+      <View style={{ flex: 1, backgroundColor: palette.surface0, padding: spacing[4] }}>
+        <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.base }}>Loading…</Text>
       </View>
     );
   }
 
+  const settings = status.settings;
+  const savedId = settings.applicationId ?? "";
+  const applicationId = draftId ?? savedId;
+  const parsedId = coerceApplicationId(applicationId);
+  const idChanged = applicationId.trim() !== savedId;
+  const idInvalid = applicationId.trim().length > 0 && parsedId === null;
+  const badgeColor = status.activity?.smallImageKey
+    ? (BADGE_COLORS[status.activity.smallImageKey] ?? null)
+    : null;
+
+  const saveApplicationId = () => {
+    if (idInvalid || !idChanged) return;
+    apply.mutate({ ...settings, applicationId: parsedId });
+    setDraftId(null);
+  };
+
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: colors.surface0 }}
-      contentContainerStyle={{ padding: layout.compact ? 16 : 24, gap: 24 }}
+      style={{ flex: 1, backgroundColor: palette.surface0 }}
+      contentContainerStyle={{
+        width: "100%",
+        maxWidth: MAX_CONTENT_WIDTH,
+        alignSelf: "center",
+        padding: layout.compact ? spacing[3] : spacing[4],
+        paddingTop: spacing[6],
+        paddingBottom: spacing[8],
+        gap: spacing[6],
+      }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <Text style={{ color: colors[line.tone], fontSize: 14, flexShrink: 1 }}>{line.text}</Text>
-        <Button
-          colors={colors}
-          label={status.settings.enabled ? "Turn off" : "Turn on"}
-          tone={status.settings.enabled ? "outline" : "accent"}
-          onPress={() => apply.mutate({ ...status.settings, enabled: !status.settings.enabled })}
+      <Card palette={palette}>
+        <Row
+          palette={palette}
+          title="Show my activity on Discord"
+          hint={connection.text}
+          hintColor={toneColor(palette, connection.tone)}
+          leading={
+            <View style={{ paddingRight: spacing[1] }}>
+              <StatusDot color={toneColor(palette, connection.tone)} />
+            </View>
+          }
+          trailing={
+            <Switch
+              palette={palette}
+              value={settings.enabled}
+              onValueChange={(enabled) => apply.mutate({ ...settings, enabled })}
+              accessibilityLabel="Show my activity on Discord"
+            />
+          }
         />
-      </View>
+      </Card>
 
-      <Section colors={colors} title="Application ID">
-        <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-          <TextInput
-            value={applicationId}
-            onChangeText={setDraftId}
-            placeholder={MANAGED_APPLICATION_ID}
-            placeholderTextColor={colors.foregroundMuted}
-            style={{
-              flex: 1,
-              color: colors.foreground,
-              borderWidth: 1,
-              borderColor: colors.foregroundMuted,
-              borderRadius: 6,
-              paddingHorizontal: 10,
-              paddingVertical: 6,
-              fontSize: 13,
-            }}
-          />
-          <Button
-            colors={colors}
-            label="Save"
-            tone="accent"
-            onPress={() => {
-              apply.mutate({ ...status.settings, applicationId: applicationId.trim() || null });
-              setDraftId(null);
-            }}
-          />
-        </View>
-        <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-          This is the shared Paseo application, and it is already filled in. Replace it with your own
-          if you would rather host the presence yourself; the plugin README walks through the portal
-          steps and the art assets.
+      <Section
+        palette={palette}
+        title="Preview"
+        trailing={
+          badgeColor && status.activity?.smallImageText ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[2] }}>
+              <StatusDot color={badgeColor} size={6} />
+              <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.sm }}>
+                {status.activity.smallImageText}
+              </Text>
+            </View>
+          ) : null
+        }
+      >
+        <DiscordPreview status={status} />
+      </Section>
+
+      <Section palette={palette} title="Detail level">
+        <Card palette={palette}>
+          <View style={{ padding: spacing[4], gap: spacing[3] }}>
+            <SegmentedControl
+              palette={palette}
+              value={settings.detailLevel}
+              options={DETAIL_LEVELS.map((level: DetailLevel) => ({
+                value: level,
+                label: DETAIL_LEVEL_LABELS[level],
+              }))}
+              onValueChange={(detailLevel) => apply.mutate({ ...settings, detailLevel })}
+            />
+            <Text
+              style={{
+                color: palette.foregroundMuted,
+                fontSize: fontSize.sm,
+                lineHeight: leading(fontSize.sm),
+              }}
+            >
+              {DETAIL_LEVEL_HINTS[settings.detailLevel]}
+            </Text>
+          </View>
+        </Card>
+      </Section>
+
+      <Section palette={palette} title="Projects">
+        <Card palette={palette}>
+          {status.projects.length === 0 ? (
+            <Row palette={palette} title="No projects open." dimmed />
+          ) : (
+            status.projects.map((project, index) => (
+              <Row
+                key={project.rootPath}
+                palette={palette}
+                title={project.displayName}
+                hint={project.rootPath}
+                dimmed={project.muted}
+                divided={index > 0}
+                trailing={
+                  <Switch
+                    palette={palette}
+                    value={!project.muted}
+                    onValueChange={(shown) =>
+                      toggleMute.mutate({
+                        rootPath: project.rootPath,
+                        displayName: project.displayName,
+                        muted: !shown,
+                      })
+                    }
+                    accessibilityLabel={`Show ${project.displayName} on Discord`}
+                  />
+                }
+              />
+            ))
+          )}
+        </Card>
+        <Text
+          style={{
+            color: palette.foregroundMuted,
+            fontSize: fontSize.sm,
+            lineHeight: leading(fontSize.sm),
+            marginLeft: spacing[1],
+          }}
+        >
+          Switch a project off to keep it off your profile. Paseo shows another project with active
+          work instead, or falls back to the anonymous presence.
         </Text>
       </Section>
 
-      <Section colors={colors} title="Detail level">
-        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-          {DETAIL_LEVELS.map((level: DetailLevel) => (
-            <Button
-              key={level}
-              colors={colors}
-              label={DETAIL_LEVEL_LABELS[level]}
-              tone={status.settings.detailLevel === level ? "accent" : "outline"}
-              onPress={() => apply.mutate({ ...status.settings, detailLevel: level })}
-            />
-          ))}
-        </View>
-      </Section>
-
-      <Section colors={colors} title="Preview">
-        <Preview colors={colors} status={status} />
-      </Section>
-
-      <Section colors={colors} title="Projects">
-        {status.projects.length === 0 ? (
-          <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>No projects open.</Text>
-        ) : (
-          status.projects.map((project) => (
-            <View
-              key={project.rootPath}
+      <Section palette={palette} title="Application">
+        <Card palette={palette}>
+          <View style={{ padding: spacing[4], gap: spacing[3] }}>
+            <View style={{ flexDirection: "row", gap: spacing[2], alignItems: "center", flexWrap: "wrap" }}>
+              <ApplicationIdField
+                palette={palette}
+                value={applicationId}
+                onChangeText={setDraftId}
+                onSubmit={saveApplicationId}
+              />
+              <Button
+                palette={palette}
+                label="Save"
+                variant="default"
+                disabled={!idChanged || idInvalid}
+                onPress={saveApplicationId}
+              />
+              {savedId !== MANAGED_APPLICATION_ID ? (
+                <Button
+                  palette={palette}
+                  label="Use the shared one"
+                  variant="ghost"
+                  onPress={() => {
+                    apply.mutate({ ...settings, applicationId: MANAGED_APPLICATION_ID });
+                    setDraftId(null);
+                  }}
+                />
+              ) : null}
+            </View>
+            <Text
               style={{
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                paddingVertical: 6,
+                color: idInvalid ? palette.statusDanger : palette.foregroundMuted,
+                fontSize: fontSize.sm,
+                lineHeight: leading(fontSize.sm),
               }}
             >
-              <View style={{ flexShrink: 1 }}>
-                <Text style={{ color: colors.foreground, fontSize: 13 }}>{project.displayName}</Text>
-                <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>{project.rootPath}</Text>
-              </View>
-              <Button
-                colors={colors}
-                label={project.muted ? "Muted" : "Mute"}
-                tone={project.muted ? "accent" : "outline"}
-                onPress={() =>
-                  toggleMute.mutate({
-                    rootPath: project.rootPath,
-                    displayName: project.displayName,
-                    muted: !project.muted,
-                  })
-                }
-              />
-            </View>
-          ))
-        )}
+              {idInvalid
+                ? "An application ID is 17 to 20 digits."
+                : "The shared Paseo application, already filled in. Replace it with your own to host the presence yourself — the plugin README walks through the portal steps and the art assets."}
+            </Text>
+          </View>
+        </Card>
       </Section>
     </ScrollView>
   );

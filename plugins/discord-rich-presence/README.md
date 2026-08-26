@@ -32,7 +32,7 @@ Choose how much information appears on your profile with **Detail level**:
 
 Workspace titles can contain task details, so review them before using **Detailed**.
 
-You can mute a project to hide all of its workspace names. Paseo shows another project with active work when possible, or falls back to the anonymous presence. Mutes are saved by project path until you remove them.
+Switch a project off under **Projects** to hide all of its workspace names. Paseo shows another project with active work when possible, or falls back to the anonymous presence. The choice is saved by project path until you switch it back on.
 
 Use the sidebar or Command Center to turn the presence on or off and to mute or unmute the current project. Turning it off removes the presence immediately.
 
