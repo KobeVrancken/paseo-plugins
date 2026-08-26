@@ -1,0 +1,73 @@
+# Discord Presence
+
+Shows what you are doing in Paseo on your Discord profile, for as long as Paseo is open.
+
+```
+[icon]  Paseo
+        paseo-plugins — main
+        3 workspaces · 1 agent running
+        02:14 elapsed
+```
+
+The first line is the project and workspace Paseo saw activity in most recently, the second counts every open workspace and what its agents are doing, and the badge on the icon is blue while an agent runs, green while one waits for you, and grey when nothing is happening.
+
+## Setup
+
+Discord will not show a presence until you own an application for it, and only you can create one.
+
+1. Open <https://discord.com/developers/applications> and press **New Application**.
+   Name it **Paseo**: Discord renders the application's name as the bold first line, so anything else is what your friends will read.
+2. On **General Information**, copy the **Application ID**.
+3. Open **Rich Presence → Art Assets** and upload the four files in `assets/`, each keeping its filename as its asset key: `paseo`, `running`, `attention`, `idle`.
+   Uploaded art can take a few minutes before Discord serves it.
+4. In Paseo, open **Discord Presence** in the sidebar, paste the Application ID, and press **Save**.
+
+The header of that screen tells you where you stand: *Not configured*, *Discord not running — retrying…*, or *Connected to Discord*.
+Discord must be running on the same machine as the Paseo daemon; the presence talks to it over a local socket, and covers native, Snap and Flatpak installs.
+
+To re-render the art after Paseo changes its own, run `scripts/render-assets.sh /path/to/paseo`.
+
+## Controlling what is shown
+
+**Detail level** decides how much of your work is named:
+
+| Level | First line | Second line |
+| --- | --- | --- |
+| Detailed | `paseo-plugins — main` | `3 workspaces · 1 agent running` |
+| Projects only | `paseo-plugins` | `3 workspaces` |
+| Anonymous | `Using Paseo` | — |
+
+Worth knowing before you pick: a workspace's name is often a title an agent wrote for the task, so Detailed can put something like `acme-billing — Invoke the wayfinder skill` on your profile.
+**Projects only** keeps the repository name and drops that.
+
+**Muting a project** hides the names of every workspace in it.
+A muted project is redacted rather than removed: the presence falls through to another project that is not muted, and shows the Anonymous rendering when there is none.
+Going dark entirely would announce that you switched something off, which is its own signal.
+
+Mutes are keyed by the project's root path, and stay in the list after you close the project so you can lift them later.
+
+**Turning it off** closes the socket, so Paseo disappears from your profile immediately.
+
+Both live in the sidebar screen, and in the Command Center as *Discord presence: turn off*, *turn on*, *mute this project* and *unmute this project*.
+
+## Where the settings live
+
+`~/.cache/discord-presence/settings.json`, because the daemon config drops keys it does not know.
+The file is yours to edit; the plugin re-reads it when it starts.
+
+## Troubleshooting
+
+| Symptom | Cause |
+| --- | --- |
+| *Discord rejected the handshake — check the application ID* | The ID is not one of your applications. Copy it again from General Information. |
+| *Discord not running — retrying…* | Discord is closed, or its socket is somewhere this does not look. The connection retries on its own, backing off to a minute. |
+| *Cannot read Paseo* | The plugin could not reach the daemon. It reads the address from `PASEO_HOST`, `PASEO_LISTEN`, `$PASEO_HOME/paseo.pid` and the daemon config, in that order, and cannot dial a daemon listening on a unix socket. |
+| The icon shows but the images are missing | The asset keys do not match, or Discord has not finished processing the upload. |
+
+Run `paseo plugin logs discord-presence` for anything else.
+
+## Artwork
+
+`assets/` is rendered from Paseo's own artwork in [getpaseo/paseo](https://github.com/getpaseo/paseo) (`packages/app/assets/images`), which is AGPLv3.
+The large image is Paseo's app icon; the status dots are bare circles in the colours Paseo uses on its own favicon.
+This repository carries no licence of its own yet, which is worth settling before publishing it anywhere.
