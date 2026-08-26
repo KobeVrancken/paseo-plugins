@@ -7,3 +7,33 @@ Dependencies belong to the package that uses them, not the root, because the dae
 `pnpm typecheck` and `pnpm test` at the root fan out to every package; the package-level scripts are the ones to run while working on a single plugin.
 
 Each package carries its own CLAUDE.md with the constraints that apply to it.
+
+## Plugin READMEs
+
+Every plugin's README follows the same template, so a new plugin starts from this and drops only the sections marked optional:
+
+```md
+# plugin name
+
+<short description>
+
+## Screenshots
+
+## Installation
+
+<paseo plugin install "/absolute/path/to/paseo-plugins/plugins/<name>"; the samples assume the repo is the CWD>
+
+<optional extra instructions>
+
+## Settings
+
+## Troubleshooting (optional)
+
+## Development
+
+<instructions for developers>
+
+## License and attributions (optional)
+```
+
+Where a plugin's settings file lives is documented once in the root README, not per plugin.
