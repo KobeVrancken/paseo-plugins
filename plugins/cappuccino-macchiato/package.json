@@ -1,0 +1,13 @@
+{
+  "name": "@paseo-plugins/cappuccino-macchiato",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "typescript": "^5.9.3"
+  },
+  "type": "module"
+}

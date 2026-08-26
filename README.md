@@ -6,6 +6,7 @@ Local plugins for [paseo](https://github.com/getpaseo/paseo), in a pnpm workspac
 | --- | --- |
 | [`plugins/claude-code-panel`](plugins/claude-code-panel) | A workspace panel that renders your local Claude Code CLI sessions and lets you drive them from the paseo app. |
 | [`plugins/discord-rich-presence`](plugins/discord-rich-presence) | A Discord rich presence that shows what you are working on in paseo, with a badge per workspace state. |
+| [`plugins/cappuccino-macchiato`](plugins/cappuccino-macchiato) | A dark app theme in the Catppuccin Macchiato palette. |
 
 ## Working in the workspace
 
