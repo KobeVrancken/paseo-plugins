@@ -24,11 +24,13 @@ export type DiscordState =
   | { status: "idle" }
   | { status: "connecting" }
   | { status: "connected" }
-  | { status: "unavailable"; error: string };
+  | { status: "unavailable"; error: string }
+  | { status: "rejected"; error: string };
 
 /**
  * Owns the IPC socket and nothing else: what to show is decided upstream, so a Discord that is not
  * running, or is started later, shows up here as a retry rather than as a gap in the presence.
+ * An application id Discord refuses is not retried, because only a new id can change the answer.
  */
 export class DiscordConnection {
   private socket: Socket | null = null;
@@ -92,13 +94,13 @@ export class DiscordConnection {
       if (this.socket !== socket) return;
       this.socket = null;
       // Discord hangs up without a close frame when it does not recognise the application id.
-      this.fail(
-        this.state.status === "connected"
-          ? "Discord closed the connection"
-          : "Discord rejected the handshake — check the application ID",
-      );
+      if (this.state.status === "connected") this.fail("Discord closed the connection");
+      else this.reject("Discord refused this application ID");
     });
-    this.handshakeTimer = setTimeout(() => this.fail("Discord did not answer the handshake"), HANDSHAKE_TIMEOUT_MS);
+    this.handshakeTimer = setTimeout(
+      () => this.reject("Discord did not answer the handshake"),
+      HANDSHAKE_TIMEOUT_MS,
+    );
     this.handshakeTimer.unref?.();
     socket.write(encodeFrame(OP_HANDSHAKE, handshakePayload(applicationId)));
   }
@@ -111,7 +113,7 @@ export class DiscordConnection {
       }
       const error = closeFrameError(frame) ?? frameError(frame);
       if (error) {
-        this.fail(error);
+        this.reject(error);
         return;
       }
       if (isReadyFrame(frame)) {
@@ -123,6 +125,21 @@ export class DiscordConnection {
         this.onReady();
       }
     }
+  }
+
+  /** Refused rather than absent: retrying cannot help until the application id changes. */
+  private reject(error: string): void {
+    this.clearTimers();
+    this.socket?.destroy();
+    this.socket = null;
+    this.state = { status: "rejected", error };
+  }
+
+  private clearTimers(): void {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    if (this.handshakeTimer) clearTimeout(this.handshakeTimer);
+    this.retryTimer = null;
+    this.handshakeTimer = null;
   }
 
   private fail(error: string): void {
@@ -157,10 +174,7 @@ export class DiscordConnection {
 
   /** Switching the presence off drops the socket, rather than holding one open for a disabled feature. */
   disconnect(): void {
-    if (this.retryTimer) clearTimeout(this.retryTimer);
-    if (this.handshakeTimer) clearTimeout(this.handshakeTimer);
-    this.retryTimer = null;
-    this.handshakeTimer = null;
+    this.clearTimers();
     this.pending = null;
     this.applicationId = null;
     this.state = { status: "idle" };

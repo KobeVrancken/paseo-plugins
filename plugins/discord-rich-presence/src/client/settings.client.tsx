@@ -14,7 +14,7 @@ type Colors = PluginTheme["colors"];
 
 function connectionLine(status: PresenceStatusPayload): { text: string; tone: keyof Colors } {
   if (!status.settings.applicationId) {
-    return { text: "Not configured — add an application ID", tone: "foregroundMuted" };
+    return { text: "Not set up yet — add an application ID below", tone: "foregroundMuted" };
   }
   if (!status.settings.enabled) return { text: "Switched off", tone: "foregroundMuted" };
   if (status.daemon.status === "failed") {
@@ -26,7 +26,9 @@ function connectionLine(status: PresenceStatusPayload): { text: string; tone: ke
     case "connecting":
       return { text: "Connecting to Discord…", tone: "foregroundMuted" };
     case "unavailable":
-      return { text: "Discord not running — retrying…", tone: "foregroundMuted" };
+      return { text: `${status.discord.error ?? "Discord not running"} — retrying…`, tone: "foregroundMuted" };
+    case "rejected":
+      return { text: status.discord.error ?? "Discord refused this application ID", tone: "statusDanger" };
     default:
       return { text: "Idle", tone: "foregroundMuted" };
   }

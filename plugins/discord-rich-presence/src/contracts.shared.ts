@@ -26,7 +26,7 @@ const ActivitySchema = z.object({
 const StatusSchema = z.object({
   settings: SettingsSchema,
   discord: z.object({
-    status: z.enum(["idle", "connecting", "connected", "unavailable"]),
+    status: z.enum(["idle", "connecting", "connected", "unavailable", "rejected"]),
     error: z.string().optional(),
   }),
   daemon: z.object({

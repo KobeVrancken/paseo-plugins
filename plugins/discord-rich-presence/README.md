@@ -22,7 +22,8 @@ Discord will not show a presence until you own an application for it, and only y
    Uploaded art can take a few minutes before Discord serves it.
 4. In Paseo, open **Discord Presence** in the sidebar, paste the Application ID, and press **Save**.
 
-The header of that screen tells you where you stand: *Not configured*, *Discord not running — retrying…*, or *Connected to Discord*.
+The header of that screen tells you where you stand: *Not set up yet*, *Discord not running — retrying…*, or *Connected to Discord*.
+Nothing is sent, and no connection is attempted, until an Application ID is saved.
 Discord must be running on the same machine as the Paseo daemon; the presence talks to it over a local socket, and covers native, Snap and Flatpak installs.
 
 To re-render the art after Paseo changes its own, run `scripts/render-assets.sh /path/to/paseo`.
@@ -59,7 +60,7 @@ The file is yours to edit; the plugin re-reads it when it starts.
 
 | Symptom | Cause |
 | --- | --- |
-| *Discord rejected the handshake — check the application ID* | The ID is not one of your applications. Copy it again from General Information. |
+| *Discord refused this application ID* | The ID is not one of your applications. Copy it again from General Information and save it; a refusal is not retried, since only a new ID can change the answer. |
 | *Discord not running — retrying…* | Discord is closed, or its socket is somewhere this does not look. The connection retries on its own, backing off to a minute. |
 | *Cannot read Paseo* | The plugin could not reach the daemon. It reads the address from `PASEO_HOST`, `PASEO_LISTEN`, `$PASEO_HOME/paseo.pid` and the daemon config, in that order, and cannot dial a daemon listening on a unix socket. |
 | The icon shows but the images are missing | The asset keys do not match, or Discord has not finished processing the upload. |
