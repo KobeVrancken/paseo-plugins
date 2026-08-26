@@ -5,7 +5,12 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import * as contracts from "../contracts.shared.ts";
 import type { PresenceStatusPayload } from "../contracts.shared.ts";
-import { DETAIL_LEVELS, DETAIL_LEVEL_LABELS, type DetailLevel } from "../presence.shared.ts";
+import {
+  DETAIL_LEVELS,
+  DETAIL_LEVEL_LABELS,
+  type DetailLevel,
+  MANAGED_APPLICATION_ID,
+} from "../presence.shared.ts";
 
 const STATUS_QUERY_KEY = ["discord-rich-presence", "status"];
 const REFETCH_MS = 5_000;
@@ -190,7 +195,7 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
           <TextInput
             value={applicationId}
             onChangeText={setDraftId}
-            placeholder="1234567890123456789"
+            placeholder={MANAGED_APPLICATION_ID}
             placeholderTextColor={colors.foregroundMuted}
             style={{
               flex: 1,
@@ -214,8 +219,9 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
           />
         </View>
         <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-          Create an application named Paseo at discord.com/developers, then paste its ID here. The
-          plugin README walks through the portal steps and the art assets.
+          This is the shared Paseo application, and it is already filled in. Replace it with your own
+          if you would rather host the presence yourself; the plugin README walks through the portal
+          steps and the art assets.
         </Text>
       </Section>
 

@@ -38,7 +38,7 @@ function settings(overrides: Partial<PresenceSettings> = {}): PresenceSettings {
 }
 
 test("renders nothing until an application id is configured", () => {
-  assert.equal(renderActivity(snapshot(), DEFAULT_SETTINGS, START, NOW), null);
+  assert.equal(renderActivity(snapshot(), settings({ applicationId: null }), START, NOW), null);
 });
 
 test("renders nothing while switched off", () => {

@@ -8,6 +8,10 @@ test("an empty file yields the defaults", () => {
   assert.deepEqual(coerceSettings({}), DEFAULT_SETTINGS);
 });
 
+test("keeps an application id the user cleared", () => {
+  assert.equal(coerceSettings({ applicationId: null }).applicationId, null);
+});
+
 test("reads the settings out of the stored envelope", () => {
   const stored = { version: 1, settings: { enabled: false, detailLevel: "anonymous" } };
   const settings = coerceSettings(stored);

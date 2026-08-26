@@ -44,7 +44,8 @@ export function coerceSettings(raw: unknown): PresenceSettings {
   ) as Record<string, unknown>;
   return {
     enabled: typeof settings.enabled === "boolean" ? settings.enabled : DEFAULT_SETTINGS.enabled,
-    applicationId: coerceApplicationId(settings.applicationId),
+    applicationId:
+      "applicationId" in settings ? coerceApplicationId(settings.applicationId) : DEFAULT_SETTINGS.applicationId,
     detailLevel: coerceDetailLevel(settings.detailLevel),
     mutedProjects: coerceMutedProjects(settings.mutedProjects),
   };

@@ -56,9 +56,12 @@ export const DETAIL_LEVEL_LABELS: Record<DetailLevel, string> = {
   anonymous: "Anonymous",
 };
 
+/** The application the plugin ships against, so an install shows a presence without a trip to the developer portal. */
+export const MANAGED_APPLICATION_ID = "1542167510986653787";
+
 export const DEFAULT_SETTINGS: PresenceSettings = {
   enabled: true,
-  applicationId: null,
+  applicationId: MANAGED_APPLICATION_ID,
   detailLevel: "detailed",
   mutedProjects: [],
 };
