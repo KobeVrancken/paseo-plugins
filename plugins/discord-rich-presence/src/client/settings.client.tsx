@@ -26,6 +26,7 @@ import {
 import {
   Button,
   Card,
+  Disclosure,
   NO_OUTLINE,
   Row,
   Section,
@@ -66,6 +67,12 @@ function toneColor(palette: Palette, tone: Connection["tone"]): string {
   if (tone === "accent") return palette.accent;
   if (tone === "danger") return palette.statusDanger;
   return palette.foregroundMuted;
+}
+
+function applicationSummary(savedId: string): string {
+  if (savedId === MANAGED_APPLICATION_ID) return "Shared application";
+  if (savedId === "") return "No application ID";
+  return "Your own application";
 }
 
 function applicationHint(savedId: string): string {
@@ -249,6 +256,52 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
         </Card>
       </Section>
 
+      <Disclosure
+        palette={palette}
+        title="Advanced"
+        summary={applicationSummary(savedId)}
+        initialOpen={savedId === "" || status.discord.status === "rejected"}
+      >
+        <View style={{ padding: spacing[4], gap: spacing[3] }}>
+          <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.sm }}>Application ID</Text>
+          <View style={{ flexDirection: "row", gap: spacing[2], alignItems: "center", flexWrap: "wrap" }}>
+            <ApplicationIdField
+              palette={palette}
+              value={applicationId}
+              onChangeText={setDraftId}
+              onSubmit={saveApplicationId}
+            />
+            <Button
+              palette={palette}
+              label="Save"
+              variant="default"
+              disabled={!idChanged || idInvalid}
+              onPress={saveApplicationId}
+            />
+            {savedId !== MANAGED_APPLICATION_ID ? (
+              <Button
+                palette={palette}
+                label="Use the shared one"
+                variant="ghost"
+                onPress={() => {
+                  apply.mutate({ ...settings, applicationId: MANAGED_APPLICATION_ID });
+                  setDraftId(null);
+                }}
+              />
+            ) : null}
+          </View>
+          <Text
+            style={{
+              color: idInvalid ? palette.statusDanger : palette.foregroundMuted,
+              fontSize: fontSize.sm,
+              lineHeight: leading(fontSize.sm),
+            }}
+          >
+            {idInvalid ? "An application ID is 17 to 20 digits." : applicationHint(savedId)}
+          </Text>
+        </View>
+      </Disclosure>
+
       <Section palette={palette} title="Projects">
         <Card palette={palette}>
           {status.projects.length === 0 ? (
@@ -291,48 +344,6 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
           Switch a project off to keep it off your profile. Paseo shows another project with active
           work instead, or falls back to the anonymous presence.
         </Text>
-      </Section>
-
-      <Section palette={palette} title="Application">
-        <Card palette={palette}>
-          <View style={{ padding: spacing[4], gap: spacing[3] }}>
-            <View style={{ flexDirection: "row", gap: spacing[2], alignItems: "center", flexWrap: "wrap" }}>
-              <ApplicationIdField
-                palette={palette}
-                value={applicationId}
-                onChangeText={setDraftId}
-                onSubmit={saveApplicationId}
-              />
-              <Button
-                palette={palette}
-                label="Save"
-                variant="default"
-                disabled={!idChanged || idInvalid}
-                onPress={saveApplicationId}
-              />
-              {savedId !== MANAGED_APPLICATION_ID ? (
-                <Button
-                  palette={palette}
-                  label="Use the shared one"
-                  variant="ghost"
-                  onPress={() => {
-                    apply.mutate({ ...settings, applicationId: MANAGED_APPLICATION_ID });
-                    setDraftId(null);
-                  }}
-                />
-              ) : null}
-            </View>
-            <Text
-              style={{
-                color: idInvalid ? palette.statusDanger : palette.foregroundMuted,
-                fontSize: fontSize.sm,
-                lineHeight: leading(fontSize.sm),
-              }}
-            >
-              {idInvalid ? "An application ID is 17 to 20 digits." : applicationHint(savedId)}
-            </Text>
-          </View>
-        </Card>
       </Section>
     </ScrollView>
   );

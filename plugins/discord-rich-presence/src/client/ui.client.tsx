@@ -1,6 +1,6 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import type { StyleProp, TextStyle, ViewStyle } from "react-native";
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Platform, Pressable, Text, View } from "react-native";
 import {
   controlHeight,
@@ -302,6 +302,72 @@ export function Row({
       </View>
       {trailing}
     </View>
+  );
+}
+
+/** Paseo marks a disclosure with a chevron; a plugin has no icon set, so the caret is drawn. */
+function Caret({ color, open }: { color: string; open: boolean }) {
+  return (
+    <View style={{ width: 10, height: 10, alignItems: "center", justifyContent: "center" }}>
+      <View
+        style={{
+          width: 0,
+          height: 0,
+          borderTopWidth: 4,
+          borderBottomWidth: 4,
+          borderLeftWidth: 6,
+          borderTopColor: "transparent",
+          borderBottomColor: "transparent",
+          borderLeftColor: color,
+          transform: [{ rotate: open ? "90deg" : "0deg" }],
+        }}
+      />
+    </View>
+  );
+}
+
+/** A card that opens on its header row, for settings that most installs never touch. */
+export function Disclosure({
+  palette,
+  title,
+  summary,
+  initialOpen = false,
+  children,
+}: {
+  palette: Palette;
+  title: string;
+  summary?: string;
+  initialOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(initialOpen);
+  return (
+    <Card palette={palette}>
+      <Pressable
+        onPress={() => setOpen(!open)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        style={pressable(({ hovered, pressed }) => ({
+          flexDirection: "row",
+          alignItems: "center",
+          gap: spacing[2],
+          paddingVertical: spacing[4],
+          paddingHorizontal: spacing[4],
+          backgroundColor: hovered || pressed ? palette.surface2 : "transparent",
+        }))}
+      >
+        <Caret color={palette.foregroundMuted} open={open} />
+        <Text style={{ flex: 1, color: palette.foreground, fontSize: fontSize.base }}>{title}</Text>
+        {summary ? (
+          <Text numberOfLines={1} style={{ color: palette.foregroundMuted, fontSize: fontSize.sm }}>
+            {summary}
+          </Text>
+        ) : null}
+      </Pressable>
+      {open ? (
+        <View style={{ borderTopWidth: 1, borderTopColor: palette.border }}>{children}</View>
+      ) : null}
+    </Card>
   );
 }
 
