@@ -10,6 +10,7 @@ Shows what you are doing in Paseo on your Discord profile, for as long as Paseo 
 ```
 
 The first line is the project and workspace Paseo saw activity in most recently, the second counts every open workspace and what its agents are doing, and the badge on the icon is blue while an agent runs, green while one waits for you, and grey when nothing is happening.
+Half an hour after the last thing happens the first line drops back to *Using Paseo*, so your profile stops advertising a workspace you have long since walked away from.
 
 ## Setup
 
@@ -42,7 +43,8 @@ Worth knowing before you pick: a workspace's name is often a title an agent wrot
 **Projects only** keeps the repository name and drops that.
 
 **Muting a project** hides the names of every workspace in it.
-A muted project is redacted rather than removed: the presence falls through to another project that is not muted, and shows the Anonymous rendering when there is none.
+A muted project is redacted rather than removed: the presence falls through to another project that has live work in it, and shows the Anonymous rendering when there is none.
+It will not fall through to a project that merely ranks next, because a project you finished with yesterday is not what you want promoted onto your profile the moment you mute the one you are actually in.
 Going dark entirely would announce that you switched something off, which is its own signal.
 
 Mutes are keyed by the project's root path, and stay in the list after you close the project so you can lift them later.

@@ -53,7 +53,7 @@ test("ignores archived and closed agents", () => {
 
 test("builds a presence from the live payloads", () => {
   const snapshot = toPresenceSnapshot(workspaceEntries, agentEntries);
-  const now = Date.parse("2026-08-26T12:00:00.000Z");
+  const now = Date.parse("2026-08-26T11:10:00.000Z");
   const activity = renderActivity(
     snapshot,
     { ...DEFAULT_SETTINGS, applicationId: "1234567890123456789" },

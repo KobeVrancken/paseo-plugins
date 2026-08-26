@@ -4,6 +4,7 @@ import {
   ANONYMOUS_DETAILS,
   DEFAULT_SETTINGS,
   renderActivity,
+  STALE_AFTER_MS,
   type PresenceSettings,
   type PresenceSnapshot,
   type WorkspaceActivity,
@@ -127,15 +128,26 @@ test("the anonymous level names nothing at all", () => {
   });
 });
 
-test("a muted project falls through to the next unmuted workspace", () => {
+test("a muted project falls through to work that is live", () => {
   const many = snapshot({
     workspaces: [
       workspace({ projectRootPath: "/work/client", projectDisplayName: "client-work" }),
-      workspace({ projectRootPath: "/home/dev/paseo-plugins" }),
+      workspace({ projectRootPath: "/home/dev/paseo-plugins", status: "running" }),
     ],
   });
   const muted = settings({ mutedProjects: [{ rootPath: "/work/client", displayName: "client-work" }] });
   assert.equal(renderActivity(many, muted, START, NOW)?.details, "paseo-plugins — main");
+});
+
+test("a muted project does not promote a workspace that is merely the next most recent", () => {
+  const many = snapshot({
+    workspaces: [
+      workspace({ projectRootPath: "/work/client", projectDisplayName: "client-work" }),
+      workspace({ projectRootPath: "/home/dev/paseo-plugins", statusEnteredAt: START - 1 }),
+    ],
+  });
+  const muted = settings({ mutedProjects: [{ rootPath: "/work/client", displayName: "client-work" }] });
+  assert.equal(renderActivity(many, muted, START, NOW)?.details, ANONYMOUS_DETAILS);
 });
 
 test("muting every open project redacts rather than going dark", () => {
@@ -143,6 +155,23 @@ test("muting every open project redacts rather than going dark", () => {
     mutedProjects: [{ rootPath: "/home/dev/paseo-plugins", displayName: "paseo-plugins" }],
   });
   assert.equal(renderActivity(snapshot(), muted, START, NOW)?.details, ANONYMOUS_DETAILS);
+});
+
+test("stops naming a workspace nobody has touched in half an hour", () => {
+  const stale = snapshot({ workspaces: [workspace({ statusEnteredAt: START - STALE_AFTER_MS })] });
+  assert.equal(renderActivity(stale, settings(), START, NOW)?.details, ANONYMOUS_DETAILS);
+});
+
+test("keeps naming a workspace that has only just gone quiet", () => {
+  const recent = snapshot({ workspaces: [workspace({ statusEnteredAt: NOW - 60_000 })] });
+  assert.equal(renderActivity(recent, settings(), START, NOW)?.details, "paseo-plugins — main");
+});
+
+test("live work never goes stale, however old its stamp", () => {
+  const live = snapshot({
+    workspaces: [workspace({ status: "running", statusEnteredAt: START - STALE_AFTER_MS * 4 })],
+  });
+  assert.equal(renderActivity(live, settings(), START, NOW)?.details, "paseo-plugins — main");
 });
 
 test("stays visible with no workspaces open", () => {

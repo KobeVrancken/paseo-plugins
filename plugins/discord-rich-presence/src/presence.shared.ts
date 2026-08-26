@@ -84,6 +84,33 @@ export function rankWorkspaces(
   return [...workspaces].sort((left, right) => activeAt(right, now) - activeAt(left, now));
 }
 
+/** Past this, the last workspace is what you were doing rather than what you are doing. */
+export const STALE_AFTER_MS = 30 * 60_000;
+
+/**
+ * The workspace the presence speaks for, or null when it should fall back to the anonymous
+ * rendering. A muted workspace is only ever replaced by live work: promoting whatever merely ranks
+ * behind it puts a project you are not in front of on your profile, which is what muting was for.
+ */
+function pickActive(
+  workspaces: readonly WorkspaceActivity[],
+  settings: PresenceSettings,
+  now: number,
+): WorkspaceActivity | null {
+  const ranked = rankWorkspaces(workspaces, now);
+  const first = ranked[0];
+  if (!first) return null;
+  if (!isProjectMuted(settings, first.projectRootPath)) {
+    return activeAt(first, now) >= now - STALE_AFTER_MS ? first : null;
+  }
+  return (
+    ranked.find(
+      (workspace) =>
+        isLive(workspace.status) && !isProjectMuted(settings, workspace.projectRootPath),
+    ) ?? null
+  );
+}
+
 function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
@@ -134,9 +161,7 @@ export function renderActivity(
   if (!settings.enabled || !settings.applicationId) return null;
   if (settings.detailLevel === "anonymous") return anonymousActivity(startTimestamp);
 
-  const active = rankWorkspaces(snapshot.workspaces, now).find(
-    (workspace) => !isProjectMuted(settings, workspace.projectRootPath),
-  );
+  const active = pickActive(snapshot.workspaces, settings, now);
   if (!active) return anonymousActivity(startTimestamp);
 
   const image = smallImage(active, snapshot.agents);
