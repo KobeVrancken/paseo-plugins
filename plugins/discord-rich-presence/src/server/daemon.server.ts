@@ -6,7 +6,7 @@ import { toPresenceSnapshot } from "../snapshot.shared.ts";
 import { daemonConfigPath, pidFilePath } from "./paths.server.ts";
 
 /** The daemon routes a `plugin:`-prefixed client id to its own plugin session, and that handshake never completes for a websocket. */
-const DAEMON_CLIENT_ID = "discord-presence";
+const DAEMON_CLIENT_ID = "discord-rich-presence";
 
 const WORKSPACE_PAGE_LIMIT = 50;
 const AGENT_PAGE_LIMIT = 100;

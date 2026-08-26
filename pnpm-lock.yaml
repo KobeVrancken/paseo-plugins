@@ -35,7 +35,7 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
 
-  plugins/discord-presence:
+  plugins/discord-rich-presence:
     devDependencies:
       '@getpaseo/client':
         specifier: ^0.4.0

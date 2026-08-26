@@ -1,6 +1,6 @@
 # Working on this plugin
 
-Run `paseo plugin reload discord-presence` after every change, then `paseo plugin logs discord-presence`.
+Run `paseo plugin reload discord-rich-presence` after every change, then `paseo plugin logs discord-rich-presence`.
 The reload is the only compile check of the two bundles the daemon builds.
 Do this yourself; never leave it to the user.
 

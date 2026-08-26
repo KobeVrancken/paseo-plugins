@@ -157,5 +157,5 @@ export class PresenceService {
 export const service = new PresenceService();
 
 void service.start().catch((error: unknown) => {
-  console.error("discord-presence failed to start", error);
+  console.error("discord-rich-presence failed to start", error);
 });

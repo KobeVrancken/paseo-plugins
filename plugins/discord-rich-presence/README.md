@@ -52,7 +52,7 @@ Both live in the sidebar screen, and in the Command Center as *Discord presence:
 
 ## Where the settings live
 
-`~/.cache/discord-presence/settings.json`, because the daemon config drops keys it does not know.
+`~/.cache/discord-rich-presence/settings.json`, because the daemon config drops keys it does not know.
 The file is yours to edit; the plugin re-reads it when it starts.
 
 ## Troubleshooting
@@ -64,7 +64,7 @@ The file is yours to edit; the plugin re-reads it when it starts.
 | *Cannot read Paseo* | The plugin could not reach the daemon. It reads the address from `PASEO_HOST`, `PASEO_LISTEN`, `$PASEO_HOME/paseo.pid` and the daemon config, in that order, and cannot dial a daemon listening on a unix socket. |
 | The icon shows but the images are missing | The asset keys do not match, or Discord has not finished processing the upload. |
 
-Run `paseo plugin logs discord-presence` for anything else.
+Run `paseo plugin logs discord-rich-presence` for anything else.
 
 ## Artwork
 

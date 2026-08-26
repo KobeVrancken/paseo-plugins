@@ -1,5 +1,5 @@
 {
-  "name": "@paseo-plugins/discord-presence",
+  "name": "@paseo-plugins/discord-rich-presence",
   "private": true,
   "version": "0.0.0",
   "scripts": {

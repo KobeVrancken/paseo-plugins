@@ -19,14 +19,14 @@ export default function contribute(plugin: PluginContext) {
   plugin.addSurface(SURFACE_ID, DiscordPresenceSurface);
 
   plugin.addSidebarItem({
-    id: "discord-presence",
+    id: "discord-rich-presence",
     title: "Discord Presence",
     icon: "Gamepad2",
     surface: SURFACE_ID,
   });
 
   plugin.addCommandCenterItem({
-    id: "discord-presence-off",
+    id: "discord-rich-presence-off",
     title: "Discord presence: turn off",
     icon: "EyeOff",
     keywords: ["discord", "presence", "status", "privacy"],
@@ -37,7 +37,7 @@ export default function contribute(plugin: PluginContext) {
   });
 
   plugin.addCommandCenterItem({
-    id: "discord-presence-on",
+    id: "discord-rich-presence-on",
     title: "Discord presence: turn on",
     icon: "Eye",
     keywords: ["discord", "presence", "status"],
@@ -48,7 +48,7 @@ export default function contribute(plugin: PluginContext) {
   });
 
   plugin.addCommandCenterItem({
-    id: "discord-presence-mute-project",
+    id: "discord-rich-presence-mute-project",
     title: "Discord presence: mute this project",
     icon: "EyeOff",
     keywords: ["discord", "presence", "mute", "project", "privacy"],
@@ -63,7 +63,7 @@ export default function contribute(plugin: PluginContext) {
   });
 
   plugin.addCommandCenterItem({
-    id: "discord-presence-unmute-project",
+    id: "discord-rich-presence-unmute-project",
     title: "Discord presence: unmute this project",
     icon: "Eye",
     keywords: ["discord", "presence", "unmute", "project"],

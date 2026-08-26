@@ -7,7 +7,7 @@ import * as contracts from "../contracts.shared.ts";
 import type { PresenceStatusPayload } from "../contracts.shared.ts";
 import { DETAIL_LEVELS, DETAIL_LEVEL_LABELS, type DetailLevel } from "../presence.shared.ts";
 
-const STATUS_QUERY_KEY = ["discord-presence", "status"];
+const STATUS_QUERY_KEY = ["discord-rich-presence", "status"];
 const REFETCH_MS = 5_000;
 
 type Colors = PluginTheme["colors"];
