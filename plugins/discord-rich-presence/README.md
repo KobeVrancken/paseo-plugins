@@ -15,7 +15,7 @@ The first line is the project and workspace Paseo saw activity in most recently,
 
 Discord will not show a presence until you own an application for it, and only you can create one.
 
-1. Open <https://discord.com/developers/applications> and press **New Application**.
+1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and press **New Application**.
    Name it **Paseo**: Discord renders the application's name as the bold first line, so anything else is what your friends will read.
 2. On **General Information**, copy the **Application ID**.
 3. Open **Rich Presence → Art Assets** and upload the four files in `assets/`, each keeping its filename as its asset key: `paseo`, `running`, `attention`, `idle`.
