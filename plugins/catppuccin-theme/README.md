@@ -2,6 +2,10 @@
 
 Adds all [Catppuccin](https://catppuccin.com/palette/) flavours — Latte, Frappé, Macchiato, and Mocha — as Paseo app themes.
 
+## Screenshots
+
+![All four Catppuccin flavours](./docs/screenshots/flavours.png)
+
 ## Installation
 
 ```sh
