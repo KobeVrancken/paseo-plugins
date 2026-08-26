@@ -68,6 +68,16 @@ function toneColor(palette: Palette, tone: Connection["tone"]): string {
   return palette.foregroundMuted;
 }
 
+function applicationHint(savedId: string): string {
+  if (savedId === MANAGED_APPLICATION_ID) {
+    return "The shared Paseo application, already filled in. Replace it with your own to host the presence yourself — the plugin README walks through the portal steps and the art assets.";
+  }
+  if (savedId === "") {
+    return "Discord shows nothing until an application ID is saved. Paste your own, or go back to the shared Paseo application.";
+  }
+  return "Your own Discord application. Its name is the title Discord shows in bold, and it needs the six art assets from the plugin's assets folder uploaded under Rich Presence.";
+}
+
 const DETAIL_LEVEL_HINTS: Record<DetailLevel, string> = {
   detailed: "Your project, the workspace you are in, and what your agents are doing.",
   projects: "Your project name and how many workspaces are open. Workspace titles stay private.",
@@ -319,9 +329,7 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
                 lineHeight: leading(fontSize.sm),
               }}
             >
-              {idInvalid
-                ? "An application ID is 17 to 20 digits."
-                : "The shared Paseo application, already filled in. Replace it with your own to host the presence yourself — the plugin README walks through the portal steps and the art assets."}
+              {idInvalid ? "An application ID is 17 to 20 digits." : applicationHint(savedId)}
             </Text>
           </View>
         </Card>
