@@ -53,7 +53,7 @@ Both live in the sidebar screen, and in the Command Center as *Discord presence:
 
 ## Where the settings live
 
-`~/.cache/discord-rich-presence/settings.json`, because the daemon config drops keys it does not know.
+`~/.cache/paseo-plugins/discord-rich-presence/settings.json`, because the daemon config drops keys it does not know.
 The file is yours to edit; the plugin re-reads it when it starts.
 
 ## Troubleshooting

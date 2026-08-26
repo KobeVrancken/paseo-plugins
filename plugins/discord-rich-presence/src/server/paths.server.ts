@@ -4,7 +4,7 @@ import type { Env } from "../daemon-url.shared.ts";
 
 export function cacheDir(env: Env = process.env): string {
   const base = env.XDG_CACHE_HOME?.trim() || path.join(env.HOME ?? os.homedir(), ".cache");
-  return path.join(base, "discord-rich-presence");
+  return path.join(base, "paseo-plugins", "discord-rich-presence");
 }
 
 /** Plugin-owned persistence: the daemon config drops unknown keys, so settings live in the cache dir. */

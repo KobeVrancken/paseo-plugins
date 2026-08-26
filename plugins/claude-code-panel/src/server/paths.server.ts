@@ -80,7 +80,7 @@ export async function resolveProjectDir(
 
 export function cacheDir(env: Env = process.env): string {
   const base = env.XDG_CACHE_HOME?.trim() || path.join(env.HOME ?? os.homedir(), ".cache");
-  return path.join(base, "claude-code-panel");
+  return path.join(base, "paseo-plugins", "claude-code-panel");
 }
 
 export function imagesDir(env: Env = process.env): string {

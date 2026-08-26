@@ -30,7 +30,7 @@ The panel never replaces the CLI. A real interactive `claude` runs in a normal p
 
 - `PASEO_BIN` points at the `paseo` CLI. Set it if the CLI is neither on PATH nor inside the app bundle that runs the daemon.
 - `CLAUDE_CONFIG_DIR` is respected when locating transcripts, exactly as Claude Code itself does.
-- Plugin state, meaning the send behavior and the terminal bindings, lives in `~/.cache/claude-code-panel/`, and so do the images you attach. Cached images older than a week are deleted at startup.
+- Plugin state, meaning the send behavior and the terminal bindings, lives in `~/.cache/paseo-plugins/claude-code-panel/`, and so do the images you attach. Cached images older than a week are deleted at startup.
 
 ## Send behavior
 
