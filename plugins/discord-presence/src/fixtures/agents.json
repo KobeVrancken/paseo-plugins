@@ -1,0 +1,361 @@
+[
+  {
+    "agent": {
+      "id": "941ba752-dea9-4d99-bf70-b8a54c9193a2",
+      "provider": "claude",
+      "cwd": "/home/dev/paseo-plugins",
+      "workspaceId": "wks_dfd1cd899bcb5185",
+      "model": "claude-opus-5",
+      "thinkingOptionId": "high",
+      "effectiveThinkingOptionId": "high",
+      "runtimeInfo": {
+        "provider": "claude",
+        "sessionId": "0fb68bee-c9bf-42e7-b2f0-f5e9b4ef28c7",
+        "model": "claude-opus-5",
+        "modeId": "auto",
+        "extra": {
+          "runtimeModel": "claude-opus-5"
+        }
+      },
+      "createdAt": "2026-08-26T11:21:15.092Z",
+      "updatedAt": "2026-08-26T12:27:30.040Z",
+      "lastUserMessageAt": "2026-08-26T12:13:11.372Z",
+      "status": "running",
+      "activeTurn": {
+        "turnId": "foreground-turn-5",
+        "startedAt": "2026-08-26T12:13:11.372Z"
+      },
+      "capabilities": {
+        "supportsStreaming": true,
+        "supportsSessionPersistence": true,
+        "supportsSessionListing": true,
+        "supportsDynamicModes": true,
+        "supportsMcpServers": true,
+        "supportsReasoningStream": true,
+        "supportsToolInvocations": true,
+        "supportsRewindConversation": true,
+        "supportsRewindFiles": true,
+        "supportsRewindBoth": true
+      },
+      "currentModeId": "auto",
+      "availableModes": [
+        {
+          "id": "plan",
+          "label": "Plan Mode",
+          "description": "Analyze the codebase without executing tools or edits"
+        },
+        {
+          "id": "default",
+          "label": "Always Ask",
+          "description": "Prompts for permission the first time a tool is used"
+        },
+        {
+          "id": "acceptEdits",
+          "label": "Accept File Edits",
+          "description": "Automatically approves edit-focused tools without prompting"
+        },
+        {
+          "id": "auto",
+          "label": "Auto mode",
+          "description": "Uses a model classifier to review permission prompts automatically"
+        },
+        {
+          "id": "bypassPermissions",
+          "label": "Bypass",
+          "description": "Skip all permission prompts (use with caution)"
+        }
+      ],
+      "features": [
+        {
+          "type": "toggle",
+          "id": "fast_mode",
+          "label": "Fast",
+          "description": "Lower latency Opus responses at higher token cost",
+          "tooltip": "Toggle fast mode",
+          "icon": "zap",
+          "value": false
+        }
+      ],
+      "pendingPermissions": [],
+      "persistence": {
+        "provider": "claude",
+        "sessionId": "0fb68bee-c9bf-42e7-b2f0-f5e9b4ef28c7",
+        "nativeHandle": "0fb68bee-c9bf-42e7-b2f0-f5e9b4ef28c7",
+        "metadata": {
+          "provider": "claude",
+          "cwd": "/home/dev/paseo-plugins",
+          "modeId": "auto",
+          "model": "claude-opus-5",
+          "thinkingOptionId": "high",
+          "featureValues": {
+            "fast_mode": false
+          }
+        }
+      },
+      "title": "/mattpocock-skills:grill-me create a discord rich presence p",
+      "labels": {},
+      "lastUsage": {
+        "contextWindowMaxTokens": 1000000,
+        "contextWindowUsedTokens": 139648
+      },
+      "requiresAttention": false,
+      "attentionReason": null,
+      "attentionTimestamp": null,
+      "archivedAt": null
+    },
+    "project": {
+      "projectKey": "prj_1ab699f1e4d5844a",
+      "projectName": "paseo-plugins",
+      "workspaceName": "Create Discord rich presence plugin for Paseo",
+      "checkout": {
+        "cwd": "/home/dev/paseo-plugins",
+        "currentBranch": "main",
+        "remoteUrl": null,
+        "worktreeRoot": "/home/dev/paseo-plugins",
+        "isGit": true,
+        "isPaseoOwnedWorktree": false,
+        "mainRepoRoot": null
+      }
+    }
+  },
+  {
+    "agent": {
+      "id": "1b3086b3-0150-4354-80b0-e9fad3beb4c6",
+      "provider": "claude",
+      "cwd": "/home/dev/work/acme-billing",
+      "workspaceId": "wks_8cf39f37bbfadafa",
+      "model": "claude-opus-5",
+      "thinkingOptionId": "high",
+      "effectiveThinkingOptionId": "high",
+      "runtimeInfo": {
+        "provider": "claude",
+        "sessionId": "33c025ba-1190-4a94-9a5c-ac1364720a1f",
+        "model": null,
+        "modeId": "auto"
+      },
+      "createdAt": "2026-08-25T11:28:51.795Z",
+      "updatedAt": "2026-08-26T11:06:15.733Z",
+      "lastUserMessageAt": "2026-08-25T12:32:28.609Z",
+      "status": "idle",
+      "activeTurn": null,
+      "capabilities": {
+        "supportsStreaming": true,
+        "supportsSessionPersistence": true,
+        "supportsSessionListing": true,
+        "supportsDynamicModes": true,
+        "supportsMcpServers": true,
+        "supportsReasoningStream": true,
+        "supportsToolInvocations": true,
+        "supportsRewindConversation": true,
+        "supportsRewindFiles": true,
+        "supportsRewindBoth": true
+      },
+      "currentModeId": "auto",
+      "availableModes": [
+        {
+          "id": "plan",
+          "label": "Plan Mode",
+          "description": "Analyze the codebase without executing tools or edits"
+        },
+        {
+          "id": "default",
+          "label": "Always Ask",
+          "description": "Prompts for permission the first time a tool is used"
+        },
+        {
+          "id": "acceptEdits",
+          "label": "Accept File Edits",
+          "description": "Automatically approves edit-focused tools without prompting"
+        },
+        {
+          "id": "auto",
+          "label": "Auto mode",
+          "description": "Uses a model classifier to review permission prompts automatically"
+        },
+        {
+          "id": "bypassPermissions",
+          "label": "Bypass",
+          "description": "Skip all permission prompts (use with caution)"
+        }
+      ],
+      "features": [
+        {
+          "type": "toggle",
+          "id": "fast_mode",
+          "label": "Fast",
+          "description": "Lower latency Opus responses at higher token cost",
+          "tooltip": "Toggle fast mode",
+          "icon": "zap",
+          "value": false
+        }
+      ],
+      "pendingPermissions": [],
+      "persistence": {
+        "provider": "claude",
+        "sessionId": "33c025ba-1190-4a94-9a5c-ac1364720a1f",
+        "nativeHandle": "33c025ba-1190-4a94-9a5c-ac1364720a1f",
+        "metadata": {
+          "provider": "claude",
+          "cwd": "/home/dev/work/acme-billing",
+          "modeId": "auto",
+          "model": "claude-opus-5",
+          "thinkingOptionId": "high"
+        }
+      },
+      "title": "/mattpocock-skills:wayfinder",
+      "labels": {},
+      "requiresAttention": false,
+      "attentionReason": null,
+      "attentionTimestamp": null,
+      "archivedAt": null
+    },
+    "project": {
+      "projectKey": "prj_8937f43d44e1c6bc",
+      "projectName": "acme-billing",
+      "workspaceName": "Invoke mattpocock-skills:wayfinder",
+      "checkout": {
+        "cwd": "/home/dev/work/acme-billing",
+        "currentBranch": "feat/invoice-monthly-wiring",
+        "remoteUrl": null,
+        "worktreeRoot": "/home/dev/work/acme-billing",
+        "isGit": true,
+        "isPaseoOwnedWorktree": false,
+        "mainRepoRoot": null
+      }
+    }
+  },
+  {
+    "agent": {
+      "id": "fe00cd55-948e-4938-9772-c27d7fbc5695",
+      "provider": "claude",
+      "cwd": "/home/dev/todo-app",
+      "workspaceId": "wks_8862cf1b6651af1a",
+      "model": "claude-opus-5",
+      "thinkingOptionId": "high",
+      "effectiveThinkingOptionId": "high",
+      "runtimeInfo": {
+        "provider": "claude",
+        "sessionId": "91caa6a0-18cd-478d-a27a-2fdf42f7758c",
+        "model": null,
+        "modeId": "auto"
+      },
+      "createdAt": "2026-08-23T13:59:53.266Z",
+      "updatedAt": "2026-08-25T21:15:41.299Z",
+      "lastUserMessageAt": "2026-08-23T14:28:45.104Z",
+      "status": "closed",
+      "capabilities": {
+        "supportsStreaming": false,
+        "supportsSessionPersistence": true,
+        "supportsDynamicModes": false,
+        "supportsMcpServers": false,
+        "supportsReasoningStream": false,
+        "supportsToolInvocations": true,
+        "supportsRewindConversation": false,
+        "supportsRewindFiles": false,
+        "supportsRewindBoth": false
+      },
+      "currentModeId": "auto",
+      "availableModes": [],
+      "pendingPermissions": [],
+      "persistence": {
+        "provider": "claude",
+        "sessionId": "91caa6a0-18cd-478d-a27a-2fdf42f7758c",
+        "nativeHandle": "91caa6a0-18cd-478d-a27a-2fdf42f7758c",
+        "metadata": {
+          "provider": "claude",
+          "cwd": "/home/dev/todo-app",
+          "modeId": "auto",
+          "model": "claude-opus-5",
+          "thinkingOptionId": "high"
+        }
+      },
+      "title": "/mattpocock-skills:wayfinder",
+      "requiresAttention": false,
+      "attentionReason": null,
+      "attentionTimestamp": null,
+      "archivedAt": null,
+      "labels": {}
+    },
+    "project": {
+      "projectKey": "prj_1affeee258225ac1",
+      "projectName": "todo-app",
+      "workspaceName": "Build POC",
+      "checkout": {
+        "cwd": "/home/dev/todo-app",
+        "currentBranch": "main",
+        "remoteUrl": null,
+        "worktreeRoot": "/home/dev/todo-app",
+        "isGit": true,
+        "isPaseoOwnedWorktree": false,
+        "mainRepoRoot": null
+      }
+    }
+  },
+  {
+    "agent": {
+      "id": "34292896-526e-4292-bced-755edc627051",
+      "provider": "claude",
+      "cwd": "/home/dev/todo-app",
+      "workspaceId": "wks_8862cf1b6651af1a",
+      "model": "claude-fable-5",
+      "thinkingOptionId": "high",
+      "effectiveThinkingOptionId": "high",
+      "runtimeInfo": {
+        "provider": "claude",
+        "sessionId": "e1718f88-e662-4a50-acab-6d58cf3d0311",
+        "model": null,
+        "modeId": "auto"
+      },
+      "createdAt": "2026-08-25T10:24:05.574Z",
+      "updatedAt": "2026-08-25T21:15:39.368Z",
+      "lastUserMessageAt": "2026-08-25T10:27:38.472Z",
+      "status": "closed",
+      "capabilities": {
+        "supportsStreaming": false,
+        "supportsSessionPersistence": true,
+        "supportsDynamicModes": false,
+        "supportsMcpServers": false,
+        "supportsReasoningStream": false,
+        "supportsToolInvocations": true,
+        "supportsRewindConversation": false,
+        "supportsRewindFiles": false,
+        "supportsRewindBoth": false
+      },
+      "currentModeId": "auto",
+      "availableModes": [],
+      "pendingPermissions": [],
+      "persistence": {
+        "provider": "claude",
+        "sessionId": "e1718f88-e662-4a50-acab-6d58cf3d0311",
+        "nativeHandle": "e1718f88-e662-4a50-acab-6d58cf3d0311",
+        "metadata": {
+          "provider": "claude",
+          "cwd": "/home/dev/todo-app",
+          "modeId": "auto",
+          "model": "claude-fable-5",
+          "thinkingOptionId": "high"
+        }
+      },
+      "title": "/mattpocock-skills:wayfinder we are pausing here and auditin",
+      "requiresAttention": false,
+      "attentionReason": null,
+      "attentionTimestamp": null,
+      "archivedAt": null,
+      "labels": {}
+    },
+    "project": {
+      "projectKey": "prj_1affeee258225ac1",
+      "projectName": "todo-app",
+      "workspaceName": "Build POC",
+      "checkout": {
+        "cwd": "/home/dev/todo-app",
+        "currentBranch": "main",
+        "remoteUrl": null,
+        "worktreeRoot": "/home/dev/todo-app",
+        "isGit": true,
+        "isPaseoOwnedWorktree": false,
+        "mainRepoRoot": null
+      }
+    }
+  }
+]

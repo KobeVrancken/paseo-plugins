@@ -1,0 +1,260 @@
+[
+  {
+    "id": "wks_8862cf1b6651af1a",
+    "projectId": "prj_1affeee258225ac1",
+    "projectDisplayName": "todo-app",
+    "projectCustomName": null,
+    "projectCustomIconRevision": null,
+    "projectRootPath": "/home/dev/todo-app",
+    "workspaceDirectory": "/home/dev/todo-app",
+    "projectKind": "git",
+    "workspaceKind": "local_checkout",
+    "name": "Build POC",
+    "title": "Build POC",
+    "pinnedAt": null,
+    "archivingAt": null,
+    "status": "done",
+    "statusEnteredAt": "2026-08-25T21:15:41.299Z",
+    "activityAt": null,
+    "diffStat": null,
+    "scripts": [],
+    "project": {
+      "projectKey": "prj_1affeee258225ac1",
+      "projectName": "todo-app",
+      "workspaceName": "Build POC",
+      "checkout": {
+        "cwd": "/home/dev/todo-app",
+        "currentBranch": "main",
+        "remoteUrl": null,
+        "worktreeRoot": "/home/dev/todo-app",
+        "isGit": true,
+        "isPaseoOwnedWorktree": false,
+        "mainRepoRoot": null
+      }
+    },
+    "gitRuntime": {
+      "currentBranch": "main",
+      "remoteUrl": null,
+      "isPaseoOwnedWorktree": false,
+      "isDirty": false,
+      "aheadBehind": null,
+      "aheadOfOrigin": null,
+      "behindOfOrigin": null
+    },
+    "githubRuntime": {
+      "featuresEnabled": false,
+      "pullRequest": null,
+      "error": null
+    }
+  },
+  {
+    "id": "wks_8cf39f37bbfadafa",
+    "projectId": "prj_8937f43d44e1c6bc",
+    "projectDisplayName": "acme-billing",
+    "projectCustomName": null,
+    "projectCustomIconRevision": null,
+    "projectRootPath": "/home/dev/work/acme-billing",
+    "workspaceDirectory": "/home/dev/work/acme-billing",
+    "projectKind": "git",
+    "workspaceKind": "local_checkout",
+    "name": "Invoke mattpocock-skills:wayfinder",
+    "title": "Invoke mattpocock-skills:wayfinder",
+    "pinnedAt": null,
+    "archivingAt": null,
+    "status": "done",
+    "statusEnteredAt": "2026-08-26T11:06:15.733Z",
+    "activityAt": null,
+    "diffStat": {
+      "additions": 77071,
+      "deletions": 50470
+    },
+    "scripts": [],
+    "project": {
+      "projectKey": "prj_8937f43d44e1c6bc",
+      "projectName": "acme-billing",
+      "workspaceName": "Invoke mattpocock-skills:wayfinder",
+      "checkout": {
+        "cwd": "/home/dev/work/acme-billing",
+        "currentBranch": "feat/invoice-monthly-wiring",
+        "remoteUrl": null,
+        "worktreeRoot": "/home/dev/work/acme-billing",
+        "isGit": true,
+        "isPaseoOwnedWorktree": false,
+        "mainRepoRoot": null
+      }
+    },
+    "gitRuntime": {
+      "currentBranch": "feat/invoice-monthly-wiring",
+      "remoteUrl": "git@gitlab.com:acme-corp/acme-billing.git",
+      "isPaseoOwnedWorktree": false,
+      "isDirty": false,
+      "aheadBehind": {
+        "ahead": 1242,
+        "behind": 82
+      },
+      "aheadOfOrigin": 0,
+      "behindOfOrigin": 0
+    },
+    "githubRuntime": {
+      "featuresEnabled": true,
+      "pullRequest": {
+        "number": 506,
+        "repoOwner": "acme-corp",
+        "repoName": "acme-billing",
+        "projectPath": "acme-corp/acme-billing",
+        "url": "https://gitlab.com/acme-corp/acme-billing/-/merge_requests/506",
+        "title": "Draft: feat(billing): wire the monthly invoice through, front and back",
+        "state": "open",
+        "baseRefName": "feat/invoice-groundwork",
+        "headRefName": "feat/invoice-monthly-wiring",
+        "isMerged": false,
+        "isDraft": true,
+        "mergeable": "UNKNOWN",
+        "checks": [
+          {
+            "name": "lint-commits",
+            "status": "success",
+            "url": "https://gitlab.com/acme-corp/acme-billing/-/jobs/10000000013",
+            "workflow": "verify",
+            "checkRunId": 10000000013
+          },
+          {
+            "name": "type_check",
+            "status": "success",
+            "url": "https://gitlab.com/acme-corp/acme-billing/-/jobs/10000000014",
+            "workflow": "test",
+            "checkRunId": 10000000014
+          },
+          {
+            "name": "lint",
+            "status": "success",
+            "url": "https://gitlab.com/acme-corp/acme-billing/-/jobs/10000000015",
+            "workflow": "test",
+            "checkRunId": 10000000015
+          },
+          {
+            "name": "unit_tests",
+            "status": "success",
+            "url": "https://gitlab.com/acme-corp/acme-billing/-/jobs/10000000016",
+            "workflow": "test",
+            "checkRunId": 10000000016
+          },
+          {
+            "name": "integration_tests",
+            "status": "success",
+            "url": "https://gitlab.com/acme-corp/acme-billing/-/jobs/10000000017",
+            "workflow": "test",
+            "checkRunId": 10000000017
+          },
+          {
+            "name": "playwright_e2e_tests",
+            "status": "success",
+            "url": "https://gitlab.com/acme-corp/acme-billing/-/jobs/10000000018",
+            "workflow": "test",
+            "checkRunId": 10000000018
+          },
+          {
+            "name": "build review",
+            "status": "success",
+            "url": "https://gitlab.com/acme-corp/acme-billing/-/jobs/10000000019",
+            "workflow": "build",
+            "checkRunId": 10000000019
+          },
+          {
+            "name": "containerize review",
+            "status": "success",
+            "url": "https://gitlab.com/acme-corp/acme-billing/-/jobs/10000000020",
+            "workflow": "push",
+            "checkRunId": 10000000020
+          },
+          {
+            "name": "start review",
+            "status": "success",
+            "url": "https://gitlab.com/acme-corp/acme-billing/-/jobs/10000000021",
+            "workflow": "review",
+            "checkRunId": 10000000021
+          },
+          {
+            "name": "stop review",
+            "status": "skipped",
+            "traits": [
+              "manual"
+            ],
+            "url": "https://gitlab.com/acme-corp/acme-billing/-/jobs/10000000022",
+            "workflow": "cleanup",
+            "checkRunId": 10000000022
+          }
+        ],
+        "checksStatus": "success",
+        "reviewDecision": null,
+        "forgeSpecific": {
+          "forge": "gitlab",
+          "detailedMergeStatus": "draft_status",
+          "mergeStatus": null,
+          "hasConflicts": false,
+          "blockingDiscussionsResolved": true,
+          "approvalsRequired": 0,
+          "approvalsGiven": 0,
+          "pipelineStatus": "success",
+          "pipelineId": 1000000720,
+          "pipelineUrl": "https://gitlab.com/acme-corp/acme-billing/-/pipelines/1000000720",
+          "mergeWhenPipelineSucceeds": false
+        }
+      },
+      "error": null
+    },
+    "forge": "gitlab"
+  },
+  {
+    "id": "wks_9ebffd89c74ac1a3",
+    "projectId": "prj_fba306a10c3cc1bc",
+    "projectDisplayName": "dotfiles",
+    "projectCustomName": null,
+    "projectCustomIconRevision": null,
+    "projectRootPath": "/home/dev/dotfiles",
+    "workspaceDirectory": "/home/dev/dotfiles",
+    "projectKind": "git",
+    "workspaceKind": "local_checkout",
+    "name": "Improve the database query skill for agents",
+    "title": "Improve the database query skill for agents",
+    "pinnedAt": null,
+    "archivingAt": null,
+    "status": "done",
+    "statusEnteredAt": "2026-08-25T15:09:31.507Z",
+    "activityAt": null,
+    "diffStat": {
+      "additions": 158,
+      "deletions": 0
+    },
+    "scripts": [],
+    "project": {
+      "projectKey": "prj_fba306a10c3cc1bc",
+      "projectName": "dotfiles",
+      "workspaceName": "Improve the database query skill for agents",
+      "checkout": {
+        "cwd": "/home/dev/dotfiles",
+        "currentBranch": "main",
+        "remoteUrl": null,
+        "worktreeRoot": "/home/dev/dotfiles",
+        "isGit": true,
+        "isPaseoOwnedWorktree": false,
+        "mainRepoRoot": null
+      }
+    },
+    "gitRuntime": {
+      "currentBranch": "main",
+      "remoteUrl": "git@github.com:example-user/dotfiles.git",
+      "isPaseoOwnedWorktree": false,
+      "isDirty": true,
+      "aheadBehind": null,
+      "aheadOfOrigin": 0,
+      "behindOfOrigin": 0
+    },
+    "githubRuntime": {
+      "featuresEnabled": true,
+      "pullRequest": null,
+      "error": null
+    },
+    "forge": "github"
+  }
+]

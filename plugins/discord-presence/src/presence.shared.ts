@@ -7,6 +7,9 @@ export type WorkspaceActivity = {
   projectDisplayName: string;
   workspaceName: string;
   status: WorkspaceStatus;
+  /** Epoch ms of the daemon's own activity stamp, which older daemons never fill in. */
+  activityAt: number | null;
+  statusEnteredAt: number | null;
 };
 
 export type AgentTally = {
@@ -27,7 +30,6 @@ export type PresenceSettings = {
 };
 
 export type PresenceSnapshot = {
-  /** Most-recently-active first, which is the order the daemon's `activity_at` sort returns. */
   workspaces: WorkspaceActivity[];
   agents: AgentTally;
 };
@@ -65,12 +67,29 @@ export function isProjectMuted(settings: PresenceSettings, projectRootPath: stri
   return settings.mutedProjects.some((project) => project.rootPath === projectRootPath);
 }
 
+function isLive(status: WorkspaceStatus): boolean {
+  return status === "running" || status === "needs_input" || status === "attention";
+}
+
+/** A workspace still working or still waiting on you is active now, whatever its last stamp says. */
+function activeAt(workspace: WorkspaceActivity, now: number): number {
+  if (isLive(workspace.status)) return now;
+  return Math.max(workspace.activityAt ?? 0, workspace.statusEnteredAt ?? 0);
+}
+
+export function rankWorkspaces(
+  workspaces: readonly WorkspaceActivity[],
+  now: number,
+): WorkspaceActivity[] {
+  return [...workspaces].sort((left, right) => activeAt(right, now) - activeAt(left, now));
+}
+
 function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 /** Being blocked on the user outranks work in flight, in both the second line and the small image. */
-function activityClause(workspaces: WorkspaceActivity[], agents: AgentTally): string {
+function activityClause(workspaces: readonly WorkspaceActivity[], agents: AgentTally): string {
   const waiting =
     agents.needsAttention +
     workspaces.filter((workspace) => workspace.status === "needs_input").length;
@@ -79,10 +98,7 @@ function activityClause(workspaces: WorkspaceActivity[], agents: AgentTally): st
   return "idle";
 }
 
-function smallImage(
-  active: WorkspaceActivity,
-  agents: AgentTally,
-): { key: string; text: string } {
+function smallImage(active: WorkspaceActivity, agents: AgentTally): { key: string; text: string } {
   if (agents.needsAttention > 0 || active.status === "needs_input" || active.status === "attention") {
     return { key: "attention", text: "Waiting for input" };
   }
@@ -113,11 +129,12 @@ export function renderActivity(
   snapshot: PresenceSnapshot,
   settings: PresenceSettings,
   startTimestamp: number,
+  now: number,
 ): PresenceActivity | null {
   if (!settings.enabled || !settings.applicationId) return null;
   if (settings.detailLevel === "anonymous") return anonymousActivity(startTimestamp);
 
-  const active = snapshot.workspaces.find(
+  const active = rankWorkspaces(snapshot.workspaces, now).find(
     (workspace) => !isProjectMuted(settings, workspace.projectRootPath),
   );
   if (!active) return anonymousActivity(startTimestamp);
