@@ -21,8 +21,8 @@ async function tempEnv(): Promise<{
   const cache = await mkdtemp(path.join(os.tmpdir(), "claude-images-"));
   return {
     env: { XDG_CACHE_HOME: cache, HOME: cache },
-    imagesDir: path.join(cache, "paseo-claude-code-cli-plugin", "images"),
-    filesDir: path.join(cache, "paseo-claude-code-cli-plugin", "files"),
+    imagesDir: path.join(cache, "claude-code-panel", "images"),
+    filesDir: path.join(cache, "claude-code-panel", "files"),
   };
 }
 
