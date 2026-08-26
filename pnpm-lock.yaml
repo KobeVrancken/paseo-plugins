@@ -8,7 +8,7 @@ importers:
 
   .: {}
 
-  plugins/cappuccino-macchiato:
+  plugins/catppuccin-theme:
     devDependencies:
       '@types/node':
         specifier: ^26.2.0

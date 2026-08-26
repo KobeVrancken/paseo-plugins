@@ -6,7 +6,7 @@ Plugins for [Paseo](https://github.com/getpaseo/paseo), organized in a pnpm work
 | --- | --- |
 | [Claude Code panel](plugins/claude-code-panel) | View and control local Claude Code CLI sessions from Paseo. |
 | [Discord Rich Presence](plugins/discord-rich-presence) | Show your current Paseo activity on Discord. |
-| [Cappuccino Macchiato](plugins/cappuccino-macchiato) | Add a dark Catppuccin Macchiato app theme. |
+| [Catppuccin theme](plugins/catppuccin-theme) | Add all four Catppuccin flavours as app themes. |
 
 Each plugin has its own README with installation, settings, and development details.
 
