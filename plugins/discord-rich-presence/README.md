@@ -27,6 +27,7 @@ That is Paseo telling you it is your move, not an error.
 
 ## Setup
 
+Install the plugin as the [workspace README](../../README.md) describes, then set up the Discord side.
 Discord will not show a presence until you own an application for it, and only you can create one.
 
 1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and press **New Application**.
@@ -81,6 +82,20 @@ The file is yours to edit; the plugin re-reads it when it starts.
 | The icon shows but the images are missing | The asset keys do not match, or Discord has not finished processing the upload. |
 
 Run `paseo plugin logs discord-rich-presence` for anything else.
+
+## Development
+
+```sh
+pnpm typecheck
+pnpm test                                  # node --test, colocated, no test dependencies
+paseo plugin reload discord-rich-presence  # after every edit; there is no hot reload
+paseo plugin logs discord-rich-presence
+```
+
+The daemon compiles `index.ts` into a client and a server bundle, so `index.ts` and `paseo-plugin.json` stay at the plugin root and everything else lives under `src/`.
+`*.client.tsx` runs inside the paseo app, `*.server.ts` as a Node subprocess beside the daemon, and `*.shared.ts` holds the presence model and the zod contracts both sides use.
+The presence has to be live before anyone opens the settings screen, so the server keeps its own daemon connection rather than waiting for a client to call in.
+The Discord IPC client is written out by hand in `src/server/ipc.server.ts` because no CommonJS dependency survives the daemon's compiler.
 
 ## Artwork
 

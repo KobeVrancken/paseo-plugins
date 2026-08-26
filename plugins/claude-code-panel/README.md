@@ -6,10 +6,14 @@ The panel never replaces the CLI. A real interactive `claude` runs in a normal p
 
 ## What it does
 
-- **Pretty view of a session.** The transcript JSONL is rendered as markdown, tool cards with an Edit diff, thinking rows, todo lists, images and subagent groups.
+- **Pretty view of a session.** The transcript JSONL is rendered as markdown, tool cards with an Edit diff, thinking rows, todo lists, images and subagent groups. A card ships shortened detail and loads its full body when you expand it, so a long session stays cheap to poll.
 - **Session picker.** Every transcript belonging to the workspace is listed newest first, and the live one is flagged.
-- **Prompt box.** What you type is forwarded to the terminal running `claude`, along with the paths of any images you attach. Enter sends the prompt and Shift+Enter starts a new line, except on a phone, where Enter still breaks the line and the send button sends.
+- **Prompt box.** What you type is forwarded to the terminal running `claude`, along with the paths and URLs of anything you attach. Enter sends the prompt and Shift+Enter starts a new line, except on a phone, where Enter still breaks the line and the send button sends.
+- **`@` and `/` menus.** An `@` completes a file or directory in the workspace and a `/` completes an installed skill or command, both ranked the way paseo's own composer ranks them.
+- **Attachments.** Paste or pick an image, upload any other file, name a GitHub issue or pull request through your own `gh`, or attach a file by path. The picker reaches the machine showing the panel; a typed path reaches the machine paseo runs on, and a file named that way is attached where it already is rather than copied.
+- **Composer controls.** The model and its effort level, thinking, and the permission mode are shown and changed by opening the CLI's own menus and reading them back, so the panel never has its own idea of what the CLI supports.
 - **Answering dialogs.** Permission prompts and `AskUserQuestion` options become buttons in the panel. The terminal is always offered as the way out, and an answer that does not register is reported rather than silently dropped.
+- **No double notification.** While the panel is the thing you are looking at, it tells paseo so, which stops paseo notifying you about the terminal you are already reading.
 
 ## Setup
 
@@ -30,7 +34,8 @@ The panel never replaces the CLI. A real interactive `claude` runs in a normal p
 
 - `PASEO_BIN` points at the `paseo` CLI. Set it if the CLI is neither on PATH nor inside the app bundle that runs the daemon.
 - `CLAUDE_CONFIG_DIR` is respected when locating transcripts, exactly as Claude Code itself does.
-- Plugin state, meaning the send behavior and the terminal bindings, lives in `~/.cache/paseo-plugins/claude-code-panel/`, and so do the images you attach. Cached images older than a week are deleted at startup.
+- `gh` is what the issue and pull request search runs; a workspace it cannot answer for gets a warning rather than an error.
+- Plugin state, meaning the send behavior and the terminal bindings, lives in `~/.cache/paseo-plugins/claude-code-panel/`, and so do the images and files you paste or upload. Anything cached there older than a week is deleted at startup.
 
 ## Send behavior
 
@@ -53,10 +58,10 @@ The commands above run in this package. From the workspace root, `pnpm typecheck
 
 The daemon compiles `index.ts` into two bundles. `index.ts` and `paseo-plugin.json` have to stay at the plugin root; the rest of the code lives under `src/`, split into `src/server`, `src/client` and the shared contracts.
 
-`*.client.tsx` runs inside the paseo app and may only import `react`, `react-native`, `@tanstack/react-query`, `zod` and `@getpaseo/plugin`. That is why the markdown renderer and the diff are hand-rolled, and why everything is pure React Native, which is what lets the panel work on iOS and Android. `*.server.ts` runs as an unsandboxed Node subprocess beside the daemon. `*.shared.ts` holds the zod contracts that both sides use. Relative imports carry their `.ts` or `.tsx` extension so the same modules run unchanged under `node --test`.
+`*.client.tsx` runs inside the paseo app and may only import `react`, `react-native`, `@tanstack/react-query`, `zod` and `@getpaseo/plugin`. That is why the markdown renderer, the diff and the autocomplete menus are hand-rolled, and why everything is pure React Native, which is what lets the panel work on iOS and Android. `*.server.ts` runs as an unsandboxed Node subprocess beside the daemon. `*.shared.ts` holds the zod contracts that both sides use. Relative imports carry their `.ts` or `.tsx` extension so the same modules run unchanged under `node --test`.
 
 ## Known limits
 
 - Terminal activity has no per-terminal CLI or plugin API, so the status shown in the header comes from the workspace bucket that the hooks feed. A second busy terminal in the same workspace can therefore make a session look busy.
-- Pure React Native has no file picker and its clipboard is text-only, so attaching an image means giving it a file path rather than picking the file from a dialog.
+- The host hands a plugin no file dialog, so the picker is the browser's own and only exists on web. On a phone, attaching a file means naming it by path.
 - Reading dialogs off the terminal screen is inherently sensitive to the CLI version. The parsing is fixture-tested against real captures and fails soft: a screen it does not recognise becomes a card that points you at the terminal.
