@@ -20,7 +20,7 @@ export default function contribute(plugin: PluginContext) {
 
   plugin.addSidebarItem({
     id: "discord-rich-presence",
-    title: "Discord Rich Presence",
+    title: "Discord",
     icon: "Gamepad2",
     surface: SURFACE_ID,
   });
