@@ -1,8 +1,8 @@
 import type { PluginContext } from "@getpaseo/plugin";
 import * as contracts from "./src/contracts.shared.ts";
 import {
-  muteProjectHandler,
   setEnabledHandler,
+  setProjectLevelHandler,
   setSettingsHandler,
   statusHandler,
 } from "./src/server/handlers.server.ts";
@@ -14,7 +14,7 @@ export default function contribute(plugin: PluginContext) {
   plugin.handle(contracts.getStatus, () => statusHandler());
   plugin.handle(contracts.setSettings, (input) => setSettingsHandler(input));
   plugin.handle(contracts.setEnabled, (input) => setEnabledHandler(input));
-  plugin.handle(contracts.muteProject, (input) => muteProjectHandler(input));
+  plugin.handle(contracts.setProjectLevel, (input) => setProjectLevelHandler(input));
 
   plugin.addSurface(SURFACE_ID, DiscordPresenceSurface);
 
@@ -48,31 +48,61 @@ export default function contribute(plugin: PluginContext) {
   });
 
   plugin.addCommandCenterItem({
-    id: "discord-rich-presence-mute-project",
-    title: "Discord rich presence: mute this project",
-    icon: "EyeOff",
-    keywords: ["discord", "presence", "mute", "project", "privacy"],
+    id: "discord-rich-presence-project-detailed",
+    title: "Discord rich presence: show this project as Detailed",
+    icon: "Eye",
+    keywords: ["discord", "presence", "project", "detail", "privacy"],
     context: "workspace",
     async onSelect({ rpc, workspace }) {
-      await rpc(contracts.muteProject, {
+      await rpc(contracts.setProjectLevel, {
         rootPath: workspace.projectRootPath,
         displayName: workspace.projectDisplayName,
-        muted: true,
+        level: "detailed",
       });
     },
   });
 
   plugin.addCommandCenterItem({
-    id: "discord-rich-presence-unmute-project",
-    title: "Discord rich presence: unmute this project",
-    icon: "Eye",
-    keywords: ["discord", "presence", "unmute", "project"],
+    id: "discord-rich-presence-project-projects",
+    title: "Discord rich presence: show this project as Projects only",
+    icon: "Folder",
+    keywords: ["discord", "presence", "project", "detail", "privacy"],
     context: "workspace",
     async onSelect({ rpc, workspace }) {
-      await rpc(contracts.muteProject, {
+      await rpc(contracts.setProjectLevel, {
         rootPath: workspace.projectRootPath,
         displayName: workspace.projectDisplayName,
-        muted: false,
+        level: "projects",
+      });
+    },
+  });
+
+  plugin.addCommandCenterItem({
+    id: "discord-rich-presence-project-hidden",
+    title: "Discord rich presence: show this project as Hidden",
+    icon: "EyeOff",
+    keywords: ["discord", "presence", "project", "hide", "privacy"],
+    context: "workspace",
+    async onSelect({ rpc, workspace }) {
+      await rpc(contracts.setProjectLevel, {
+        rootPath: workspace.projectRootPath,
+        displayName: workspace.projectDisplayName,
+        level: "hidden",
+      });
+    },
+  });
+
+  plugin.addCommandCenterItem({
+    id: "discord-rich-presence-project-default",
+    title: "Discord rich presence: show this project at the default level",
+    icon: "Settings2",
+    keywords: ["discord", "presence", "project", "default", "detail"],
+    context: "workspace",
+    async onSelect({ rpc, workspace }) {
+      await rpc(contracts.setProjectLevel, {
+        rootPath: workspace.projectRootPath,
+        displayName: workspace.projectDisplayName,
+        level: null,
       });
     },
   });

@@ -8,7 +8,7 @@ Show your current Paseo activity on Discord. The Paseo daemon and Discord app mu
 
 ![Discord presence with workspace status](./docs/screenshots/presence1.png)
 
-![Anonymous Discord presence](./docs/screenshots/presence3.png)
+![Discord presence with a finished turn](./docs/screenshots/presence3.png)
 
 ## Installation
 
@@ -22,19 +22,21 @@ Native, Snap, and Flatpak Discord installations are supported. The plugin reconn
 
 ## Settings
 
-Choose how much information appears on your profile with **Detail level**:
+**Detail level** decides how much of your work reaches your profile:
 
 | Level | Example |
 | --- | --- |
 | Detailed | `paseo-plugins — main` and `3 workspaces · 1 agent running` |
 | Projects only | `paseo-plugins` and `3 workspaces` |
-| Anonymous | `Using Paseo` |
+| Hidden | `Using Paseo` |
 
-Workspace titles can contain task details, so review them before using **Detailed**.
+The second line counts only the project named on the first, so work in your other projects never shows through.
 
-Switch a project off under **Projects** to hide all of its workspace names. Paseo shows another project with active work when possible, or falls back to the anonymous presence. The choice is saved by project path until you switch it back on.
+**All projects** sets the level every project follows. Each project beneath it starts on **Default** and can be given a level of its own instead, saved by project path until you set it back to **Default** — a project you hid stays listed after you close it, so you can put it back. Workspace titles can contain task details, so review them before leaving a project on **Detailed**.
 
-Use the sidebar or Command Center to turn the presence on or off and to mute or unmute the current project. Turning it off removes the presence immediately.
+A project set to **Hidden** is never named: Paseo names another project with active work when possible, and otherwise falls back to `Using Paseo`.
+
+Use the sidebar or Command Center to turn the presence on or off and to show the current project as Detailed, Projects only, Hidden, or at the default level. Turning the presence off removes it immediately.
 
 The status badge matches the workspace state shown by Paseo:
 

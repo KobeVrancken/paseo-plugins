@@ -1,4 +1,9 @@
-import type { PresenceActivity, PresenceSettings, PresenceSnapshot } from "../presence.shared.ts";
+import type {
+  DetailLevel,
+  PresenceActivity,
+  PresenceSettings,
+  PresenceSnapshot,
+} from "../presence.shared.ts";
 import { renderActivity } from "../presence.shared.ts";
 import { decideWrite, MIN_WRITE_INTERVAL_MS } from "../throttle.shared.ts";
 import { DaemonConnection, type DaemonState } from "./daemon.server.ts";
@@ -13,7 +18,8 @@ const REFRESH_INTERVAL_MS = 60_000;
 export type KnownProject = {
   rootPath: string;
   displayName: string;
-  muted: boolean;
+  /** null when the project follows the default level. */
+  level: DetailLevel | null;
 };
 
 export type PresenceStatus = {
@@ -30,7 +36,7 @@ export class PresenceService {
   private readonly daemon: DaemonConnection;
   private readonly discord: DiscordConnection;
   private settings: PresenceSettings | null = null;
-  private snapshot: PresenceSnapshot = { workspaces: [], agents: { running: 0, needsAttention: 0 } };
+  private snapshot: PresenceSnapshot = { workspaces: [], agents: [] };
   private activity: PresenceActivity | null = null;
   private lastPayload: string | null = null;
   private lastSentAt: number | null = null;
@@ -70,18 +76,18 @@ export class PresenceService {
     return this.status();
   }
 
-  /** Muted projects stay listed even when none of their workspaces is open, so they can be unmuted. */
+  /** A project given a level of its own stays listed with no workspace open, so the choice can be undone. */
   private knownProjects(settings: PresenceSettings): KnownProject[] {
     const projects = new Map<string, KnownProject>();
-    for (const muted of settings.mutedProjects) {
-      projects.set(muted.rootPath, { ...muted, muted: true });
+    for (const project of settings.projectDetailLevels) {
+      projects.set(project.rootPath, project);
     }
     for (const workspace of this.snapshot.workspaces) {
       if (projects.has(workspace.projectRootPath)) continue;
       projects.set(workspace.projectRootPath, {
         rootPath: workspace.projectRootPath,
         displayName: workspace.projectDisplayName,
-        muted: false,
+        level: null,
       });
     }
     return [...projects.values()].sort((left, right) =>

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { renderActivity, DEFAULT_SETTINGS } from "./presence.shared.ts";
-import { toAgentTally, toPresenceSnapshot, toWorkspaceActivity } from "./snapshot.shared.ts";
+import { toAgentActivities, toPresenceSnapshot, toWorkspaceActivity } from "./snapshot.shared.ts";
 
 function fixture(name: string): unknown[] {
   return JSON.parse(readFileSync(path.join(import.meta.dirname, "fixtures", `${name}.json`), "utf8"));
@@ -15,6 +15,7 @@ const agentEntries = fixture("agents");
 test("reads the fields the presence needs off a live workspace payload", () => {
   const workspace = toWorkspaceActivity(workspaceEntries[0]);
   assert.deepEqual(workspace, {
+    id: "wks_8862cf1b6651af1a",
     projectRootPath: "/home/dev/todo-app",
     projectDisplayName: "todo-app",
     workspaceName: "Build POC",
@@ -34,13 +35,19 @@ test("falls back to the root path when a project has no display name", () => {
   assert.equal(workspace?.projectDisplayName, "/home/dev/thing");
 });
 
-test("counts only agents that are still doing something", () => {
-  assert.deepEqual(toAgentTally(agentEntries), { running: 1, needsAttention: 0 });
+test("keeps the workspace that places an agent in a project", () => {
+  const agents = toAgentActivities(agentEntries);
+  assert.deepEqual(
+    agents.filter((agent) => agent.running),
+    [{ workspaceId: "wks_dfd1cd899bcb5185", running: true, needsAttention: false }],
+  );
 });
 
-test("counts an agent waiting on the user", () => {
-  const waiting = [{ agent: { status: "idle", requiresAttention: true } }];
-  assert.deepEqual(toAgentTally(waiting), { running: 0, needsAttention: 1 });
+test("reads an agent waiting on the user", () => {
+  const waiting = [{ agent: { status: "idle", requiresAttention: true, workspaceId: "wks_a" } }];
+  assert.deepEqual(toAgentActivities(waiting), [
+    { workspaceId: "wks_a", running: false, needsAttention: true },
+  ]);
 });
 
 test("ignores archived and closed agents", () => {
@@ -48,7 +55,7 @@ test("ignores archived and closed agents", () => {
     { agent: { status: "running", archivedAt: "2026-08-01T00:00:00.000Z" } },
     { agent: { status: "closed", requiresAttention: true } },
   ];
-  assert.deepEqual(toAgentTally(gone), { running: 0, needsAttention: 0 });
+  assert.deepEqual(toAgentActivities(gone), []);
 });
 
 test("builds a presence from the live payloads", () => {
@@ -61,8 +68,7 @@ test("builds a presence from the live payloads", () => {
     now,
   );
   assert.equal(activity?.details, "acme-billing — Invoke mattpocock-skills:wayfinder");
-  assert.equal(activity?.state, "3 workspaces · 1 agent running");
-  // The running agent's workspace is absent from this capture, so the badge reports the workspace
-  // it actually named rather than borrowing a state from an agent it cannot show.
+  // Each of the three workspaces is its own project, and the running agent belongs to none of them.
+  assert.equal(activity?.state, "1 workspace · idle");
   assert.equal(activity?.smallImageKey, "idle");
 });

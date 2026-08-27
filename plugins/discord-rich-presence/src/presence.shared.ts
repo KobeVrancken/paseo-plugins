@@ -1,8 +1,9 @@
-export type DetailLevel = "detailed" | "projects" | "anonymous";
+export type DetailLevel = "detailed" | "projects" | "hidden";
 
 export type WorkspaceStatus = "needs_input" | "failed" | "running" | "attention" | "done";
 
 export type WorkspaceActivity = {
+  id: string;
   projectRootPath: string;
   projectDisplayName: string;
   workspaceName: string;
@@ -17,22 +18,52 @@ export type AgentTally = {
   needsAttention: number;
 };
 
-export type MutedProject = {
+/** An agent still doing something, carrying the workspace that places it in a project. */
+export type AgentActivity = {
+  workspaceId: string | null;
+  running: boolean;
+  needsAttention: boolean;
+};
+
+export type Project = {
   rootPath: string;
   displayName: string;
+};
+
+/** A project told to ignore the default and use this level instead. */
+export type ProjectDetailLevel = Project & {
+  level: DetailLevel;
 };
 
 export type PresenceSettings = {
   enabled: boolean;
   applicationId: string | null;
-  detailLevel: DetailLevel;
-  mutedProjects: MutedProject[];
+  defaultDetailLevel: DetailLevel;
+  projectDetailLevels: ProjectDetailLevel[];
 };
 
 export type PresenceSnapshot = {
   workspaces: WorkspaceActivity[];
-  agents: AgentTally;
+  agents: AgentActivity[];
 };
+
+/**
+ * An agent whose workspace is not among the ones counted is left out rather than assumed: the
+ * presence speaks for one project, and an agent it cannot place might belong to a hidden one.
+ */
+export function tallyAgents(
+  agents: readonly AgentActivity[],
+  workspaceIds: ReadonlySet<string>,
+): AgentTally {
+  let running = 0;
+  let needsAttention = 0;
+  for (const agent of agents) {
+    if (agent.workspaceId === null || !workspaceIds.has(agent.workspaceId)) continue;
+    if (agent.running) running += 1;
+    if (agent.needsAttention) needsAttention += 1;
+  }
+  return { running, needsAttention };
+}
 
 export type PresenceActivity = {
   details: string;
@@ -48,12 +79,12 @@ export const LARGE_IMAGE_KEY = "paseo";
 export const LARGE_IMAGE_TEXT = "Paseo";
 export const ANONYMOUS_DETAILS = "Using Paseo";
 
-export const DETAIL_LEVELS: readonly DetailLevel[] = ["detailed", "projects", "anonymous"];
+export const DETAIL_LEVELS: readonly DetailLevel[] = ["detailed", "projects", "hidden"];
 
 export const DETAIL_LEVEL_LABELS: Record<DetailLevel, string> = {
   detailed: "Detailed",
   projects: "Projects only",
-  anonymous: "Anonymous",
+  hidden: "Hidden",
 };
 
 /** The application the plugin ships against, so an install shows a presence without a trip to the developer portal. */
@@ -62,12 +93,20 @@ export const MANAGED_APPLICATION_ID = "1542167510986653787";
 export const DEFAULT_SETTINGS: PresenceSettings = {
   enabled: true,
   applicationId: MANAGED_APPLICATION_ID,
-  detailLevel: "detailed",
-  mutedProjects: [],
+  defaultDetailLevel: "detailed",
+  projectDetailLevels: [],
 };
 
-export function isProjectMuted(settings: PresenceSettings, projectRootPath: string): boolean {
-  return settings.mutedProjects.some((project) => project.rootPath === projectRootPath);
+/** The level set on a project, or null when it follows the default. */
+export function levelSetOn(settings: PresenceSettings, projectRootPath: string): DetailLevel | null {
+  return (
+    settings.projectDetailLevels.find((project) => project.rootPath === projectRootPath)?.level ??
+    null
+  );
+}
+
+export function detailLevelFor(settings: PresenceSettings, projectRootPath: string): DetailLevel {
+  return levelSetOn(settings, projectRootPath) ?? settings.defaultDetailLevel;
 }
 
 function isLive(status: WorkspaceStatus): boolean {
@@ -90,28 +129,35 @@ export function rankWorkspaces(
 /** Past this, the last workspace is what you were doing rather than what you are doing. */
 export const STALE_AFTER_MS = 30 * 60_000;
 
+/** The workspace the presence speaks for, carrying the level its project asked to be shown at. */
+type ActiveWorkspace = {
+  workspace: WorkspaceActivity;
+  level: DetailLevel;
+};
+
 /**
  * The workspace the presence speaks for, or null when it should fall back to the anonymous
- * rendering. A muted workspace is only ever replaced by live work: promoting whatever merely ranks
- * behind it puts a project you are not in front of on your profile, which is what muting was for.
+ * rendering. A hidden workspace is only ever replaced by live work: promoting whatever merely ranks
+ * behind it puts a project you are not in front of on your profile, which is what hiding was for.
  */
 function pickActive(
   workspaces: readonly WorkspaceActivity[],
   settings: PresenceSettings,
   now: number,
-): WorkspaceActivity | null {
+): ActiveWorkspace | null {
   const ranked = rankWorkspaces(workspaces, now);
   const first = ranked[0];
   if (!first) return null;
-  if (!isProjectMuted(settings, first.projectRootPath)) {
-    return activeAt(first, now) >= now - STALE_AFTER_MS ? first : null;
+  const level = detailLevelFor(settings, first.projectRootPath);
+  if (level !== "hidden") {
+    return activeAt(first, now) >= now - STALE_AFTER_MS ? { workspace: first, level } : null;
   }
-  return (
-    ranked.find(
-      (workspace) =>
-        isLive(workspace.status) && !isProjectMuted(settings, workspace.projectRootPath),
-    ) ?? null
-  );
+  for (const workspace of ranked) {
+    if (!isLive(workspace.status)) continue;
+    const fallback = detailLevelFor(settings, workspace.projectRootPath);
+    if (fallback !== "hidden") return { workspace, level: fallback };
+  }
+  return null;
 }
 
 function plural(count: number, noun: string): string {
@@ -137,8 +183,8 @@ function activityClause(workspaces: readonly WorkspaceActivity[], agents: AgentT
 }
 
 /**
- * The badge speaks for the workspace on the first line and nothing else. Reading it off a tally
- * across every project would turn it green for work in a project you muted precisely to hide.
+ * The badge speaks for the workspace on the first line and nothing else, which is why it survives
+ * the projects level while the activity clause does not.
  */
 const BADGES: Record<WorkspaceStatus, { key: string; text: string }> = {
   needs_input: { key: "needs_input", text: "Waiting for permission" },
@@ -156,6 +202,10 @@ export const BADGE_COLORS: Record<string, string> = {
   attention: "#35c264",
   idle: "#6b7280",
 };
+
+function idsOf(workspaces: readonly WorkspaceActivity[]): Set<string> {
+  return new Set(workspaces.map((workspace) => workspace.id).filter((id) => id.length > 0));
+}
 
 function describeWorkspace(active: WorkspaceActivity): string {
   const { projectDisplayName, workspaceName } = active;
@@ -183,20 +233,22 @@ export function renderActivity(
   now: number,
 ): PresenceActivity | null {
   if (!settings.enabled || !settings.applicationId) return null;
-  if (settings.detailLevel === "anonymous") return anonymousActivity(startTimestamp);
 
   const active = pickActive(snapshot.workspaces, settings, now);
   if (!active) return anonymousActivity(startTimestamp);
 
-  const badge = BADGES[active.status];
-  const count = plural(snapshot.workspaces.length, "workspace");
+  const { workspace, level } = active;
+  const badge = BADGES[workspace.status];
+  const siblings = snapshot.workspaces.filter(
+    (entry) => entry.projectRootPath === workspace.projectRootPath,
+  );
+  const count = plural(siblings.length, "workspace");
   return {
-    details:
-      settings.detailLevel === "projects" ? active.projectDisplayName : describeWorkspace(active),
+    details: level === "projects" ? workspace.projectDisplayName : describeWorkspace(workspace),
     state:
-      settings.detailLevel === "projects"
+      level === "projects"
         ? count
-        : `${count} · ${activityClause(snapshot.workspaces, snapshot.agents)}`,
+        : `${count} · ${activityClause(siblings, tallyAgents(snapshot.agents, idsOf(siblings)))}`,
     largeImageKey: LARGE_IMAGE_KEY,
     largeImageText: LARGE_IMAGE_TEXT,
     smallImageKey: badge.key,

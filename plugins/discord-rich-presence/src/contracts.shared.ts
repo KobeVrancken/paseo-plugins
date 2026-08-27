@@ -1,7 +1,9 @@
 import { defineRpc } from "@getpaseo/plugin/server";
 import { z } from "zod";
 
-const MutedProjectSchema = z.object({
+const DetailLevelSchema = z.enum(["detailed", "projects", "hidden"]);
+
+const ProjectSchema = z.object({
   rootPath: z.string(),
   displayName: z.string(),
 });
@@ -9,8 +11,8 @@ const MutedProjectSchema = z.object({
 export const SettingsSchema = z.object({
   enabled: z.boolean(),
   applicationId: z.string().nullable(),
-  detailLevel: z.enum(["detailed", "projects", "anonymous"]),
-  mutedProjects: z.array(MutedProjectSchema),
+  defaultDetailLevel: DetailLevelSchema,
+  projectDetailLevels: z.array(ProjectSchema.extend({ level: DetailLevelSchema })),
 });
 
 const ActivitySchema = z.object({
@@ -34,7 +36,7 @@ const StatusSchema = z.object({
     error: z.string().optional(),
   }),
   activity: ActivitySchema.nullable(),
-  projects: z.array(MutedProjectSchema.extend({ muted: z.boolean() })),
+  projects: z.array(ProjectSchema.extend({ level: DetailLevelSchema.nullable() })),
 });
 
 export type PresenceStatusPayload = z.output<typeof StatusSchema>;
@@ -57,8 +59,8 @@ export const setEnabled = defineRpc({
   output: StatusSchema,
 });
 
-export const muteProject = defineRpc({
-  name: "presence.project.mute",
-  input: MutedProjectSchema.extend({ muted: z.boolean() }),
+export const setProjectLevel = defineRpc({
+  name: "presence.project.level",
+  input: ProjectSchema.extend({ level: DetailLevelSchema.nullable() }),
   output: StatusSchema,
 });

@@ -2,8 +2,9 @@ import {
   DEFAULT_SETTINGS,
   DETAIL_LEVELS,
   type DetailLevel,
-  type MutedProject,
   type PresenceSettings,
+  type Project,
+  type ProjectDetailLevel,
 } from "./presence.shared.ts";
 
 export type StoredState = {
@@ -11,8 +12,8 @@ export type StoredState = {
   settings: PresenceSettings;
 };
 
-function coerceDetailLevel(raw: unknown): DetailLevel {
-  return DETAIL_LEVELS.includes(raw as DetailLevel) ? (raw as DetailLevel) : DEFAULT_SETTINGS.detailLevel;
+function asDetailLevel(raw: unknown): DetailLevel | null {
+  return DETAIL_LEVELS.includes(raw as DetailLevel) ? (raw as DetailLevel) : null;
 }
 
 /** Discord application ids are snowflakes, and a pasted one arrives with whatever whitespace came along. */
@@ -22,16 +23,23 @@ export function coerceApplicationId(raw: unknown): string | null {
   return /^\d{17,20}$/.test(trimmed) ? trimmed : null;
 }
 
-function coerceMutedProjects(raw: unknown): MutedProject[] {
+/**
+ * An entry whose level is unreadable is dropped rather than filled in with the default: a project
+ * set to the same level as the default still has to stop following it when the default changes.
+ */
+function coerceProjectDetailLevels(raw: unknown): ProjectDetailLevel[] {
   if (!Array.isArray(raw)) return [];
-  const projects: MutedProject[] = [];
+  const projects: ProjectDetailLevel[] = [];
   for (const entry of raw) {
-    const project = entry as Partial<MutedProject> | null;
+    const project = entry as Partial<ProjectDetailLevel> | null;
     if (!project || typeof project.rootPath !== "string" || project.rootPath.length === 0) continue;
+    const level = asDetailLevel(project.level);
+    if (level === null) continue;
     if (projects.some((existing) => existing.rootPath === project.rootPath)) continue;
     projects.push({
       rootPath: project.rootPath,
       displayName: typeof project.displayName === "string" ? project.displayName : project.rootPath,
+      level,
     });
   }
   return projects;
@@ -46,16 +54,23 @@ export function coerceSettings(raw: unknown): PresenceSettings {
     enabled: typeof settings.enabled === "boolean" ? settings.enabled : DEFAULT_SETTINGS.enabled,
     applicationId:
       "applicationId" in settings ? coerceApplicationId(settings.applicationId) : DEFAULT_SETTINGS.applicationId,
-    detailLevel: coerceDetailLevel(settings.detailLevel),
-    mutedProjects: coerceMutedProjects(settings.mutedProjects),
+    defaultDetailLevel:
+      asDetailLevel(settings.defaultDetailLevel) ?? DEFAULT_SETTINGS.defaultDetailLevel,
+    projectDetailLevels: coerceProjectDetailLevels(settings.projectDetailLevels),
   };
 }
 
-export function withMutedProject(
+/** A null level drops the entry, so the project goes back to following the default. */
+export function withProjectDetailLevel(
   settings: PresenceSettings,
-  project: MutedProject,
-  muted: boolean,
+  project: Project,
+  level: DetailLevel | null,
 ): PresenceSettings {
-  const without = settings.mutedProjects.filter((entry) => entry.rootPath !== project.rootPath);
-  return { ...settings, mutedProjects: muted ? [...without, project] : without };
+  const without = settings.projectDetailLevels.filter(
+    (entry) => entry.rootPath !== project.rootPath,
+  );
+  return {
+    ...settings,
+    projectDetailLevels: level === null ? without : [...without, { ...project, level }],
+  };
 }

@@ -1,7 +1,7 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import type { StyleProp, TextStyle, ViewStyle } from "react-native";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Platform, Pressable, Text, View } from "react-native";
+import { Animated, Dimensions, Modal, Platform, Pressable, Text, View } from "react-native";
 import {
   controlHeight,
   derivePalette,
@@ -104,42 +104,167 @@ export function Switch({
   );
 }
 
-export function SegmentedControl<Value extends string>({
+export type SelectOption<Value extends string> = {
+  value: Value;
+  label: string;
+  description?: string;
+};
+
+type Anchor = { x: number; y: number; width: number; height: number };
+
+const MENU_MIN_WIDTH = 240;
+const MENU_MARGIN = 8;
+const MENU_GAP = 4;
+
+/**
+ * Places the menu under its trigger and right-aligned with it, unless the window has no room, in
+ * which case it goes above. Nothing else in the panel can hold it: the cards clip their overflow
+ * and the surface is a scroll view, so the menu is drawn in a `Modal` and positioned by hand.
+ */
+function menuPosition(anchor: Anchor, height: number, width: number) {
+  const window = Dimensions.get("window");
+  const below = anchor.y + anchor.height + MENU_GAP;
+  const fitsBelow = below + height + MENU_MARGIN <= window.height;
+  return {
+    top: fitsBelow ? below : Math.max(MENU_MARGIN, anchor.y - MENU_GAP - height),
+    left: Math.max(MENU_MARGIN, Math.min(anchor.x + anchor.width - width, window.width - width - MENU_MARGIN)),
+  };
+}
+
+export function Select<Value extends string>({
   palette,
   options,
   value,
   onValueChange,
+  label,
+  accessibilityLabel,
 }: {
   palette: Palette;
-  options: readonly { value: Value; label: string }[];
+  options: readonly SelectOption<Value>[];
   value: Value;
   onValueChange: (value: Value) => void;
+  /** What the closed trigger reads, when it says more than the selected option's label. */
+  label?: string;
+  accessibilityLabel: string;
 }) {
+  const trigger = useRef<View>(null);
+  const [anchor, setAnchor] = useState<Anchor | null>(null);
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  const selected = options.find((option) => option.value === value);
+
+  const open = () => {
+    trigger.current?.measureInWindow((x, y, width, height) => setAnchor({ x, y, width, height }));
+  };
+  const close = () => {
+    setAnchor(null);
+    setSize(null);
+  };
+
+  const placed = anchor && size ? menuPosition(anchor, size.height, size.width) : null;
+
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[1], minHeight: controlHeight.compact }}>
-      {options.map((option) => {
-        const selected = option.value === value;
-        return (
-          <Pressable
-            key={option.value}
-            accessibilityRole="button"
-            accessibilityState={{ selected }}
-            onPress={() => onValueChange(option.value)}
-            style={pressable(({ hovered, pressed }) => ({
-              minHeight: controlHeight.compact - 4,
-              paddingHorizontal: spacing[3],
-              borderRadius: radius.md,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: selected || pressed ? palette.surface3 : hovered ? palette.surface2 : "transparent",
-            }))}
+    <View ref={trigger} collapsable={false}>
+      <Pressable
+        onPress={open}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: anchor !== null }}
+        accessibilityLabel={accessibilityLabel}
+        style={pressable(({ hovered, pressed }) => ({
+          flexDirection: "row",
+          alignItems: "center",
+          gap: spacing[2],
+          minHeight: controlHeight.compact,
+          paddingLeft: spacing[3],
+          paddingRight: spacing[2],
+          borderRadius: radius.md,
+          borderWidth: 1,
+          borderColor: palette.borderAccent,
+          backgroundColor: hovered || pressed ? palette.surface2 : "transparent",
+        }))}
+      >
+        <Text numberOfLines={1} style={{ color: palette.foreground, fontSize: fontSize.base }}>
+          {label ?? selected?.label ?? ""}
+        </Text>
+        <Caret color={palette.foregroundMuted} open />
+      </Pressable>
+
+      <Modal visible={anchor !== null} transparent animationType="none" onRequestClose={close}>
+        <Pressable style={{ flex: 1 }} onPress={close} accessibilityLabel="Close menu">
+          <View
+            onLayout={(event) => {
+              const { width, height } = event.nativeEvent.layout;
+              setSize({ width: Math.max(width, MENU_MIN_WIDTH), height });
+            }}
+            style={{
+              position: "absolute",
+              minWidth: MENU_MIN_WIDTH,
+              maxWidth: 320,
+              top: placed?.top ?? 0,
+              left: placed?.left ?? 0,
+              opacity: placed ? 1 : 0,
+              backgroundColor: palette.surface2,
+              borderRadius: radius.lg,
+              borderWidth: 1,
+              borderColor: palette.border,
+              paddingVertical: spacing[1],
+              shadowColor: "rgba(0, 0, 0, 0.4)",
+              shadowOffset: { width: 0, height: 4 },
+              shadowRadius: 12,
+              shadowOpacity: 1,
+              elevation: 8,
+            }}
           >
-            <Text style={{ color: selected ? palette.foreground : palette.foregroundMuted, fontSize: fontSize.base }}>
-              {option.label}
-            </Text>
-          </Pressable>
-        );
-      })}
+            {options.map((option) => {
+              const active = option.value === value;
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  onPress={() => {
+                    close();
+                    onValueChange(option.value);
+                  }}
+                  style={pressable(({ hovered, pressed }) => ({
+                    flexDirection: "row",
+                    alignItems: "flex-start",
+                    gap: spacing[2],
+                    paddingVertical: spacing[2],
+                    paddingHorizontal: spacing[3],
+                    backgroundColor: hovered || pressed ? palette.surface3 : "transparent",
+                  }))}
+                >
+                  <View style={{ paddingTop: (leading(fontSize.base) - 6) / 2 }}>
+                    <StatusDot color={active ? palette.accent : "transparent"} size={6} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={{
+                        color: palette.foreground,
+                        fontSize: fontSize.base,
+                        lineHeight: leading(fontSize.base),
+                      }}
+                    >
+                      {option.label}
+                    </Text>
+                    {option.description ? (
+                      <Text
+                        style={{
+                          color: palette.foregroundMuted,
+                          fontSize: fontSize.sm,
+                          lineHeight: leading(fontSize.sm),
+                        }}
+                      >
+                        {option.description}
+                      </Text>
+                    ) : null}
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }

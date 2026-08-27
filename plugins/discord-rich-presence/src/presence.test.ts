@@ -5,6 +5,7 @@ import {
   DEFAULT_SETTINGS,
   renderActivity,
   STALE_AFTER_MS,
+  type AgentActivity,
   type PresenceSettings,
   type PresenceSnapshot,
   type WorkspaceActivity,
@@ -15,6 +16,7 @@ const NOW = START + 60_000;
 
 function workspace(overrides: Partial<WorkspaceActivity> = {}): WorkspaceActivity {
   return {
+    id: "wks_main",
     projectRootPath: "/home/dev/paseo-plugins",
     projectDisplayName: "paseo-plugins",
     workspaceName: "main",
@@ -28,13 +30,32 @@ function workspace(overrides: Partial<WorkspaceActivity> = {}): WorkspaceActivit
 function snapshot(overrides: Partial<PresenceSnapshot> = {}): PresenceSnapshot {
   return {
     workspaces: [workspace()],
-    agents: { running: 0, needsAttention: 0 },
+    agents: [],
     ...overrides,
   };
 }
 
+/** Agents are counted through the workspace they sit in, so a fixture has to name one. */
+function agents(
+  tally: { running?: number; needsAttention?: number },
+  workspaceId = "wks_main",
+): AgentActivity[] {
+  const list: AgentActivity[] = [];
+  for (let index = 0; index < (tally.running ?? 0); index += 1) {
+    list.push({ workspaceId, running: true, needsAttention: false });
+  }
+  for (let index = 0; index < (tally.needsAttention ?? 0); index += 1) {
+    list.push({ workspaceId, running: false, needsAttention: true });
+  }
+  return list;
+}
+
 function settings(overrides: Partial<PresenceSettings> = {}): PresenceSettings {
   return { ...DEFAULT_SETTINGS, applicationId: "1234", ...overrides };
+}
+
+function hiding(rootPath: string): PresenceSettings {
+  return settings({ projectDetailLevels: [{ rootPath, displayName: rootPath, level: "hidden" }] });
 }
 
 test("renders nothing until an application id is configured", () => {
@@ -85,20 +106,39 @@ test("a workspace still running outranks one that merely finished more recently"
   assert.match(renderActivity(many, settings(), START, NOW)?.details ?? "", /^still-running/);
 });
 
-test("counts every workspace, including muted ones", () => {
-  const many = snapshot({ workspaces: [workspace({ projectRootPath: "/a" }), workspace({ projectRootPath: "/b" })] });
+test("counts only the workspaces of the project it names", () => {
+  const many = snapshot({
+    workspaces: [
+      workspace({ id: "wks_a", projectRootPath: "/a" }),
+      workspace({ id: "wks_b", projectRootPath: "/a" }),
+      workspace({ id: "wks_c", projectRootPath: "/b" }),
+    ],
+  });
   assert.equal(renderActivity(many, settings(), START, NOW)?.state, "2 workspaces · idle");
 });
 
+test("leaves out an agent working in another project", () => {
+  const many = snapshot({
+    workspaces: [workspace(), workspace({ id: "wks_other", projectRootPath: "/b" })],
+    agents: agents({ running: 3 }, "wks_other"),
+  });
+  assert.equal(renderActivity(many, settings(), START, NOW)?.state, "1 workspace · idle");
+});
+
+test("leaves out an agent it cannot place in any workspace", () => {
+  const orphaned = snapshot({ agents: [{ workspaceId: null, running: true, needsAttention: false }] });
+  assert.equal(renderActivity(orphaned, settings(), START, NOW)?.state, "1 workspace · idle");
+});
+
 test("reports running agents", () => {
-  const busy = snapshot({ agents: { running: 2, needsAttention: 0 } });
+  const busy = snapshot({ agents: agents({ running: 2 }) });
   assert.equal(renderActivity(busy, settings(), START, NOW)?.state, "1 workspace · 2 agents running");
 });
 
 test("a permission prompt outranks work in flight", () => {
   const blocked = snapshot({
     workspaces: [workspace({ status: "needs_input" })],
-    agents: { running: 1, needsAttention: 0 },
+    agents: agents({ running: 1 }),
   });
   assert.equal(renderActivity(blocked, settings(), START, NOW)?.state, "1 workspace · 1 waiting for permission");
 });
@@ -106,7 +146,7 @@ test("a permission prompt outranks work in flight", () => {
 test("work in flight outranks a turn that has merely ended", () => {
   const busy = snapshot({
     workspaces: [workspace({ status: "running" })],
-    agents: { running: 1, needsAttention: 1 },
+    agents: agents({ running: 1, needsAttention: 1 }),
   });
   assert.equal(renderActivity(busy, settings(), START, NOW)?.state, "1 workspace · 1 agent running");
 });
@@ -114,7 +154,7 @@ test("work in flight outranks a turn that has merely ended", () => {
 test("reports a finished turn once nothing is still running", () => {
   const finished = snapshot({
     workspaces: [workspace({ status: "attention" })],
-    agents: { running: 0, needsAttention: 2 },
+    agents: agents({ needsAttention: 2 }),
   });
   assert.equal(renderActivity(finished, settings(), START, NOW)?.state, "1 workspace · 2 waiting for you");
 });
@@ -142,28 +182,44 @@ test("gives every workspace status its own badge", () => {
   }
 });
 
-test("the badge follows the named workspace, not a tally across muted projects", () => {
+test("the badge follows the named workspace, not a tally across hidden projects", () => {
   const many = snapshot({
     workspaces: [
-      workspace({ projectRootPath: "/work/client", projectDisplayName: "client-work", status: "needs_input" }),
+      workspace({ id: "wks_client", projectRootPath: "/work/client", projectDisplayName: "client-work", status: "needs_input" }),
       workspace({ projectRootPath: "/home/dev/paseo-plugins", status: "running" }),
     ],
-    agents: { running: 1, needsAttention: 3 },
+    agents: agents({ running: 1, needsAttention: 3 }, "wks_client"),
   });
-  const muted = settings({ mutedProjects: [{ rootPath: "/work/client", displayName: "client-work" }] });
-  const activity = renderActivity(many, muted, START, NOW);
+  const activity = renderActivity(many, hiding("/work/client"), START, NOW);
   assert.equal(activity?.details, "paseo-plugins — main");
   assert.equal(activity?.smallImageKey, "running");
 });
 
 test("the projects level keeps the project name and drops the rest", () => {
-  const activity = renderActivity(snapshot(), settings({ detailLevel: "projects" }), START, NOW);
+  const quiet = settings({ defaultDetailLevel: "projects" });
+  const activity = renderActivity(snapshot(), quiet, START, NOW);
   assert.equal(activity?.details, "paseo-plugins");
   assert.equal(activity?.state, "1 workspace");
 });
 
-test("the anonymous level names nothing at all", () => {
-  const activity = renderActivity(snapshot(), settings({ detailLevel: "anonymous" }), START, NOW);
+test("the projects level still badges the workspace it named", () => {
+  const only = snapshot({ workspaces: [workspace({ status: "running" })] });
+  const quiet = settings({ defaultDetailLevel: "projects" });
+  assert.equal(renderActivity(only, quiet, START, NOW)?.smallImageKey, "running");
+});
+
+test("a project renders at its own level, not the default", () => {
+  const quiet = settings({
+    defaultDetailLevel: "projects",
+    projectDetailLevels: [
+      { rootPath: "/home/dev/paseo-plugins", displayName: "paseo-plugins", level: "detailed" },
+    ],
+  });
+  assert.equal(renderActivity(snapshot(), quiet, START, NOW)?.details, "paseo-plugins — main");
+});
+
+test("hiding every project names nothing at all", () => {
+  const activity = renderActivity(snapshot(), settings({ defaultDetailLevel: "hidden" }), START, NOW);
   assert.deepEqual(activity, {
     details: ANONYMOUS_DETAILS,
     largeImageKey: "paseo",
@@ -172,33 +228,45 @@ test("the anonymous level names nothing at all", () => {
   });
 });
 
-test("a muted project falls through to work that is live", () => {
+test("a hidden project falls through to work that is live", () => {
   const many = snapshot({
     workspaces: [
       workspace({ projectRootPath: "/work/client", projectDisplayName: "client-work" }),
       workspace({ projectRootPath: "/home/dev/paseo-plugins", status: "running" }),
     ],
   });
-  const muted = settings({ mutedProjects: [{ rootPath: "/work/client", displayName: "client-work" }] });
-  assert.equal(renderActivity(many, muted, START, NOW)?.details, "paseo-plugins — main");
+  assert.equal(renderActivity(many, hiding("/work/client"), START, NOW)?.details, "paseo-plugins — main");
 });
 
-test("a muted project does not promote a workspace that is merely the next most recent", () => {
+test("the project promoted past a hidden one is rendered at its own level", () => {
+  const many = snapshot({
+    workspaces: [
+      workspace({ projectRootPath: "/work/client", projectDisplayName: "client-work" }),
+      workspace({ projectRootPath: "/home/dev/paseo-plugins", status: "running" }),
+    ],
+  });
+  const mixed = settings({
+    projectDetailLevels: [
+      { rootPath: "/work/client", displayName: "client-work", level: "hidden" },
+      { rootPath: "/home/dev/paseo-plugins", displayName: "paseo-plugins", level: "projects" },
+    ],
+  });
+  assert.equal(renderActivity(many, mixed, START, NOW)?.details, "paseo-plugins");
+});
+
+test("a hidden project does not promote a workspace that is merely the next most recent", () => {
   const many = snapshot({
     workspaces: [
       workspace({ projectRootPath: "/work/client", projectDisplayName: "client-work" }),
       workspace({ projectRootPath: "/home/dev/paseo-plugins", statusEnteredAt: START - 1 }),
     ],
   });
-  const muted = settings({ mutedProjects: [{ rootPath: "/work/client", displayName: "client-work" }] });
-  assert.equal(renderActivity(many, muted, START, NOW)?.details, ANONYMOUS_DETAILS);
+  assert.equal(renderActivity(many, hiding("/work/client"), START, NOW)?.details, ANONYMOUS_DETAILS);
 });
 
-test("muting every open project redacts rather than going dark", () => {
-  const muted = settings({
-    mutedProjects: [{ rootPath: "/home/dev/paseo-plugins", displayName: "paseo-plugins" }],
-  });
-  assert.equal(renderActivity(snapshot(), muted, START, NOW)?.details, ANONYMOUS_DETAILS);
+test("hiding every open project redacts rather than going dark", () => {
+  const hidden = hiding("/home/dev/paseo-plugins");
+  assert.equal(renderActivity(snapshot(), hidden, START, NOW)?.details, ANONYMOUS_DETAILS);
 });
 
 test("stops naming a workspace nobody has touched in half an hour", () => {

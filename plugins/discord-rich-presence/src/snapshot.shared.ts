@@ -1,4 +1,9 @@
-import type { AgentTally, PresenceSnapshot, WorkspaceActivity, WorkspaceStatus } from "./presence.shared.ts";
+import type {
+  AgentActivity,
+  PresenceSnapshot,
+  WorkspaceActivity,
+  WorkspaceStatus,
+} from "./presence.shared.ts";
 
 const WORKSPACE_STATUSES: readonly WorkspaceStatus[] = [
   "needs_input",
@@ -26,6 +31,7 @@ export function toWorkspaceActivity(entry: unknown): WorkspaceActivity | null {
   const workspace = entry as Record<string, unknown> | null;
   if (!workspace || typeof workspace.projectRootPath !== "string") return null;
   return {
+    id: typeof workspace.id === "string" ? workspace.id : "",
     projectRootPath: workspace.projectRootPath,
     projectDisplayName:
       typeof workspace.projectDisplayName === "string" && workspace.projectDisplayName.length > 0
@@ -38,19 +44,21 @@ export function toWorkspaceActivity(entry: unknown): WorkspaceActivity | null {
   };
 }
 
-/** Counts what the second line reports. Closed and archived sessions are not activity. */
-export function toAgentTally(entries: readonly unknown[]): AgentTally {
-  let running = 0;
-  let needsAttention = 0;
+/** Closed and archived sessions are not activity, so they never reach the tally. */
+export function toAgentActivities(entries: readonly unknown[]): AgentActivity[] {
+  const activities: AgentActivity[] = [];
   for (const entry of entries) {
     const agent = (entry as { agent?: Record<string, unknown> } | null)?.agent;
     if (!agent) continue;
     if (agent.archivedAt) continue;
     if (agent.status === "closed") continue;
-    if (agent.status === "running") running += 1;
-    if (agent.requiresAttention === true) needsAttention += 1;
+    activities.push({
+      workspaceId: typeof agent.workspaceId === "string" ? agent.workspaceId : null,
+      running: agent.status === "running",
+      needsAttention: agent.requiresAttention === true,
+    });
   }
-  return { running, needsAttention };
+  return activities;
 }
 
 export function toPresenceSnapshot(
@@ -62,5 +70,5 @@ export function toPresenceSnapshot(
     const workspace = toWorkspaceActivity(entry);
     if (workspace) workspaces.push(workspace);
   }
-  return { workspaces, agents: toAgentTally(agentEntries) };
+  return { workspaces, agents: toAgentActivities(agentEntries) };
 }

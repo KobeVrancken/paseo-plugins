@@ -30,7 +30,8 @@ import {
   NO_OUTLINE,
   Row,
   Section,
-  SegmentedControl,
+  Select,
+  type SelectOption,
   StatusDot,
   Switch,
   usePalette,
@@ -85,11 +86,81 @@ function applicationHint(savedId: string): string {
   return "Your own Discord application. Its name is the title Discord shows in bold, and it needs the six art assets from the plugin's assets folder uploaded under Rich Presence.";
 }
 
-const DETAIL_LEVEL_HINTS: Record<DetailLevel, string> = {
-  detailed: "Your project, the workspace you are in, and what your agents are doing.",
-  projects: "Your project name and how many workspaces are open. Workspace titles stay private.",
-  anonymous: "Only that Paseo is running.",
+const DEFAULT_LEVEL_HINTS: Record<DetailLevel, string> = {
+  detailed: "Names the project and the workspace you are in.",
+  projects: "Names the project. Workspace titles stay private.",
+  hidden: "Nothing is named. Discord shows only that Paseo is running.",
 };
+
+const PROJECT_LEVEL_HINTS: Record<DetailLevel, string> = {
+  detailed: "Names the project and the workspace you are in.",
+  projects: "Names the project, never the workspace.",
+  hidden: "Never named. Paseo shows another active project instead.",
+};
+
+const DEFAULT_LEVEL_OPTIONS: readonly SelectOption<DetailLevel>[] = DETAIL_LEVELS.map((level) => ({
+  value: level,
+  label: DETAIL_LEVEL_LABELS[level],
+  description: DEFAULT_LEVEL_HINTS[level],
+}));
+
+/** The extra option a project row has, and the one the settings store spells as no entry at all. */
+const FOLLOWS_DEFAULT = "default";
+
+type ProjectLevelChoice = DetailLevel | typeof FOLLOWS_DEFAULT;
+
+const PROJECT_LEVEL_OPTIONS: readonly SelectOption<ProjectLevelChoice>[] = [
+  {
+    value: FOLLOWS_DEFAULT,
+    label: "Default",
+    description: "Follows the level set for all projects.",
+  },
+  ...DETAIL_LEVELS.map((level) => ({
+    value: level,
+    label: DETAIL_LEVEL_LABELS[level],
+    description: PROJECT_LEVEL_HINTS[level],
+  })),
+];
+
+type KnownProject = PresenceStatusPayload["projects"][number];
+
+function ProjectLevelRow({
+  palette,
+  project,
+  defaultLevel,
+  onChange,
+}: {
+  palette: Palette;
+  project: KnownProject;
+  defaultLevel: DetailLevel;
+  onChange: (level: DetailLevel | null) => void;
+}) {
+  const effective = project.level ?? defaultLevel;
+  const label = DETAIL_LEVEL_LABELS[effective];
+  return (
+    <Row
+      palette={palette}
+      title={project.displayName}
+      hint={project.rootPath}
+      dimmed={effective === "hidden"}
+      divided
+      trailing={
+        <Select
+          palette={palette}
+          value={project.level ?? FOLLOWS_DEFAULT}
+          options={PROJECT_LEVEL_OPTIONS}
+          label={project.level === null ? `Default · ${label}` : label}
+          accessibilityLabel={
+            project.level === null
+              ? `Detail level for ${project.displayName}: follows the default, ${label}`
+              : `Detail level for ${project.displayName}: ${label}`
+          }
+          onValueChange={(choice) => onChange(choice === FOLLOWS_DEFAULT ? null : choice)}
+        />
+      }
+    />
+  );
+}
 
 function ApplicationIdField({
   palette,
@@ -134,7 +205,7 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
   const queryClient = useQueryClient();
   const getStatus = useRpc(contracts.getStatus);
   const setSettings = useRpc(contracts.setSettings);
-  const muteProject = useRpc(contracts.muteProject);
+  const setProjectLevel = useRpc(contracts.setProjectLevel);
 
   const query = useQuery({
     queryKey: STATUS_QUERY_KEY,
@@ -145,9 +216,9 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
     mutationFn: (next: PresenceStatusPayload["settings"]) => setSettings(next),
     onSuccess: (next) => queryClient.setQueryData(STATUS_QUERY_KEY, next),
   });
-  const toggleMute = useMutation({
-    mutationFn: (input: { rootPath: string; displayName: string; muted: boolean }) =>
-      muteProject(input),
+  const setLevel = useMutation({
+    mutationFn: (input: { rootPath: string; displayName: string; level: DetailLevel | null }) =>
+      setProjectLevel(input),
     onSuccess: (next) => queryClient.setQueryData(STATUS_QUERY_KEY, next),
   });
 
@@ -233,27 +304,53 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
 
       <Section palette={palette} title="Detail level">
         <Card palette={palette}>
-          <View style={{ padding: spacing[4], gap: spacing[3] }}>
-            <SegmentedControl
-              palette={palette}
-              value={settings.detailLevel}
-              options={DETAIL_LEVELS.map((level: DetailLevel) => ({
-                value: level,
-                label: DETAIL_LEVEL_LABELS[level],
-              }))}
-              onValueChange={(detailLevel) => apply.mutate({ ...settings, detailLevel })}
-            />
-            <Text
-              style={{
-                color: palette.foregroundMuted,
-                fontSize: fontSize.sm,
-                lineHeight: leading(fontSize.sm),
-              }}
-            >
-              {DETAIL_LEVEL_HINTS[settings.detailLevel]}
-            </Text>
-          </View>
+          <Row
+            palette={palette}
+            title="All projects"
+            hint="What a project shows unless it says otherwise"
+            trailing={
+              <Select
+                palette={palette}
+                value={settings.defaultDetailLevel}
+                options={DEFAULT_LEVEL_OPTIONS}
+                accessibilityLabel={`Detail level for all projects: ${DETAIL_LEVEL_LABELS[settings.defaultDetailLevel]}`}
+                onValueChange={(defaultDetailLevel) =>
+                  apply.mutate({ ...settings, defaultDetailLevel })
+                }
+              />
+            }
+          />
+          {status.projects.length === 0 ? (
+            <Row palette={palette} title="No projects open." dimmed divided />
+          ) : (
+            status.projects.map((project) => (
+              <ProjectLevelRow
+                key={project.rootPath}
+                palette={palette}
+                project={project}
+                defaultLevel={settings.defaultDetailLevel}
+                onChange={(level) =>
+                  setLevel.mutate({
+                    rootPath: project.rootPath,
+                    displayName: project.displayName,
+                    level,
+                  })
+                }
+              />
+            ))
+          )}
         </Card>
+        <Text
+          style={{
+            color: palette.foregroundMuted,
+            fontSize: fontSize.sm,
+            lineHeight: leading(fontSize.sm),
+            marginLeft: spacing[1],
+          }}
+        >
+          A project set to Hidden is never named. Paseo shows another project with active work
+          instead, or shows only that you are running Paseo.
+        </Text>
       </Section>
 
       <Disclosure
@@ -301,50 +398,6 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
           </Text>
         </View>
       </Disclosure>
-
-      <Section palette={palette} title="Projects">
-        <Card palette={palette}>
-          {status.projects.length === 0 ? (
-            <Row palette={palette} title="No projects open." dimmed />
-          ) : (
-            status.projects.map((project, index) => (
-              <Row
-                key={project.rootPath}
-                palette={palette}
-                title={project.displayName}
-                hint={project.rootPath}
-                dimmed={project.muted}
-                divided={index > 0}
-                trailing={
-                  <Switch
-                    palette={palette}
-                    value={!project.muted}
-                    onValueChange={(shown) =>
-                      toggleMute.mutate({
-                        rootPath: project.rootPath,
-                        displayName: project.displayName,
-                        muted: !shown,
-                      })
-                    }
-                    accessibilityLabel={`Show ${project.displayName} on Discord`}
-                  />
-                }
-              />
-            ))
-          )}
-        </Card>
-        <Text
-          style={{
-            color: palette.foregroundMuted,
-            fontSize: fontSize.sm,
-            lineHeight: leading(fontSize.sm),
-            marginLeft: spacing[1],
-          }}
-        >
-          Switch a project off to keep it off your profile. Paseo shows another project with active
-          work instead, or falls back to the anonymous presence.
-        </Text>
-      </Section>
     </ScrollView>
   );
 }

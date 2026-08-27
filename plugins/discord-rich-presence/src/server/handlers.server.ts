@@ -1,5 +1,5 @@
-import type { PresenceSettings } from "../presence.shared.ts";
-import { withMutedProject } from "../settings.shared.ts";
+import type { DetailLevel, PresenceSettings } from "../presence.shared.ts";
+import { withProjectDetailLevel } from "../settings.shared.ts";
 import { service, type PresenceStatus } from "./service.server.ts";
 
 export function statusHandler(): Promise<PresenceStatus> {
@@ -15,16 +15,16 @@ export async function setEnabledHandler(input: { enabled: boolean }): Promise<Pr
   return service.update({ ...settings, enabled: input.enabled });
 }
 
-export async function muteProjectHandler(input: {
+export async function setProjectLevelHandler(input: {
   rootPath: string;
   displayName: string;
-  muted: boolean;
+  level: DetailLevel | null;
 }): Promise<PresenceStatus> {
   const { settings } = await service.status();
-  const next = withMutedProject(
+  const next = withProjectDetailLevel(
     settings,
     { rootPath: input.rootPath, displayName: input.displayName },
-    input.muted,
+    input.level,
   );
   return service.update(next);
 }
