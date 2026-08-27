@@ -5,16 +5,27 @@ import { claudeHomeDir, type Env } from "./paths.server.ts";
 
 /**
  * The slash commands a session can run, read off disk the way Claude Code reads them.
- * Its built-in commands are compiled into the binary and are deliberately not listed here: they
- * would be a copy of a list that changes with every release, and the CLI already offers them.
+ * The CLI's built-in commands are compiled into its binary, so the panel cannot enumerate them and does not try; the exception is the handful it has to understand itself, which are named here.
  */
 export type SlashCommand = {
   /** What follows the slash, including a plugin's namespace. */
   name: string;
   description: string;
-  source: "user" | "project" | "plugin";
+  source: "user" | "project" | "plugin" | "builtin";
   kind: "skill" | "command";
 };
+
+/**
+ * `/clear` is in the menu because the panel follows the session rotation it causes, and because a command it handles but does not offer is one the user has to type blind.
+ */
+const BUILT_IN_COMMANDS: SlashCommand[] = [
+  {
+    name: "clear",
+    description: "Clear conversation history and start a new session",
+    source: "builtin",
+    kind: "command",
+  },
+];
 
 const FRONTMATTER_SCAN_BYTES = 8 * 1024;
 const MAX_PROJECT_LEVELS = 12;
@@ -209,7 +220,7 @@ export async function listSlashCommands(
   }
 
   const byName = new Map<string, SlashCommand>();
-  for (const command of layers.flat()) {
+  for (const command of [...layers.flat(), ...BUILT_IN_COMMANDS]) {
     if (!byName.has(command.name)) byName.set(command.name, command);
   }
   return [...byName.values()].sort((left, right) => left.name.localeCompare(right.name));

@@ -23,6 +23,13 @@ import { snapshotFile, waitForFileChange } from "./file-events.server.ts";
 import { sendWatchingFrame } from "./presence.server.ts";
 import { searchWorkspaceEntries } from "./file-search.server.ts";
 import { searchForgeItems } from "./github.server.ts";
+import {
+  deliveryFor,
+  forgetDelivery,
+  noteDelivery,
+  shouldLookForSuccessor,
+  transcriptTookThePrompt,
+} from "./session-rotation.server.ts";
 import { StateStore } from "./state.server.ts";
 import { TranscriptStore, isRecentlyActive } from "./transcript.server.ts";
 
@@ -102,6 +109,40 @@ export async function listSessionsHandler(
   return { projectDir, sessions };
 }
 
+/** Armed as the keys go in, because how far the transcript had got by then is what says whether the prompt ever landed in it. */
+async function armRotationWatch(workspaceDir: string, sessionId: string): Promise<void> {
+  const at = Date.now();
+  const entryTotal = await store.entryTotal(workspaceDir, sessionId).catch(() => null);
+  noteDelivery(sessionId, { at, entryTotal: entryTotal ?? 0 });
+}
+
+/**
+ * `/clear` leaves the bound transcript behind for a new one, and neither file records the other, so the successor is found by elimination and the binding follows it.
+ * Null whenever the session is merely quiet, which is every other reason a poll comes back empty.
+ */
+async function followRotation(
+  workspaceDir: string,
+  sessionId: string,
+  entryTotal: number | null,
+): Promise<string | null> {
+  const delivery = deliveryFor(sessionId);
+  if (delivery === null) return null;
+  if (transcriptTookThePrompt(delivery, entryTotal)) {
+    forgetDelivery(sessionId);
+    return null;
+  }
+  if (!shouldLookForSuccessor({ delivery, entryTotal })) return null;
+  const successor = await store.findSuccessor(workspaceDir, sessionId, delivery.at);
+  if (successor === null) return null;
+  const binding = await state.binding(sessionId);
+  if (!binding) return null;
+  forgetDelivery(sessionId);
+  await state.unbind(sessionId);
+  await state.bind(successor, { ...binding, boundAt: Date.now() });
+  console.log(`session ${sessionId} was cleared and continues as ${successor}`);
+  return successor;
+}
+
 export async function getTimelineHandler(
   input: Input<typeof contracts.getTimeline>,
   context: Context,
@@ -124,6 +165,8 @@ export async function getTimelineHandler(
       sessionStatus = await statusFor(context.paseo, input.sessionId, input.workspaceId);
     }
   }
+  const rotatedTo = await followRotation(input.workspaceDir, input.sessionId, slice?.total ?? null);
+
   if (!slice) {
     return {
       entries: [],
@@ -131,6 +174,7 @@ export async function getTimelineHandler(
       windowStart: 0,
       revision: 0,
       reset: true,
+      rotatedTo,
       sessionStatus,
     };
   }
@@ -140,6 +184,7 @@ export async function getTimelineHandler(
     windowStart: slice.windowStart,
     revision: slice.revision,
     reset: slice.reset,
+    rotatedTo,
     sessionStatus,
   };
 }
@@ -238,6 +283,7 @@ export async function sendPromptHandler(
     references: input.references,
     behavior: sendBehavior,
     readStatus: () => statusFor(context.paseo, input.sessionId, input.workspaceId),
+    onDeliver: () => void armRotationWatch(input.workspaceDir, input.sessionId),
   });
 }
 

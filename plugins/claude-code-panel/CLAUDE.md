@@ -49,6 +49,8 @@ Every `paseo` CLI call boots Electron-as-node and costs roughly a second of CPU,
 The panel probes once when a session is opened and then only while the transcript has gone quiet after recent activity, backing off the longer nothing appears.
 
 Claude Code writes `~/.claude/projects/<cwd with every non-alphanumeric replaced by a dash>/<session-id>.jsonl`, and the file does not exist until the session's first prompt.
+`/clear` does not empty that file: the CLI abandons the session id it was launched with, appends a last `cost-state` line to the transcript it is leaving, and starts a new file whose first record is the `/clear` command itself, with nothing in either file linking the two.
+So the abandoned transcript's mtime moves one final time after the keys go in, and only the entry count says whether a delivered prompt actually landed in the session the panel is watching.
 In its option dialogs a digit selects an option in a single-select and toggles it in a multi-select, which is then submitted with the right arrow followed by `1`.
 
 A prompt whose caret ends inside an `@` mention or a `/` command opens the CLI's own suggestion list, and bracketed paste does not prevent that — the caret position is what decides it.
@@ -61,7 +63,7 @@ The command name comes from where the file lives, and only a plugin skill takes 
 A directory under `~/.claude/skills/` or `.claude/skills/` is named after the directory, a file under `.claude/commands/` after its filename, and a plugin's skill after `<plugin>:<frontmatter name or directory name>`.
 Personal beats project, a skill beats a command of the same name, and a plugin is namespaced so it never takes part.
 Project skills load from the working directory and every parent up to the repository root; a plugin contributes only while `enabledPlugins` in the settings has it switched on, at the `installPath` recorded in `~/.claude/plugins/installed_plugins.json`.
-The built-in commands live in the binary, so the panel cannot enumerate them and does not try.
+The built-in commands live in the binary, so the panel cannot enumerate them and does not try; `BUILT_IN_COMMANDS` names only the ones the panel has to handle itself, which is `/clear`.
 
 ## Where paseo's own answer lives
 

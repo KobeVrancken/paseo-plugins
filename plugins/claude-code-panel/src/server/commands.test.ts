@@ -65,6 +65,7 @@ test("lists skills and commands the way the CLI resolves them", async () => {
   assert.equal(byName.get("codex:rescue")?.description, "Ask codex", "a plugin skill is namespaced");
   assert.equal(byName.has("rescue"), false, "and only reachable through its namespace");
   assert.equal(byName.has("off:rescue"), false, "a disabled plugin contributes nothing");
+  assert.equal(byName.get("clear")?.source, "builtin", "the one built-in the panel handles itself");
   assert.deepEqual(
     commands.map((command) => command.name),
     [...commands.map((command) => command.name)].sort(),

@@ -109,6 +109,8 @@ export async function sendPrompt(options: {
   references: string[];
   behavior: SendBehavior;
   readStatus: () => Promise<"idle" | "running" | "needs_input" | "detached">;
+  /** Called once the waiting is over and the keys are about to go in, which `hold_until_idle` can delay for minutes. */
+  onDeliver?: () => void;
 }): Promise<SendPromptResult> {
   const composed = composePrompt(options.text, options.references);
   if (composed === "") return { delivered: false, note: "nothing to send" };
@@ -131,6 +133,7 @@ export async function sendPrompt(options: {
     await delay(INTERRUPT_SETTLE_MS);
   }
 
+  options.onDeliver?.();
   if (composed.includes("\n")) {
     await sendKeys(options.terminalId, [PASTE_START, composed, PASTE_END], true);
   } else {

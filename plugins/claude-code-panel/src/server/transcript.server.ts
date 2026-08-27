@@ -106,6 +106,27 @@ export async function readSessionSummary(filePath: string): Promise<SessionFileS
   };
 }
 
+/**
+ * When the session in a transcript began, taken from the first line that carries a timestamp.
+ * Birth time would say the same thing, but not every filesystem records one.
+ */
+export async function sessionStartedAt(filePath: string): Promise<number | null> {
+  let head: string;
+  try {
+    head = await readRange(filePath, 0, HEAD_SCAN_BYTES);
+  } catch {
+    return null;
+  }
+  for (const line of head.split("\n")) {
+    const entry = parseLine(line);
+    const timestamp = entry?.timestamp;
+    if (typeof timestamp !== "string") continue;
+    const parsed = Date.parse(timestamp);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return null;
+}
+
 export function isRecentlyActive(mtime: number, now = Date.now()): boolean {
   return now - mtime < LIVE_WINDOW_MS;
 }
@@ -265,6 +286,46 @@ export class TranscriptStore {
       lastEntryTimestamp: state.builder.lastEntryTimestamp,
       mtime,
     };
+  }
+
+  /**
+   * The transcript a rotated session continued into: the newest one in the project that did not exist yet at `since`.
+   * Nothing in either file links them, so the caller has to have narrowed `since` down to a moment after which only the successor can have been created.
+   */
+  async findSuccessor(workspaceDir: string, sessionId: string, since: number): Promise<string | null> {
+    const projectDir = await this.projectDir(workspaceDir);
+    if (!projectDir) return null;
+    let names: string[];
+    try {
+      names = await fs.readdir(projectDir);
+    } catch {
+      return null;
+    }
+    let best: { sessionId: string; startedAt: number } | null = null;
+    for (const name of names) {
+      if (!name.endsWith(".jsonl")) continue;
+      const candidate = path.basename(name, ".jsonl");
+      if (candidate === sessionId) continue;
+      const filePath = path.join(projectDir, name);
+      // A file created after `since` cannot have been touched before it, so the stat rules most out unread.
+      let stat;
+      try {
+        stat = await fs.stat(filePath);
+      } catch {
+        continue;
+      }
+      if (stat.mtimeMs < since) continue;
+      const startedAt = await sessionStartedAt(filePath);
+      if (startedAt === null || startedAt < since) continue;
+      if (!best || startedAt > best.startedAt) best = { sessionId: candidate, startedAt };
+    }
+    return best?.sessionId ?? null;
+  }
+
+  /** How many entries the transcript holds, without paying for the entries themselves. */
+  async entryTotal(workspaceDir: string, sessionId: string): Promise<number | null> {
+    const synced = await this.sync(workspaceDir, sessionId);
+    return synced?.state.builder.total ?? null;
   }
 
   /** The model the session last answered with, for the composer's model control. */

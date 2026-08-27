@@ -58,6 +58,7 @@ GitHub issue and pull request search uses your installed `gh` CLI. Uploaded file
 - Session status is reported per workspace, so activity in another terminal can affect the status shown in the panel.
 - The file picker is available on web. On mobile, attach a file by entering its path.
 - If the plugin cannot recognize a CLI dialog, open the terminal and answer it there.
+- `/clear` starts a new session rather than emptying the current one, and the panel follows it as soon as the next prompt is sent. Clearing from the terminal itself is only noticed on that next prompt.
 
 Run `paseo plugin logs claude-code-panel` for more detail.
 

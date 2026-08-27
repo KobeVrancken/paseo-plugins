@@ -89,6 +89,8 @@ type TimelineState = {
   windowStart: number;
   sessionStatus: SessionStatus;
   lastChangeAt: number;
+  /** Set for the one response that reports the session was cleared out from under the panel. */
+  rotatedTo: string | null;
 };
 
 function emptyTimeline(key: string): TimelineState {
@@ -100,6 +102,7 @@ function emptyTimeline(key: string): TimelineState {
     windowStart: 0,
     sessionStatus: "detached",
     lastChangeAt: Date.now(),
+    rotatedTo: null,
   };
 }
 
@@ -233,6 +236,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
         windowStart: response.windowStart,
         sessionStatus: response.sessionStatus,
         lastChangeAt: response.revision === previous.revision ? previous.lastChangeAt : Date.now(),
+        rotatedTo: response.rotatedTo,
       };
       timelineRef.current = next;
       return next;
@@ -254,6 +258,17 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
     setPending([]);
     followRef.current = true;
   }, [timelineKey]);
+
+  // `/clear` starts a new transcript rather than emptying this one, so the panel is left watching a file that will never move again.
+  const rotatedTo = timelineQuery.data?.rotatedTo ?? null;
+  const refetchSessions = sessionsQuery.refetch;
+  useEffect(() => {
+    if (rotatedTo === null) return;
+    setSelectedSessionId(rotatedTo);
+    setWindowStart(null);
+    setNote("That session was cleared — following the one it started.");
+    void refetchSessions();
+  }, [rotatedTo, refetchSessions]);
 
   const status: SessionStatus = timelineQuery.data?.sessionStatus ?? "detached";
   const hooksReady = hooksQuery.data?.enabled === true;

@@ -4,9 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { escapeProjectDirName } from "./paths.server.ts";
-import { TranscriptStore, readSessionSummary } from "./transcript.server.ts";
+import { TranscriptStore, readSessionSummary, sessionStartedAt } from "./transcript.server.ts";
 
 const SESSION_ID = "22222222-2222-4222-8222-222222222222";
+
+function startedLine(timestamp: string): string {
+  return `${JSON.stringify({ type: "user", uuid: timestamp, cwd: "/work/repo", timestamp, message: { role: "user", content: "hi" } })}\n`;
+}
 
 function userLine(text: string): string {
   return `${JSON.stringify({ type: "user", uuid: text, cwd: "/work/repo", message: { role: "user", content: text } })}\n`;
@@ -141,4 +145,29 @@ test("reads the tail once when two callers poll at the same time", async () => {
     timeline.entries.map((entry) => (entry.body.kind === "user_text" ? entry.body.text : entry.body.kind)),
     ["first", "second"],
   );
+});
+
+test("reads when a session began from its first timestamped line", async () => {
+  const { env, workspaceDir } = await setupWorkspace();
+  const projectDir = path.join(env.CLAUDE_CONFIG_DIR, "projects", escapeProjectDirName(workspaceDir));
+  const file = path.join(projectDir, "timed.jsonl");
+  await writeFile(file, userLine("untimed") + startedLine("2026-08-27T22:23:51.179Z"));
+  assert.equal(await sessionStartedAt(file), Date.parse("2026-08-27T22:23:51.179Z"));
+});
+
+test("finds the transcript a cleared session continued into", async () => {
+  const { env, workspaceDir } = await setupWorkspace();
+  const store = new TranscriptStore(env);
+  const projectDir = path.join(env.CLAUDE_CONFIG_DIR, "projects", escapeProjectDirName(workspaceDir));
+  const since = Date.parse("2026-08-27T22:00:00.000Z");
+
+  // A session of its own that was already running, which is what the panel must not jump to.
+  await writeFile(path.join(projectDir, "older.jsonl"), startedLine("2026-08-27T21:00:00.000Z"));
+  assert.equal(await store.findSuccessor(workspaceDir, SESSION_ID, since), null);
+
+  await writeFile(path.join(projectDir, "successor.jsonl"), startedLine("2026-08-27T22:00:01.000Z"));
+  assert.equal(await store.findSuccessor(workspaceDir, SESSION_ID, since), "successor");
+
+  await writeFile(path.join(projectDir, "newest.jsonl"), startedLine("2026-08-27T22:00:02.000Z"));
+  assert.equal(await store.findSuccessor(workspaceDir, SESSION_ID, since), "newest");
 });

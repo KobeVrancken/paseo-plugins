@@ -40,6 +40,11 @@ export const getTimeline = defineRpc({
     revision: z.number().int(),
     /** The client must discard everything it has cached for this session before merging. */
     reset: z.boolean(),
+    /**
+     * The session the CLI rotated into, which `/clear` does by abandoning the current transcript for a new one.
+     * The panel has been rebound to it already and must follow it.
+     */
+    rotatedTo: z.string().nullable(),
     sessionStatus: SessionStatusSchema,
   }),
 });
@@ -258,7 +263,7 @@ export const listCommands = defineRpc({
       z.object({
         name: z.string(),
         description: z.string(),
-        source: z.enum(["user", "project", "plugin"]),
+        source: z.enum(["user", "project", "plugin", "builtin"]),
         kind: z.enum(["skill", "command"]),
       }),
     ),
