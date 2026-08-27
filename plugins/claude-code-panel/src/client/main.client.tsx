@@ -327,12 +327,12 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
   }, []);
 
   const sendMutation = useMutation({
-    mutationFn: (sent: { prompt: PendingPrompt; references: string[] }) =>
+    mutationFn: (sent: { prompt: PendingPrompt; text: string; references: string[] }) =>
       sendPrompt({
         workspaceId,
         workspaceDir: workspaceDir!,
         sessionId: activeSessionId!,
-        text: sent.prompt.text,
+        text: sent.text,
         references: sent.references,
       }),
     onSuccess: (result, sent) => {
@@ -355,6 +355,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
       const references = attachments.map((attachment) => attachment.reference);
       const prompt: PendingPrompt = {
         id: `${Date.now()}-${promptCounter.current++}`,
+        // Composed here for the echo only: the terminal is sent the raw text and composes its own.
         text: composePrompt(text, references),
         afterIndex: timelineRef.current.total,
       };
@@ -362,7 +363,7 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
       setPending((current) => [...current, prompt]);
       setAttachments([]);
       setNote(null);
-      sendMutation.mutate({ prompt, references });
+      sendMutation.mutate({ prompt, text, references });
     },
     [attachments, sendMutation],
   );
