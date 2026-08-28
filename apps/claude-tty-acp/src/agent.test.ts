@@ -7,7 +7,7 @@ function createAgent(): ClaudeTtyAgent {
   return new ClaudeTtyAgent({} as AgentSideConnection);
 }
 
-test("advertises a lazy ACP scaffold", async () => {
+test("advertises the interactive ACP agent", async () => {
   const agent = createAgent();
   const initialized = await agent.initialize({ protocolVersion: PROTOCOL_VERSION });
 
@@ -24,6 +24,7 @@ test("creates probe sessions without starting a runtime", async () => {
   assert.ok(session);
   assert.equal(session.cwd, "/work/probe");
   assert.equal(session.started, false);
+  await agent.close();
 });
 
 test("rejects injected MCP servers", async () => {

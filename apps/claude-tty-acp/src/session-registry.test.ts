@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { AgentSideConnection } from "@agentclientprotocol/sdk";
+import { HookServer } from "./hook-server.ts";
 import { SessionRegistry } from "./session-registry.ts";
 
+function createRegistry(): SessionRegistry {
+  return new SessionRegistry({} as AgentSideConnection, new HookServer());
+}
+
 test("creates independent lazy sessions", () => {
-  const registry = new SessionRegistry();
+  const registry = createRegistry();
   const first = registry.create("/work/one");
   const second = registry.create("/work/two");
 
@@ -16,12 +22,12 @@ test("creates independent lazy sessions", () => {
 });
 
 test("rejects relative session directories", () => {
-  assert.throws(() => new SessionRegistry().create("relative/path"), /absolute path/);
+  assert.throws(() => createRegistry().create("relative/path"), /absolute path/);
 });
 
-test("clears probe-only sessions without external state", () => {
-  const registry = new SessionRegistry();
+test("clears probe-only sessions without external state", async () => {
+  const registry = createRegistry();
   registry.create("/work/probe");
-  registry.clear();
+  await registry.clear();
   assert.equal(registry.size, 0);
 });

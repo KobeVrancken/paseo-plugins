@@ -12,15 +12,19 @@ import {
   type PromptResponse,
 } from "@agentclientprotocol/sdk";
 import { APP_NAME, APP_TITLE, APP_VERSION } from "./constants.ts";
+import { HookServer } from "./hook-server.ts";
 import { writeLog } from "./log.ts";
 import { SessionRegistry } from "./session-registry.ts";
+import type { RuntimeDependencies } from "./claude-runtime.ts";
 
 export class ClaudeTtyAgent implements Agent {
-  readonly sessions = new SessionRegistry();
+  readonly hooks = new HookServer();
+  readonly sessions: SessionRegistry;
   readonly connection: AgentSideConnection;
 
-  constructor(connection: AgentSideConnection) {
+  constructor(connection: AgentSideConnection, runtimeDependencies: RuntimeDependencies = {}) {
     this.connection = connection;
+    this.sessions = new SessionRegistry(connection, this.hooks, runtimeDependencies);
   }
 
   async initialize(_params: InitializeRequest): Promise<InitializeResponse> {
@@ -57,16 +61,17 @@ export class ClaudeTtyAgent implements Agent {
   }
 
   async prompt(params: PromptRequest): Promise<PromptResponse> {
-    if (!this.sessions.get(params.sessionId)) throw new Error(`Session ${params.sessionId} not found`);
-    throw new Error("Interactive Claude runtime is not available in this scaffold build");
+    const session = this.sessions.get(params.sessionId);
+    if (!session) throw new Error(`Session ${params.sessionId} not found`);
+    return session.prompt(params.prompt);
   }
 
   async cancel(params: CancelNotification): Promise<void> {
-    if (!this.sessions.get(params.sessionId)) return;
-    writeLog({ level: "debug", message: "Ignored cancellation for idle scaffold session", sessionId: params.sessionId });
+    this.sessions.get(params.sessionId)?.cancel();
   }
 
   async close(): Promise<void> {
-    this.sessions.clear();
+    await this.sessions.clear();
+    await this.hooks.close();
   }
 }
