@@ -6,6 +6,7 @@ import type { AgentSideConnection, ContentBlock, PromptResponse } from "@agentcl
 import * as nodePty from "node-pty";
 import { createDeferred, type Deferred } from "./deferred.ts";
 import { type HookPayload, type HookResponse, HookServer } from "./hook-server.ts";
+import { InteractionBridge } from "./interactions.ts";
 import { writeLog } from "./log.ts";
 import { TerminalScreen } from "./terminal-screen.ts";
 import { TranscriptReader } from "./transcript-reader.ts";
@@ -44,6 +45,7 @@ export class ClaudeRuntime {
   private readonly runtimeRoot: string;
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
+  private readonly interactions: InteractionBridge;
   private readonly translator: TranscriptTranslator;
   private readonly transcript: TranscriptWatcher;
   private readonly screen = new TerminalScreen();
@@ -68,6 +70,7 @@ export class ClaudeRuntime {
     this.cwd = cwd;
     this.connection = connection;
     this.hooks = hooks;
+    this.interactions = new InteractionBridge(sessionId, cwd, connection);
     this.spawnPty = dependencies.spawnPty ?? nodePty.spawn;
     this.startupTimeoutMs = dependencies.startupTimeoutMs ?? STARTUP_TIMEOUT_MS;
     this.cancelTimeoutMs = dependencies.cancelTimeoutMs ?? CANCEL_TIMEOUT_MS;
@@ -91,6 +94,7 @@ export class ClaudeRuntime {
     const turn = createDeferred<TurnResult>();
     this.turn = turn;
     this.cancelRequested = false;
+    this.interactions.beginTurn();
     this.assistantBaseline = this.translator.assistantChunks;
     this.pty?.write(`${BRACKETED_PASTE_START}${prompt}${BRACKETED_PASTE_END}\r`);
     const result = await turn.promise;
@@ -111,6 +115,7 @@ export class ClaudeRuntime {
     const turn = this.turn;
     if (!turn) return;
     this.cancelRequested = true;
+    this.interactions.cancelPending();
     this.pty?.write(ESCAPE);
     if (this.cancelTimer) clearTimeout(this.cancelTimer);
     this.cancelTimer = setTimeout(() => void this.finishCancelled(), this.cancelTimeoutMs);
@@ -124,6 +129,7 @@ export class ClaudeRuntime {
     this.ready?.reject(new Error(`Session ${this.sessionId} closed before Claude became ready`));
     this.ready = null;
     this.finishTurn({ response: { stopReason: "cancelled" } });
+    this.interactions.cancelPending();
     this.unregisterHook?.();
     this.unregisterHook = null;
     const pty = this.pty;
@@ -194,6 +200,10 @@ export class ClaudeRuntime {
 
   private async handleHook(payload: HookPayload): Promise<HookResponse> {
     switch (payload.hook_event_name) {
+      case "PreToolUse":
+        return this.interactions.handlePreToolUse(payload);
+      case "PermissionRequest":
+        return this.interactions.handlePermissionRequest(payload);
       case "SessionStart":
         this.ready?.resolve();
         break;
@@ -256,6 +266,7 @@ export class ClaudeRuntime {
     if (this.cancelTimer) clearTimeout(this.cancelTimer);
     this.cancelTimer = null;
     this.cancelRequested = false;
+    this.interactions.cancelPending();
     const turn = this.turn;
     this.turn = null;
     turn.resolve(result);
@@ -274,13 +285,16 @@ export class ClaudeRuntime {
 }
 
 function createHookSettings(endpoint: string): Record<string, unknown> {
-  const hook = { type: "http", url: endpoint, timeout: 30 };
+  const lifecycleHook = { type: "http", url: endpoint, timeout: 30 };
+  const interactionHook = { type: "http", url: endpoint, timeout: 600 };
   return {
     hooks: {
-      SessionStart: [{ hooks: [hook] }],
-      Stop: [{ hooks: [hook] }],
-      StopFailure: [{ hooks: [hook] }],
-      SessionEnd: [{ hooks: [hook] }],
+      PreToolUse: [{ hooks: [interactionHook] }],
+      PermissionRequest: [{ hooks: [interactionHook] }],
+      SessionStart: [{ hooks: [lifecycleHook] }],
+      Stop: [{ hooks: [lifecycleHook] }],
+      StopFailure: [{ hooks: [lifecycleHook] }],
+      SessionEnd: [{ hooks: [lifecycleHook] }],
     },
   };
 }
