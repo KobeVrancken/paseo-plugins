@@ -82,7 +82,7 @@ test("loads history lazily, resumes Claude, and follows clear session rotation",
   try {
     await agent.loadSession({ sessionId: acpSessionId, cwd, mcpServers: [] });
     assert.equal(spawns.length, 0);
-    assert.deepEqual(updates.map((notification) => notification.update.sessionUpdate), ["user_message_chunk", "agent_message_chunk"]);
+    assert.deepEqual(updates.map((notification) => notification.update.sessionUpdate), ["user_message_chunk", "agent_message_chunk", "available_commands_update"]);
 
     const turn = agent.prompt({ sessionId: acpSessionId, prompt: [{ type: "text", text: "/clear" }] });
     await waitFor(() => pty.writes.length === 1);

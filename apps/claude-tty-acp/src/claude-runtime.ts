@@ -8,6 +8,8 @@ import { createDeferred, type Deferred } from "./deferred.ts";
 import { type HookPayload, type HookRegistration, type HookResponse, HookServer } from "./hook-server.ts";
 import { InteractionBridge } from "./interactions.ts";
 import { writeLog } from "./log.ts";
+import { cleanupPromptFiles, materializePrompt } from "./prompt-content.ts";
+import { markRuntimeDirectory, runtimePrefix } from "./runtime-directories.ts";
 import { TerminalScreen } from "./terminal-screen.ts";
 import { TranscriptReader } from "./transcript-reader.ts";
 import { TranscriptTranslator } from "./transcript-translator.ts";
@@ -18,6 +20,7 @@ const CANCEL_TIMEOUT_MS = 2_000;
 const BRACKETED_PASTE_START = "\u001b[200~";
 const BRACKETED_PASTE_END = "\u001b[201~";
 const ESCAPE = "\u001b";
+const CONTROL_D = "\u0004";
 
 type PtyProcess = Pick<nodePty.IPty, "pid" | "write" | "kill" | "onData" | "onExit">;
 type SpawnPty = (file: string, args: string[], options: nodePty.IPtyForkOptions) => PtyProcess;
@@ -32,6 +35,8 @@ export type RuntimeDependencies = {
   stateDirectory?: string;
   translator?: TranscriptTranslator;
   resume?: boolean;
+  model?: string;
+  mode?: string;
   onClaudeSessionChange?: (claudeSessionId: string) => Promise<void>;
 };
 
@@ -52,7 +57,9 @@ export class ClaudeRuntime {
   private readonly hooks: HookServer;
   private readonly claudeConfigDir: string | undefined;
   private readonly initialTranscriptFilePath: string | undefined;
-  private readonly resume: boolean;
+  private resumeNextLaunch: boolean;
+  private model: string;
+  private mode: string;
   private readonly onClaudeSessionChange: ((claudeSessionId: string) => Promise<void>) | undefined;
   private readonly interactions: InteractionBridge;
   private readonly translator: TranscriptTranslator;
@@ -67,6 +74,7 @@ export class ClaudeRuntime {
   private cancelRequested = false;
   private assistantBaseline = 0;
   private closed = false;
+  private intentionalExit: Deferred<void> | null = null;
 
   constructor(
     sessionId: string,
@@ -83,7 +91,9 @@ export class ClaudeRuntime {
     this.hooks = hooks;
     this.claudeConfigDir = dependencies.claudeConfigDir;
     this.initialTranscriptFilePath = dependencies.transcriptFilePath;
-    this.resume = dependencies.resume === true;
+    this.resumeNextLaunch = dependencies.resume === true;
+    this.model = dependencies.model ?? "default";
+    this.mode = dependencies.mode ?? "default";
     this.onClaudeSessionChange = dependencies.onClaudeSessionChange;
     this.interactions = new InteractionBridge(sessionId, cwd, connection);
     this.spawnPty = dependencies.spawnPty ?? nodePty.spawn;
@@ -98,29 +108,47 @@ export class ClaudeRuntime {
     return this.pty !== null;
   }
 
+  get turnActive(): boolean {
+    return this.turn !== null;
+  }
+
   async prompt(content: ContentBlock[]): Promise<PromptResponse> {
     if (this.closed) throw new Error(`Session ${this.sessionId} is closed`);
     if (this.turn) throw new Error(`Session ${this.sessionId} already has an active turn`);
-    const prompt = promptText(content);
     await this.ensureStarted();
+    if (!this.runtimeDirectory) throw new Error(`Session ${this.sessionId} has no runtime directory`);
+    const prompt = await materializePrompt(content, this.runtimeDirectory, this.cwd);
     const turn = createDeferred<TurnResult>();
     this.turn = turn;
     this.cancelRequested = false;
     this.interactions.beginTurn();
     this.assistantBaseline = this.translator.assistantChunks;
-    this.pty?.write(`${BRACKETED_PASTE_START}${prompt}${BRACKETED_PASTE_END}\r`);
-    const result = await turn.promise;
-    if (result.assistantMessage) {
-      await this.connection.sessionUpdate({
-        sessionId: this.sessionId,
-        update: {
-          sessionUpdate: "agent_message_chunk",
-          messageId: randomUUID(),
-          content: { type: "text", text: result.assistantMessage },
-        },
-      });
+    this.pty?.write(`${BRACKETED_PASTE_START}${prompt.text}${BRACKETED_PASTE_END}\r`);
+    try {
+      const result = await turn.promise;
+      if (result.assistantMessage) {
+        await this.connection.sessionUpdate({
+          sessionId: this.sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            messageId: randomUUID(),
+            content: { type: "text", text: result.assistantMessage },
+          },
+        });
+      }
+      return result.response;
+    } finally {
+      await cleanupPromptFiles(prompt.files);
     }
-    return result.response;
+  }
+
+  async reconfigure(model: string, mode: string): Promise<void> {
+    if (this.turn) throw new Error("Cannot change Claude model or mode during an active turn");
+    this.model = model;
+    this.mode = mode;
+    if (!this.pty) return;
+    await this.stopForRestart();
+    await this.ensureStarted();
   }
 
   cancel(): void {
@@ -128,6 +156,8 @@ export class ClaudeRuntime {
     if (!turn) return;
     this.cancelRequested = true;
     this.interactions.cancelPending();
+    this.intentionalExit?.resolve();
+    this.intentionalExit = null;
     this.pty?.write(ESCAPE);
     if (this.cancelTimer) clearTimeout(this.cancelTimer);
     this.cancelTimer = setTimeout(() => void this.finishCancelled(), this.cancelTimeoutMs);
@@ -161,8 +191,9 @@ export class ClaudeRuntime {
   private async ensureStarted(): Promise<void> {
     if (this.pty) return;
     await this.hooks.start();
-    this.runtimeDirectory = await mkdtemp(path.join(this.runtimeRoot, "claude-tty-acp-"));
+    this.runtimeDirectory = await mkdtemp(runtimePrefix(this.runtimeRoot));
     await chmod(this.runtimeDirectory, 0o700);
+    await markRuntimeDirectory(this.runtimeDirectory);
     this.hookRegistration = this.hooks.register(this.currentClaudeSessionId, (payload) => this.handleHook(payload));
     const hookClientPath = path.join(this.runtimeDirectory, "hook-client.mjs");
     await writeFile(hookClientPath, hookClientSource(this.hookRegistration.endpoint), { mode: 0o600 });
@@ -171,11 +202,11 @@ export class ClaudeRuntime {
     await writeFile(settingsPath, `${JSON.stringify(createHookSettings(hookCommand))}\n`, { mode: 0o600 });
     this.ready = createDeferred<void>();
     const claudeBin = process.env.CLAUDE_BIN || "claude";
-    const sessionArgs = this.resume
+    const sessionArgs = this.resumeNextLaunch
       ? ["--resume", this.currentClaudeSessionId]
       : ["--session-id", this.currentClaudeSessionId];
     try {
-      this.pty = this.spawnPty(claudeBin, [...sessionArgs, "--settings", settingsPath], {
+      this.pty = this.spawnPty(claudeBin, [...sessionArgs, ...selectionArgs(this.model, this.mode), "--settings", settingsPath], {
         name: "xterm-256color",
         cols: 120,
         rows: 40,
@@ -199,6 +230,7 @@ export class ClaudeRuntime {
       this.ready = null;
     }
     await this.transcript.start();
+    this.resumeNextLaunch = true;
     writeLog({ level: "info", message: "Started interactive Claude session", sessionId: this.sessionId, pid: this.pty?.pid, cwd: this.cwd });
   }
 
@@ -261,6 +293,11 @@ export class ClaudeRuntime {
 
   private handleExit(exitCode: number, signal?: number): void {
     if (this.closed) return;
+    if (this.intentionalExit) {
+      this.pty = null;
+      this.intentionalExit.resolve();
+      return;
+    }
     const details = this.screen.snapshot();
     const error = new Error(`Claude PTY exited unexpectedly with code ${exitCode}${signal === undefined ? "" : ` and signal ${signal}`}.${details ? `\n${details}` : ""}`);
     this.ready?.reject(error);
@@ -327,6 +364,26 @@ export class ClaudeRuntime {
     this.runtimeDirectory = null;
     if (directory) await rm(directory, { force: true, recursive: true });
   }
+
+  private async stopForRestart(): Promise<void> {
+    const pty = this.pty;
+    if (!pty) return;
+    this.intentionalExit = createDeferred<void>();
+    pty.write(CONTROL_D);
+    await Promise.race([this.intentionalExit.promise, new Promise<void>((resolve) => setTimeout(resolve, 500))]);
+    if (this.pty === pty) {
+      try {
+        pty.kill();
+      } catch {}
+      this.pty = null;
+      await Promise.race([this.intentionalExit.promise, new Promise<void>((resolve) => setTimeout(resolve, 50))]);
+    }
+    this.intentionalExit = null;
+    this.hookRegistration?.unregister();
+    this.hookRegistration = null;
+    await this.transcript.close();
+    await this.removeRuntimeDirectory();
+  }
 }
 
 function createHookSettings(command: string): Record<string, unknown> {
@@ -358,12 +415,11 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-function promptText(content: ContentBlock[]): string {
-  const unsupported = content.find((block) => block.type !== "text");
-  if (unsupported) throw new Error(`ACP ${unsupported.type} prompt content is not supported until attachment handling is enabled`);
-  const text = content.map((block) => (block.type === "text" ? block.text : "")).join("\n");
-  if (!text.trim()) throw new Error("Prompt must contain text");
-  return text;
+function selectionArgs(model: string, mode: string): string[] {
+  const args: string[] = [];
+  if (model !== "default") args.push("--model", model);
+  if (mode !== "default") args.push("--permission-mode", mode);
+  return args;
 }
 
 async function withTimeout<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {

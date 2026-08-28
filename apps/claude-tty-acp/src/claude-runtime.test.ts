@@ -13,13 +13,17 @@ class FakePty {
   killed = false;
   private readonly dataHandlers: Array<(data: string) => void> = [];
   private readonly exitHandlers: Array<(event: { exitCode: number; signal?: number }) => void> = [];
+  private readonly writeHandler: ((data: string) => void) | undefined;
 
-  constructor(pid: number) {
+  constructor(pid: number, writeHandler?: (data: string) => void) {
     this.pid = pid;
+    this.writeHandler = writeHandler;
   }
 
   write(data: string | Buffer): void {
-    this.writes.push(data.toString());
+    const text = data.toString();
+    this.writes.push(text);
+    this.writeHandler?.(text);
   }
 
   kill(): void {
@@ -34,6 +38,10 @@ class FakePty {
   onExit(handler: (event: { exitCode: number; signal?: number }) => void): { dispose(): void } {
     this.exitHandlers.push(handler);
     return { dispose: () => undefined };
+  }
+
+  emitExit(): void {
+    for (const handler of this.exitHandlers) handler({ exitCode: 0 });
   }
 }
 
@@ -88,7 +96,7 @@ test("starts isolated interactive PTYs and completes parallel turns through hook
     ]);
     assert.deepEqual(await Promise.all([firstTurn, secondTurn]), [{ stopReason: "end_turn" }, { stopReason: "end_turn" }]);
     assert.deepEqual(
-      updates.map((notification) => notification.update.sessionUpdate),
+      updates.map((notification) => notification.update.sessionUpdate).filter((update) => update !== "available_commands_update"),
       ["agent_message_chunk", "agent_message_chunk"],
     );
   } finally {
@@ -142,6 +150,44 @@ test("fails closed when Claude never completes the startup hook", async () => {
     );
     assert.equal(pty.killed, true);
     assert.equal((await readdir(runtimeRoot)).some((name) => name.startsWith("claude-tty-acp-")), false);
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+test("applies native model and mode controls and restarts an idle session", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-test-"));
+  const spawns: SpawnRecord[] = [];
+  let agent!: ClaudeTtyAgent;
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    let pty!: FakePty;
+    pty = new FakePty(4000 + spawns.length, (data) => {
+      if (data === "\u0004") setImmediate(() => pty.emitExit());
+    });
+    spawns.push({ file, args, options, pty });
+    const idFlag = args.includes("--resume") ? "--resume" : "--session-id";
+    const sessionId = args[args.indexOf(idFlag) + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500 });
+
+  try {
+    const created = await agent.newSession({ cwd: "/work/controls", mcpServers: [] });
+    await agent.unstable_setSessionModel({ sessionId: created.sessionId, modelId: "opus" });
+    await agent.setSessionMode({ sessionId: created.sessionId, modeId: "plan" });
+    const turn = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "plan it" }] });
+    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 1);
+    assert.deepEqual(spawns[0]!.args.slice(0, 6), ["--session-id", created.sessionId, "--model", "opus", "--permission-mode", "plan"]);
+    await assert.rejects(agent.setSessionMode({ sessionId: created.sessionId, modeId: "auto" }), /active turn/);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: created.sessionId, last_assistant_message: "planned" });
+    await turn;
+
+    await agent.unstable_setSessionModel({ sessionId: created.sessionId, modelId: "sonnet" });
+    assert.equal(spawns.length, 2);
+    assert.deepEqual(spawns[1]!.args.slice(0, 6), ["--resume", created.sessionId, "--model", "sonnet", "--permission-mode", "plan"]);
+    assert.equal(spawns[0]!.pty.writes.at(-1), "\u0004");
   } finally {
     await agent.close();
     await rm(runtimeRoot, { force: true, recursive: true });

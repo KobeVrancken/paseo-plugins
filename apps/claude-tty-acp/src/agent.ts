@@ -12,6 +12,8 @@ import {
   type NewSessionResponse,
   type PromptRequest,
   type PromptResponse,
+  type SetSessionModeRequest,
+  type SetSessionModelRequest,
 } from "@agentclientprotocol/sdk";
 import { APP_NAME, APP_TITLE, APP_VERSION } from "./constants.ts";
 import { HookServer } from "./hook-server.ts";
@@ -35,8 +37,8 @@ export class ClaudeTtyAgent implements Agent {
       agentCapabilities: {
         loadSession: true,
         promptCapabilities: {
-          embeddedContext: false,
-          image: false,
+          embeddedContext: true,
+          image: true,
           audio: false,
         },
       },
@@ -54,8 +56,9 @@ export class ClaudeTtyAgent implements Agent {
       throw new Error(`${APP_TITLE} does not accept ACP-injected MCP servers`);
     }
     const session = this.sessions.create(params.cwd);
+    await session.emitCommands();
     writeLog({ level: "info", message: "Created lazy ACP session", sessionId: session.id, cwd: session.cwd });
-    return { sessionId: session.id };
+    return { sessionId: session.id, models: session.models, modes: session.modes };
   }
 
   async authenticate(_params: AuthenticateRequest): Promise<Record<string, never>> {
@@ -64,8 +67,23 @@ export class ClaudeTtyAgent implements Agent {
 
   async loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse> {
     if (params.mcpServers.length > 0) throw new Error(`${APP_TITLE} does not accept ACP-injected MCP servers`);
-    await this.sessions.load(params.sessionId, params.cwd);
+    const session = await this.sessions.load(params.sessionId, params.cwd);
+    await session.emitCommands();
     writeLog({ level: "info", message: "Loaded persisted ACP session", sessionId: params.sessionId, cwd: params.cwd });
+    return { models: session.models, modes: session.modes };
+  }
+
+  async setSessionMode(params: SetSessionModeRequest): Promise<Record<string, never>> {
+    const session = this.sessions.get(params.sessionId);
+    if (!session) throw new Error(`Session ${params.sessionId} not found`);
+    await session.setMode(params.modeId);
+    return {};
+  }
+
+  async unstable_setSessionModel(params: SetSessionModelRequest): Promise<Record<string, never>> {
+    const session = this.sessions.get(params.sessionId);
+    if (!session) throw new Error(`Session ${params.sessionId} not found`);
+    await session.setModel(params.modelId);
     return {};
   }
 

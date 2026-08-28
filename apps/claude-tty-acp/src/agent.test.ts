@@ -4,7 +4,7 @@ import { PROTOCOL_VERSION, type AgentSideConnection } from "@agentclientprotocol
 import { ClaudeTtyAgent } from "./agent.ts";
 
 function createAgent(): ClaudeTtyAgent {
-  return new ClaudeTtyAgent({} as AgentSideConnection);
+  return new ClaudeTtyAgent({ sessionUpdate: async () => undefined } as unknown as AgentSideConnection);
 }
 
 test("advertises the interactive ACP agent", async () => {
@@ -24,6 +24,8 @@ test("creates probe sessions without starting a runtime", async () => {
   assert.ok(session);
   assert.equal(session.cwd, "/work/probe");
   assert.equal(session.started, false);
+  assert.equal(created.models?.currentModelId, "default");
+  assert.equal(created.modes?.currentModeId, "default");
   await agent.close();
 });
 
