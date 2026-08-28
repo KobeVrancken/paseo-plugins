@@ -8,6 +8,9 @@ import { createDeferred, type Deferred } from "./deferred.ts";
 import { type HookPayload, type HookResponse, HookServer } from "./hook-server.ts";
 import { writeLog } from "./log.ts";
 import { TerminalScreen } from "./terminal-screen.ts";
+import { TranscriptReader } from "./transcript-reader.ts";
+import { TranscriptTranslator } from "./transcript-translator.ts";
+import { TranscriptWatcher } from "./transcript-watcher.ts";
 
 const STARTUP_TIMEOUT_MS = 15_000;
 const CANCEL_TIMEOUT_MS = 2_000;
@@ -23,6 +26,8 @@ export type RuntimeDependencies = {
   startupTimeoutMs?: number;
   cancelTimeoutMs?: number;
   runtimeRoot?: string;
+  claudeConfigDir?: string;
+  transcriptFilePath?: string;
 };
 
 type TurnResult = {
@@ -39,6 +44,8 @@ export class ClaudeRuntime {
   private readonly runtimeRoot: string;
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
+  private readonly translator: TranscriptTranslator;
+  private readonly transcript: TranscriptWatcher;
   private readonly screen = new TerminalScreen();
   private pty: PtyProcess | null = null;
   private runtimeDirectory: string | null = null;
@@ -47,6 +54,7 @@ export class ClaudeRuntime {
   private turn: Deferred<TurnResult> | null = null;
   private cancelTimer: NodeJS.Timeout | null = null;
   private cancelRequested = false;
+  private assistantBaseline = 0;
   private closed = false;
 
   constructor(
@@ -64,6 +72,11 @@ export class ClaudeRuntime {
     this.startupTimeoutMs = dependencies.startupTimeoutMs ?? STARTUP_TIMEOUT_MS;
     this.cancelTimeoutMs = dependencies.cancelTimeoutMs ?? CANCEL_TIMEOUT_MS;
     this.runtimeRoot = dependencies.runtimeRoot ?? os.tmpdir();
+    this.translator = new TranscriptTranslator(sessionId, cwd, connection);
+    this.transcript = new TranscriptWatcher(
+      new TranscriptReader(sessionId, cwd, { configDir: dependencies.claudeConfigDir, filePath: dependencies.transcriptFilePath }),
+      this.translator,
+    );
   }
 
   get started(): boolean {
@@ -78,6 +91,7 @@ export class ClaudeRuntime {
     const turn = createDeferred<TurnResult>();
     this.turn = turn;
     this.cancelRequested = false;
+    this.assistantBaseline = this.translator.assistantChunks;
     this.pty?.write(`${BRACKETED_PASTE_START}${prompt}${BRACKETED_PASTE_END}\r`);
     const result = await turn.promise;
     if (result.assistantMessage) {
@@ -99,7 +113,7 @@ export class ClaudeRuntime {
     this.cancelRequested = true;
     this.pty?.write(ESCAPE);
     if (this.cancelTimer) clearTimeout(this.cancelTimer);
-    this.cancelTimer = setTimeout(() => this.finishTurn({ response: { stopReason: "cancelled" } }), this.cancelTimeoutMs);
+    this.cancelTimer = setTimeout(() => void this.finishCancelled(), this.cancelTimeoutMs);
   }
 
   async close(): Promise<void> {
@@ -121,6 +135,7 @@ export class ClaudeRuntime {
         writeLog({ level: "warn", message: "Failed to stop Claude PTY", sessionId: this.sessionId, error: errorMessage(error) });
       }
     }
+    await this.transcript.close();
     this.screen.dispose();
     await this.removeRuntimeDirectory();
   }
@@ -159,6 +174,7 @@ export class ClaudeRuntime {
     } finally {
       this.ready = null;
     }
+    await this.transcript.start();
     writeLog({ level: "info", message: "Started interactive Claude session", sessionId: this.sessionId, pid: this.pty?.pid, cwd: this.cwd });
   }
 
@@ -182,23 +198,32 @@ export class ClaudeRuntime {
         this.ready?.resolve();
         break;
       case "Stop":
+        await this.transcript.flushUntilStable();
         this.finishTurn(
           this.cancelRequested
             ? { response: { stopReason: "cancelled" } }
-            : { response: { stopReason: "end_turn" }, assistantMessage: asString(payload.last_assistant_message) },
+            : {
+                response: { stopReason: "end_turn" },
+                assistantMessage: this.translator.assistantChunks === this.assistantBaseline ? asString(payload.last_assistant_message) : undefined,
+              },
         );
         break;
       case "StopFailure":
+        await this.transcript.flushUntilStable();
         this.finishTurn(
           this.cancelRequested
             ? { response: { stopReason: "cancelled" } }
             : {
                 response: { stopReason: "refusal" },
-                assistantMessage: asString(payload.last_assistant_message) || asString(payload.error) || "Claude could not complete the turn.",
+                assistantMessage:
+                  this.translator.assistantChunks === this.assistantBaseline
+                    ? asString(payload.last_assistant_message) || asString(payload.error) || "Claude could not complete the turn."
+                    : undefined,
               },
         );
         break;
       case "SessionEnd":
+        await this.transcript.flushUntilStable();
         this.finishTurn({ response: { stopReason: "cancelled" } });
         break;
     }
@@ -218,6 +243,9 @@ export class ClaudeRuntime {
     this.pty = null;
     this.unregisterHook?.();
     this.unregisterHook = null;
+    void this.transcript.close().catch((transcriptError) => {
+      writeLog({ level: "warn", message: "Failed to stop Claude transcript watcher", sessionId: this.sessionId, error: errorMessage(transcriptError) });
+    });
     void this.removeRuntimeDirectory().catch((cleanupError) => {
       writeLog({ level: "warn", message: "Failed to remove Claude runtime directory", sessionId: this.sessionId, error: errorMessage(cleanupError) });
     });
@@ -231,6 +259,11 @@ export class ClaudeRuntime {
     const turn = this.turn;
     this.turn = null;
     turn.resolve(result);
+  }
+
+  private async finishCancelled(): Promise<void> {
+    await this.transcript.flushUntilStable();
+    this.finishTurn({ response: { stopReason: "cancelled" } });
   }
 
   private async removeRuntimeDirectory(): Promise<void> {

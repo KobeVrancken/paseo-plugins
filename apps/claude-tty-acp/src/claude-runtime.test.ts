@@ -73,12 +73,14 @@ test("starts isolated interactive PTYs and completes parallel turns through hook
     const secondTurn = agent.prompt({ sessionId: second.sessionId, prompt: [{ type: "text", text: "second" }] });
     await waitFor(() => spawns.length === 2 && spawns.every((spawn) => spawn.pty.writes.length === 1));
 
-    assert.equal(spawns[0]?.file, "claude");
-    assert.deepEqual(spawns[0]?.args.slice(0, 2), ["--session-id", first.sessionId]);
-    assert.equal(spawns[0]?.options.cwd, "/work/one");
-    assert.equal(spawns[1]?.options.cwd, "/work/two");
-    assert.equal(spawns[0]?.pty.writes[0], "\u001b[200~first $(safe)\u001b[201~\r");
-    assert.equal(spawns[1]?.pty.writes[0], "\u001b[200~second\u001b[201~\r");
+    const firstSpawn = spawns.find((spawn) => spawn.args[1] === first.sessionId);
+    const secondSpawn = spawns.find((spawn) => spawn.args[1] === second.sessionId);
+    assert.equal(firstSpawn?.file, "claude");
+    assert.deepEqual(firstSpawn?.args.slice(0, 2), ["--session-id", first.sessionId]);
+    assert.equal(firstSpawn?.options.cwd, "/work/one");
+    assert.equal(secondSpawn?.options.cwd, "/work/two");
+    assert.equal(firstSpawn?.pty.writes[0], "\u001b[200~first $(safe)\u001b[201~\r");
+    assert.equal(secondSpawn?.pty.writes[0], "\u001b[200~second\u001b[201~\r");
 
     await Promise.all([
       agent.hooks.dispatch({ hook_event_name: "Stop", session_id: first.sessionId, last_assistant_message: "one done" }),
