@@ -64,7 +64,7 @@ test("starts isolated interactive PTYs and completes parallel turns through hook
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, startupTimeoutMs: 500 });
+  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500 });
 
   try {
     const first = await agent.newSession({ cwd: "/work/one", mcpServers: [] });
@@ -94,7 +94,7 @@ test("starts isolated interactive PTYs and completes parallel turns through hook
   } finally {
     await agent.close();
     assert.ok(spawns.every((spawn) => spawn.pty.killed));
-    assert.deepEqual(await readdir(runtimeRoot), []);
+    assert.equal((await readdir(runtimeRoot)).some((name) => name.startsWith("claude-tty-acp-")), false);
     await rm(runtimeRoot, { force: true, recursive: true });
   }
 });
@@ -109,7 +109,7 @@ test("cancels an active turn with Escape", async () => {
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return spawned;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, startupTimeoutMs: 500, cancelTimeoutMs: 5 });
+  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, cancelTimeoutMs: 5 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/cancel", mcpServers: [] });
@@ -130,6 +130,7 @@ test("fails closed when Claude never completes the startup hook", async () => {
   const agent = new ClaudeTtyAgent(createConnection([]), {
     spawnPty: () => pty,
     runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
     startupTimeoutMs: 5,
   });
 
@@ -140,7 +141,7 @@ test("fails closed when Claude never completes the startup hook", async () => {
       /SessionStart hook handshake/,
     );
     assert.equal(pty.killed, true);
-    assert.deepEqual(await readdir(runtimeRoot), []);
+    assert.equal((await readdir(runtimeRoot)).some((name) => name.startsWith("claude-tty-acp-")), false);
   } finally {
     await agent.close();
     await rm(runtimeRoot, { force: true, recursive: true });

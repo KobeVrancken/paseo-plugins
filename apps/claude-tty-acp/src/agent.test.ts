@@ -13,7 +13,7 @@ test("advertises the interactive ACP agent", async () => {
 
   assert.equal(initialized.protocolVersion, PROTOCOL_VERSION);
   assert.equal(initialized.agentInfo?.name, "claude-tty-acp");
-  assert.equal(initialized.agentCapabilities?.loadSession, false);
+  assert.equal(initialized.agentCapabilities?.loadSession, true);
 });
 
 test("creates probe sessions without starting a runtime", async () => {

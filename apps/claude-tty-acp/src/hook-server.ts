@@ -14,9 +14,15 @@ export type HookPayload = {
 
 export type HookResponse = Record<string, unknown>;
 export type HookHandler = (payload: HookPayload) => Promise<HookResponse>;
+export type HookRegistration = {
+  endpoint: string;
+  addSessionId: (sessionId: string) => void;
+  unregister: () => void;
+};
 
 export class HookServer {
   private readonly handlers = new Map<string, HookHandler>();
+  private readonly routes = new Map<string, HookHandler>();
   private readonly token = randomBytes(32).toString("hex");
   private server: http.Server | null = null;
   private endpoint: string | null = null;
@@ -57,16 +63,30 @@ export class HookServer {
     return this.endpoint;
   }
 
-  register(sessionId: string, handler: HookHandler): () => void {
+  register(sessionId: string, handler: HookHandler): HookRegistration {
+    if (!this.endpoint) throw new Error("Hook server must be started before registering a session");
     if (this.handlers.has(sessionId)) throw new Error(`Hook handler already registered for Claude session ${sessionId}`);
+    const route = randomBytes(32).toString("hex");
+    const sessionIds = new Set([sessionId]);
     this.handlers.set(sessionId, handler);
-    return () => {
-      if (this.handlers.get(sessionId) === handler) this.handlers.delete(sessionId);
+    this.routes.set(route, handler);
+    return {
+      endpoint: `${this.endpoint}/${route}`,
+      addSessionId: (nextSessionId) => {
+        const existing = this.handlers.get(nextSessionId);
+        if (existing && existing !== handler) throw new Error(`Hook handler already registered for Claude session ${nextSessionId}`);
+        this.handlers.set(nextSessionId, handler);
+        sessionIds.add(nextSessionId);
+      },
+      unregister: () => {
+        this.routes.delete(route);
+        for (const registeredId of sessionIds) if (this.handlers.get(registeredId) === handler) this.handlers.delete(registeredId);
+      },
     };
   }
 
-  async dispatch(payload: HookPayload): Promise<HookResponse> {
-    const sessionId = payload.session_id;
+  async dispatch(payload: HookPayload, routedSessionId?: string): Promise<HookResponse> {
+    const sessionId = routedSessionId || payload.session_id;
     if (!sessionId) throw new HookRequestError(400, "Hook payload is missing session_id");
     const handler = this.handlers.get(sessionId);
     if (!handler) throw new HookRequestError(404, `No active adapter session for Claude session ${sessionId}`);
@@ -75,6 +95,7 @@ export class HookServer {
 
   async close(): Promise<void> {
     this.handlers.clear();
+    this.routes.clear();
     const server = this.server;
     this.server = null;
     this.endpoint = null;
@@ -86,13 +107,16 @@ export class HookServer {
   }
 
   private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    if (request.method !== "POST" || request.url !== `/hooks/${this.token}`) {
+    const prefix = `/hooks/${this.token}/`;
+    const route = request.url?.startsWith(prefix) ? request.url.slice(prefix.length) : null;
+    const handler = route ? this.routes.get(route) : null;
+    if (request.method !== "POST" || !handler) {
       sendJson(response, 404, { error: "Not found" });
       return;
     }
     try {
       const body = await readJsonBody(request);
-      sendJson(response, 200, await this.dispatch(body));
+      sendJson(response, 200, await handler(body));
     } catch (error) {
       const status = error instanceof HookRequestError ? error.status : 500;
       writeLog({ level: status >= 500 ? "error" : "warn", message: "Rejected Claude hook request", error: errorMessage(error) });

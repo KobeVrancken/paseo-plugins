@@ -5,7 +5,7 @@ import path from "node:path";
 import type { AgentSideConnection, ContentBlock, PromptResponse } from "@agentclientprotocol/sdk";
 import * as nodePty from "node-pty";
 import { createDeferred, type Deferred } from "./deferred.ts";
-import { type HookPayload, type HookResponse, HookServer } from "./hook-server.ts";
+import { type HookPayload, type HookRegistration, type HookResponse, HookServer } from "./hook-server.ts";
 import { InteractionBridge } from "./interactions.ts";
 import { writeLog } from "./log.ts";
 import { TerminalScreen } from "./terminal-screen.ts";
@@ -29,6 +29,10 @@ export type RuntimeDependencies = {
   runtimeRoot?: string;
   claudeConfigDir?: string;
   transcriptFilePath?: string;
+  stateDirectory?: string;
+  translator?: TranscriptTranslator;
+  resume?: boolean;
+  onClaudeSessionChange?: (claudeSessionId: string) => Promise<void>;
 };
 
 type TurnResult = {
@@ -39,19 +43,24 @@ type TurnResult = {
 export class ClaudeRuntime {
   readonly sessionId: string;
   readonly cwd: string;
+  private currentClaudeSessionId: string;
   private readonly spawnPty: SpawnPty;
   private readonly startupTimeoutMs: number;
   private readonly cancelTimeoutMs: number;
   private readonly runtimeRoot: string;
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
+  private readonly claudeConfigDir: string | undefined;
+  private readonly initialTranscriptFilePath: string | undefined;
+  private readonly resume: boolean;
+  private readonly onClaudeSessionChange: ((claudeSessionId: string) => Promise<void>) | undefined;
   private readonly interactions: InteractionBridge;
   private readonly translator: TranscriptTranslator;
-  private readonly transcript: TranscriptWatcher;
+  private transcript: TranscriptWatcher;
   private readonly screen = new TerminalScreen();
   private pty: PtyProcess | null = null;
   private runtimeDirectory: string | null = null;
-  private unregisterHook: (() => void) | null = null;
+  private hookRegistration: HookRegistration | null = null;
   private ready: Deferred<void> | null = null;
   private turn: Deferred<TurnResult> | null = null;
   private cancelTimer: NodeJS.Timeout | null = null;
@@ -61,25 +70,28 @@ export class ClaudeRuntime {
 
   constructor(
     sessionId: string,
+    claudeSessionId: string,
     cwd: string,
     connection: AgentSideConnection,
     hooks: HookServer,
     dependencies: RuntimeDependencies = {},
   ) {
     this.sessionId = sessionId;
+    this.currentClaudeSessionId = claudeSessionId;
     this.cwd = cwd;
     this.connection = connection;
     this.hooks = hooks;
+    this.claudeConfigDir = dependencies.claudeConfigDir;
+    this.initialTranscriptFilePath = dependencies.transcriptFilePath;
+    this.resume = dependencies.resume === true;
+    this.onClaudeSessionChange = dependencies.onClaudeSessionChange;
     this.interactions = new InteractionBridge(sessionId, cwd, connection);
     this.spawnPty = dependencies.spawnPty ?? nodePty.spawn;
     this.startupTimeoutMs = dependencies.startupTimeoutMs ?? STARTUP_TIMEOUT_MS;
     this.cancelTimeoutMs = dependencies.cancelTimeoutMs ?? CANCEL_TIMEOUT_MS;
     this.runtimeRoot = dependencies.runtimeRoot ?? os.tmpdir();
-    this.translator = new TranscriptTranslator(sessionId, cwd, connection);
-    this.transcript = new TranscriptWatcher(
-      new TranscriptReader(sessionId, cwd, { configDir: dependencies.claudeConfigDir, filePath: dependencies.transcriptFilePath }),
-      this.translator,
-    );
+    this.translator = dependencies.translator ?? new TranscriptTranslator(sessionId, cwd, connection);
+    this.transcript = this.createTranscriptWatcher(claudeSessionId, dependencies.transcriptFilePath);
   }
 
   get started(): boolean {
@@ -130,8 +142,8 @@ export class ClaudeRuntime {
     this.ready = null;
     this.finishTurn({ response: { stopReason: "cancelled" } });
     this.interactions.cancelPending();
-    this.unregisterHook?.();
-    this.unregisterHook = null;
+    this.hookRegistration?.unregister();
+    this.hookRegistration = null;
     const pty = this.pty;
     this.pty = null;
     if (pty) {
@@ -148,16 +160,22 @@ export class ClaudeRuntime {
 
   private async ensureStarted(): Promise<void> {
     if (this.pty) return;
-    const endpoint = await this.hooks.start();
+    await this.hooks.start();
     this.runtimeDirectory = await mkdtemp(path.join(this.runtimeRoot, "claude-tty-acp-"));
     await chmod(this.runtimeDirectory, 0o700);
+    this.hookRegistration = this.hooks.register(this.currentClaudeSessionId, (payload) => this.handleHook(payload));
+    const hookClientPath = path.join(this.runtimeDirectory, "hook-client.mjs");
+    await writeFile(hookClientPath, hookClientSource(this.hookRegistration.endpoint), { mode: 0o600 });
     const settingsPath = path.join(this.runtimeDirectory, "settings.json");
-    await writeFile(settingsPath, `${JSON.stringify(createHookSettings(endpoint))}\n`, { mode: 0o600 });
+    const hookCommand = `${shellQuote(process.execPath)} ${shellQuote(hookClientPath)}`;
+    await writeFile(settingsPath, `${JSON.stringify(createHookSettings(hookCommand))}\n`, { mode: 0o600 });
     this.ready = createDeferred<void>();
-    this.unregisterHook = this.hooks.register(this.sessionId, (payload) => this.handleHook(payload));
     const claudeBin = process.env.CLAUDE_BIN || "claude";
+    const sessionArgs = this.resume
+      ? ["--resume", this.currentClaudeSessionId]
+      : ["--session-id", this.currentClaudeSessionId];
     try {
-      this.pty = this.spawnPty(claudeBin, ["--session-id", this.sessionId, "--settings", settingsPath], {
+      this.pty = this.spawnPty(claudeBin, [...sessionArgs, "--settings", settingsPath], {
         name: "xterm-256color",
         cols: 120,
         rows: 40,
@@ -185,8 +203,8 @@ export class ClaudeRuntime {
   }
 
   private async failedStartup(message: string): Promise<never> {
-    this.unregisterHook?.();
-    this.unregisterHook = null;
+    this.hookRegistration?.unregister();
+    this.hookRegistration = null;
     const pty = this.pty;
     this.pty = null;
     if (pty) {
@@ -205,6 +223,7 @@ export class ClaudeRuntime {
       case "PermissionRequest":
         return this.interactions.handlePermissionRequest(payload);
       case "SessionStart":
+        await this.handleSessionStart(payload);
         this.ready?.resolve();
         break;
       case "Stop":
@@ -251,8 +270,8 @@ export class ClaudeRuntime {
       turn.reject(error);
     }
     this.pty = null;
-    this.unregisterHook?.();
-    this.unregisterHook = null;
+    this.hookRegistration?.unregister();
+    this.hookRegistration = null;
     void this.transcript.close().catch((transcriptError) => {
       writeLog({ level: "warn", message: "Failed to stop Claude transcript watcher", sessionId: this.sessionId, error: errorMessage(transcriptError) });
     });
@@ -277,6 +296,32 @@ export class ClaudeRuntime {
     this.finishTurn({ response: { stopReason: "cancelled" } });
   }
 
+  private async handleSessionStart(payload: HookPayload): Promise<void> {
+    const nextClaudeSessionId = asString(payload.session_id);
+    const transcriptFilePath = asString(payload.transcript_path);
+    const source = asString(payload.source);
+    if (source === "clear" && nextClaudeSessionId && nextClaudeSessionId !== this.currentClaudeSessionId) {
+      await this.transcript.close();
+      this.currentClaudeSessionId = nextClaudeSessionId;
+      this.hookRegistration?.addSessionId(nextClaudeSessionId);
+      this.transcript = this.createTranscriptWatcher(nextClaudeSessionId, transcriptFilePath);
+      await this.transcript.start();
+      await this.onClaudeSessionChange?.(nextClaudeSessionId);
+      return;
+    }
+    if (transcriptFilePath && transcriptFilePath !== this.initialTranscriptFilePath) {
+      await this.transcript.close();
+      this.transcript = this.createTranscriptWatcher(this.currentClaudeSessionId, transcriptFilePath);
+    }
+  }
+
+  private createTranscriptWatcher(claudeSessionId: string, filePath?: string): TranscriptWatcher {
+    return new TranscriptWatcher(
+      new TranscriptReader(claudeSessionId, this.cwd, { configDir: this.claudeConfigDir, filePath }),
+      this.translator,
+    );
+  }
+
   private async removeRuntimeDirectory(): Promise<void> {
     const directory = this.runtimeDirectory;
     this.runtimeDirectory = null;
@@ -284,9 +329,9 @@ export class ClaudeRuntime {
   }
 }
 
-function createHookSettings(endpoint: string): Record<string, unknown> {
-  const lifecycleHook = { type: "http", url: endpoint, timeout: 30 };
-  const interactionHook = { type: "http", url: endpoint, timeout: 600 };
+function createHookSettings(command: string): Record<string, unknown> {
+  const lifecycleHook = { type: "command", command, timeout: 30 };
+  const interactionHook = { type: "command", command, timeout: 600 };
   return {
     hooks: {
       PreToolUse: [{ hooks: [interactionHook] }],
@@ -297,6 +342,20 @@ function createHookSettings(endpoint: string): Record<string, unknown> {
       SessionEnd: [{ hooks: [lifecycleHook] }],
     },
   };
+}
+
+function hookClientSource(endpoint: string): string {
+  return `const chunks = [];
+for await (const chunk of process.stdin) chunks.push(chunk);
+const response = await fetch(${JSON.stringify(endpoint)}, { method: "POST", headers: { "content-type": "application/json" }, body: Buffer.concat(chunks) });
+const body = await response.text();
+if (body) process.stdout.write(body);
+if (!response.ok) process.exitCode = 1;
+`;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
 function promptText(content: ContentBlock[]): string {

@@ -3,27 +3,56 @@ import path from "node:path";
 import type { AgentSideConnection, ContentBlock, PromptResponse } from "@agentclientprotocol/sdk";
 import { ClaudeRuntime, type RuntimeDependencies } from "./claude-runtime.ts";
 import { HookServer } from "./hook-server.ts";
+import { SessionLock } from "./session-lock.ts";
+import { type PersistedSession, StateStore } from "./state-store.ts";
+import { TranscriptReader } from "./transcript-reader.ts";
+import { TranscriptTranslator } from "./transcript-translator.ts";
+
+type SessionOptions = {
+  id: string;
+  claudeSessionId: string;
+  cwd: string;
+  model: string;
+  mode: string;
+  persisted: boolean;
+};
 
 export class ClaudeSession {
-  readonly id = randomUUID();
+  readonly id: string;
   readonly createdAt = Date.now();
   readonly cwd: string;
+  private currentClaudeSessionId: string;
+  private model: string;
+  private mode: string;
+  private persisted: boolean;
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
   private readonly runtimeDependencies: RuntimeDependencies;
+  private readonly stateStore: StateStore;
+  private readonly lock: SessionLock;
+  private readonly translator: TranscriptTranslator;
   private runtime: ClaudeRuntime | null = null;
   private queue: Promise<void> = Promise.resolve();
 
   constructor(
-    cwd: string,
+    options: SessionOptions,
     connection: AgentSideConnection,
     hooks: HookServer,
     runtimeDependencies: RuntimeDependencies,
+    stateStore: StateStore,
   ) {
-    this.cwd = cwd;
+    this.id = options.id;
+    this.currentClaudeSessionId = options.claudeSessionId;
+    this.cwd = options.cwd;
+    this.model = options.model;
+    this.mode = options.mode;
+    this.persisted = options.persisted;
     this.connection = connection;
     this.hooks = hooks;
     this.runtimeDependencies = runtimeDependencies;
+    this.stateStore = stateStore;
+    this.lock = new SessionLock(this.id, stateStore.locksDirectory);
+    this.translator = new TranscriptTranslator(this.id, this.cwd, connection);
   }
 
   get started(): boolean {
@@ -32,9 +61,27 @@ export class ClaudeSession {
 
   prompt(content: ContentBlock[]): Promise<PromptResponse> {
     return this.exclusive(async () => {
-      this.runtime ??= new ClaudeRuntime(this.id, this.cwd, this.connection, this.hooks, this.runtimeDependencies);
+      await this.lock.acquire();
+      const resume = this.persisted;
+      await this.save();
+      this.runtime ??= new ClaudeRuntime(this.id, this.currentClaudeSessionId, this.cwd, this.connection, this.hooks, {
+        ...this.runtimeDependencies,
+        resume,
+        translator: this.translator,
+        onClaudeSessionChange: async (claudeSessionId) => {
+          this.currentClaudeSessionId = claudeSessionId;
+          await this.save();
+        },
+      });
       return this.runtime.prompt(content);
     });
+  }
+
+  async replayHistory(): Promise<void> {
+    await this.lock.acquire();
+    const reader = new TranscriptReader(this.currentClaudeSessionId, this.cwd, { configDir: this.runtimeDependencies.claudeConfigDir });
+    const result = await reader.read();
+    await this.translator.translate(result.records);
   }
 
   cancel(): void {
@@ -44,6 +91,21 @@ export class ClaudeSession {
   async close(): Promise<void> {
     await this.runtime?.close();
     this.runtime = null;
+    await this.lock.release();
+  }
+
+  private async save(): Promise<void> {
+    const state: PersistedSession = {
+      version: 1,
+      acpSessionId: this.id,
+      claudeSessionId: this.currentClaudeSessionId,
+      cwd: this.cwd,
+      model: this.model,
+      mode: this.mode,
+      lastActivity: Date.now(),
+    };
+    await this.stateStore.save(state);
+    this.persisted = true;
   }
 
   private exclusive<T>(operation: () => Promise<T>): Promise<T> {
@@ -61,22 +123,54 @@ export class SessionRegistry {
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
   private readonly runtimeDependencies: RuntimeDependencies;
+  private readonly stateStore: StateStore;
 
   constructor(
     connection: AgentSideConnection,
     hooks: HookServer,
     runtimeDependencies: RuntimeDependencies = {},
+    stateStore = new StateStore(runtimeDependencies.stateDirectory),
   ) {
     this.connection = connection;
     this.hooks = hooks;
     this.runtimeDependencies = runtimeDependencies;
+    this.stateStore = stateStore;
   }
 
   create(cwd: string): ClaudeSession {
     if (!path.isAbsolute(cwd)) throw new Error("ACP session cwd must be an absolute path");
-    const session = new ClaudeSession(path.normalize(cwd), this.connection, this.hooks, this.runtimeDependencies);
-    this.sessions.set(session.id, session);
-    return session;
+    const id = randomUUID();
+    return this.createSession({
+      id,
+      claudeSessionId: id,
+      cwd: path.normalize(cwd),
+      model: "default",
+      mode: "default",
+      persisted: false,
+    });
+  }
+
+  async load(sessionId: string, cwd: string): Promise<ClaudeSession> {
+    if (this.sessions.has(sessionId)) throw new Error(`ACP session ${sessionId} is already open in this adapter`);
+    const state = await this.stateStore.load(sessionId);
+    if (!state) throw new Error(`Persisted ACP session ${sessionId} was not found on this host`);
+    if (path.normalize(cwd) !== path.normalize(state.cwd)) throw new Error(`ACP session ${sessionId} belongs to ${state.cwd}, not ${cwd}`);
+    const session = this.createSession({
+      id: state.acpSessionId,
+      claudeSessionId: state.claudeSessionId,
+      cwd: state.cwd,
+      model: state.model,
+      mode: state.mode,
+      persisted: true,
+    });
+    try {
+      await session.replayHistory();
+      return session;
+    } catch (error) {
+      this.sessions.delete(sessionId);
+      await session.close();
+      throw error;
+    }
   }
 
   get(sessionId: string): ClaudeSession | null {
@@ -97,5 +191,11 @@ export class SessionRegistry {
 
   get size(): number {
     return this.sessions.size;
+  }
+
+  private createSession(options: SessionOptions): ClaudeSession {
+    const session = new ClaudeSession(options, this.connection, this.hooks, this.runtimeDependencies, this.stateStore);
+    this.sessions.set(session.id, session);
+    return session;
   }
 }

@@ -6,6 +6,8 @@ import {
   type CancelNotification,
   type InitializeRequest,
   type InitializeResponse,
+  type LoadSessionRequest,
+  type LoadSessionResponse,
   type NewSessionRequest,
   type NewSessionResponse,
   type PromptRequest,
@@ -31,7 +33,7 @@ export class ClaudeTtyAgent implements Agent {
     return {
       protocolVersion: PROTOCOL_VERSION,
       agentCapabilities: {
-        loadSession: false,
+        loadSession: true,
         promptCapabilities: {
           embeddedContext: false,
           image: false,
@@ -57,6 +59,13 @@ export class ClaudeTtyAgent implements Agent {
   }
 
   async authenticate(_params: AuthenticateRequest): Promise<Record<string, never>> {
+    return {};
+  }
+
+  async loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse> {
+    if (params.mcpServers.length > 0) throw new Error(`${APP_TITLE} does not accept ACP-injected MCP servers`);
+    await this.sessions.load(params.sessionId, params.cwd);
+    writeLog({ level: "info", message: "Loaded persisted ACP session", sessionId: params.sessionId, cwd: params.cwd });
     return {};
   }
 

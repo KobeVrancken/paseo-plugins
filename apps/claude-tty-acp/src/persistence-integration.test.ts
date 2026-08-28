@@ -1,0 +1,110 @@
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import type { AgentSideConnection, SessionNotification } from "@agentclientprotocol/sdk";
+import type { IPty } from "node-pty";
+import { ClaudeTtyAgent } from "./agent.ts";
+import { StateStore } from "./state-store.ts";
+import { escapeProjectDirName } from "./transcript-reader.ts";
+
+class LoadFakePty {
+  readonly pid = 9000;
+  readonly writes: string[] = [];
+  killed = false;
+
+  write(data: string | Buffer): void {
+    this.writes.push(data.toString());
+  }
+
+  kill(): void {
+    this.killed = true;
+  }
+
+  onData(): { dispose(): void } {
+    return { dispose: () => undefined };
+  }
+
+  onExit(): { dispose(): void } {
+    return { dispose: () => undefined };
+  }
+}
+
+test("loads history lazily, resumes Claude, and follows clear session rotation", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "persistence-integration-test-"));
+  const stateDirectory = path.join(root, "state");
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  await mkdir(runtimeRoot, { recursive: true });
+  const acpSessionId = "88888888-8888-4888-8888-888888888888";
+  const claudeSessionId = "99999999-9999-4999-8999-999999999999";
+  const nextClaudeSessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const cwd = "/work/load";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  const transcriptPath = path.join(projectDirectory, `${claudeSessionId}.jsonl`);
+  await mkdir(projectDirectory, { recursive: true });
+  await writeFile(
+    transcriptPath,
+    [
+      JSON.stringify({ type: "user", uuid: "history-user", message: { content: "previous question" } }),
+      JSON.stringify({ type: "assistant", uuid: "history-assistant", message: { content: [{ type: "text", text: "previous answer" }] } }),
+      "",
+    ].join("\n"),
+  );
+  const store = new StateStore(stateDirectory);
+  await store.save({
+    version: 1,
+    acpSessionId,
+    claudeSessionId,
+    cwd,
+    model: "default",
+    mode: "default",
+    lastActivity: 1,
+  });
+  const updates: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      updates.push(notification);
+    },
+  } as AgentSideConnection;
+  const pty = new LoadFakePty();
+  const spawns: string[][] = [];
+  let agent!: ClaudeTtyAgent;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    spawns.push(args);
+    const resumedId = args[args.indexOf("--resume") + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: resumedId, source: "resume", transcript_path: transcriptPath }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(connection, { claudeConfigDir: configDirectory, runtimeRoot, stateDirectory, spawnPty, startupTimeoutMs: 500 });
+
+  try {
+    await agent.loadSession({ sessionId: acpSessionId, cwd, mcpServers: [] });
+    assert.equal(spawns.length, 0);
+    assert.deepEqual(updates.map((notification) => notification.update.sessionUpdate), ["user_message_chunk", "agent_message_chunk"]);
+
+    const turn = agent.prompt({ sessionId: acpSessionId, prompt: [{ type: "text", text: "/clear" }] });
+    await waitFor(() => pty.writes.length === 1);
+    assert.deepEqual(spawns[0]?.slice(0, 2), ["--resume", claudeSessionId]);
+    await agent.hooks.dispatch(
+      { hook_event_name: "SessionStart", session_id: nextClaudeSessionId, source: "clear", transcript_path: path.join(projectDirectory, `${nextClaudeSessionId}.jsonl`) },
+      claudeSessionId,
+    );
+    assert.equal((await store.load(acpSessionId))?.claudeSessionId, nextClaudeSessionId);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: nextClaudeSessionId, last_assistant_message: "Context cleared" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    assert.equal(pty.killed, true);
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for resumed Claude prompt");
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
