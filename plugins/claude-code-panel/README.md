@@ -49,6 +49,7 @@ Use the **⋯** menu to choose how prompts are sent:
 Supported environment variables:
 
 - `PASEO_BIN` sets the path to the `paseo` CLI when it cannot be found automatically.
+- `PASEO_PASSWORD` must be set on the daemon when it has a password configured, so the panel can drive the `paseo` CLI.
 - `CLAUDE_CONFIG_DIR` changes where the plugin looks for Claude Code transcripts.
 
 GitHub issue and pull request search uses your installed `gh` CLI. Uploaded files are cached with the plugin settings and removed after one week.
@@ -59,6 +60,7 @@ GitHub issue and pull request search uses your installed `gh` CLI. Uploaded file
 - The file picker is available on web. On mobile, attach a file by entering its path.
 - If the plugin cannot recognize a CLI dialog, open the terminal and answer it there.
 - `/clear` starts a new session rather than emptying the current one, and the panel follows it as soon as the next prompt is sent. Clearing from the terminal itself is only noticed on that next prompt.
+- If no terminal is ever found, check whether your daemon has a password set (`auth.password` in `~/.paseo/config.json`). The panel drives the `paseo` CLI, which takes that password only from `PASEO_PASSWORD`, and the daemon does not set it for the plugins it spawns. Confirm with `paseo terminal ls --all --json`: a password-protected daemon answers `DAEMON_NOT_RUNNING` with "Password required" even though it is running fine. Put `PASEO_PASSWORD` in the daemon's environment — under systemd, an `EnvironmentFile=` keeps it out of a unit file you may be tracking in git.
 
 Run `paseo plugin logs claude-code-panel` for more detail.
 
