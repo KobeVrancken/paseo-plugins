@@ -108,6 +108,7 @@ export function StatusPill({ status, palette }: { status: SessionStatus; palette
 export function Pill({
   palette,
   glyph,
+  glyphSize = fontSize.base,
   label,
   onPress,
   disabled,
@@ -115,6 +116,8 @@ export function Pill({
 }: {
   palette: Palette;
   glyph?: string;
+  /** ASCII marks draw lighter than the dingbats, so they ask for a size of their own. */
+  glyphSize?: number;
   label?: string;
   onPress: () => void;
   disabled?: boolean;
@@ -141,7 +144,7 @@ export function Pill({
         minWidth: label === undefined ? controlHeight.tight : 0,
       }))}
     >
-      {glyph ? <Text style={{ color, fontSize: fontSize.base }}>{glyph}</Text> : null}
+      {glyph ? <Text style={{ color, fontSize: glyphSize }}>{glyph}</Text> : null}
       {label === undefined ? null : (
         <Text numberOfLines={1} style={{ flexShrink: 1, minWidth: 0, color, fontSize: fontSize.base }}>
           {label}
@@ -443,7 +446,13 @@ export function PromptBox({
           >
             <View style={{ flexDirection: "row", alignItems: "center", minWidth: 0, flexShrink: 1 }}>
               {onAddAttachment ? (
-                <Pill palette={palette} glyph="＋" onPress={onAddAttachment} disabled={disabled} />
+                <Pill
+                  palette={palette}
+                  glyph="+"
+                  glyphSize={fontSize.lg}
+                  onPress={onAddAttachment}
+                  disabled={disabled}
+                />
               ) : null}
               {controls ? (
                 <>

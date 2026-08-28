@@ -103,6 +103,7 @@ export function Button({
 export function IconButton({
   palette,
   glyph,
+  glyphSize = fontSize.base,
   onPress,
   disabled,
   tone = "muted",
@@ -110,6 +111,8 @@ export function IconButton({
 }: {
   palette: Palette;
   glyph: string;
+  /** ASCII marks draw lighter than the dingbats, so they ask for a size of their own. */
+  glyphSize?: number;
   onPress: () => void;
   disabled?: boolean;
   tone?: "muted" | "accent";
@@ -135,7 +138,7 @@ export function IconButton({
       <Text
         style={{
           color: tone === "accent" ? palette.accentForeground : palette.foregroundMuted,
-          fontSize: fontSize.base,
+          fontSize: glyphSize,
         }}
       >
         {glyph}

@@ -628,7 +628,8 @@ export function ClaudeCodePanel({ workspaceId, theme, layout }: PluginWorkspaceP
           <StatusPill status={dialog ? "needs_input" : status} palette={palette} />
           <IconButton
             palette={palette}
-            glyph="＋"
+            glyph="+"
+            glyphSize={fontSize.lg}
             accessibilityLabel="New session"
             disabled={startMutation.isPending}
             onPress={() => startMutation.mutate()}
