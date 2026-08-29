@@ -42,8 +42,8 @@ importers:
   plugins/claude-code-panel:
     devDependencies:
       '@getpaseo/client':
-        specifier: ^0.4.0
-        version: 0.4.0
+        specifier: ^0.6.1
+        version: 0.6.1
       '@tanstack/react-query':
         specifier: ^5.90.11
         version: 5.102.2(react@19.1.0)
@@ -96,8 +96,8 @@ importers:
   plugins/discord-rich-presence:
     devDependencies:
       '@getpaseo/client':
-        specifier: ^0.4.0
-        version: 0.4.0
+        specifier: ^0.6.1
+        version: 0.6.1
       '@tanstack/react-query':
         specifier: ^5.90.11
         version: 5.102.2(react@19.1.0)
@@ -281,20 +281,11 @@ packages:
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
 
-  '@getpaseo/client@0.4.0':
-    resolution: {integrity: sha512-PybAYOa9F3RlxC892+6n1KwrH41vLFZLlBUMyaI+kZWQs/sqgIhOaSeGW9QuSbiMgyDdVOB3/LHAAPzUrunepg==}
-
   '@getpaseo/client@0.6.1':
     resolution: {integrity: sha512-lEhHBrBKwPJaOhQ4dmYQJlKbdvphGQFq9KdBc3o49HUqi0LfijQNCop8g/SlUZr3LGw5IKLvx9xOdVyd2EPMhQ==}
 
-  '@getpaseo/protocol@0.4.0':
-    resolution: {integrity: sha512-SKAaIMNCW8/Eqq7EnMhKQjddAjKOR76fYBy2EFE2/Xf6uNF6iH7TLJtJg/Wj2YUhBFu0FfHctB+ibiEejiX1fA==}
-
   '@getpaseo/protocol@0.6.1':
     resolution: {integrity: sha512-HbTTqRSbDONJ4tRi6CPhk6UMcdvneIdHwM868b1K6ZCvzOuAbmmare+pqOXBW1YNHECPNZf8UJrzA7wt2UbApQ==}
-
-  '@getpaseo/relay@0.4.0':
-    resolution: {integrity: sha512-67FTxSpPDPEeWLD1rQ2iNzD96e5chMYd+DAF9j14wDUxL9nQWvrfQO2goq1MVOSIt3nN4P0ixOA24ZqaqnulKQ==}
 
   '@getpaseo/relay@0.6.1':
     resolution: {integrity: sha512-2a3j567o4hf/hEJQLshqL96bVQpG8h0L2zI/OSPs6nkTMMl4xABHSq/wbnio5J84TNx69p3xgpQz1ZYQtJ6FBA==}
@@ -1537,15 +1528,6 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
-  '@getpaseo/client@0.4.0':
-    dependencies:
-      '@getpaseo/protocol': 0.4.0
-      '@getpaseo/relay': 0.4.0
-      zod: 4.4.3
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-
   '@getpaseo/client@0.6.1':
     dependencies:
       '@getpaseo/protocol': 0.6.1
@@ -1555,22 +1537,9 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@getpaseo/protocol@0.4.0':
-    dependencies:
-      zod: 4.4.3
-
   '@getpaseo/protocol@0.6.1':
     dependencies:
       zod: 4.4.3
-
-  '@getpaseo/relay@0.4.0':
-    dependencies:
-      base64-js: 1.5.1
-      tweetnacl: 1.0.3
-      ws: 8.21.3
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
 
   '@getpaseo/relay@0.6.1':
     dependencies:
