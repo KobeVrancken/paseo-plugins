@@ -40,7 +40,7 @@ test("rejects corrupt state and unsafe session IDs", async () => {
       acpSessionId: SESSION_ID,
       claudeSessionId: SESSION_ID,
       cwd: "/work/repo",
-      model: "default",
+      model: "inherit",
       mode: "default",
       lastActivity: 1,
     });

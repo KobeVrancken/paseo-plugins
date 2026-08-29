@@ -58,7 +58,7 @@ test("loads history lazily, resumes Claude, and follows clear session rotation",
     acpSessionId,
     claudeSessionId,
     cwd,
-    model: "default",
+    model: "inherit",
     mode: "default",
     lastActivity: 1,
   });

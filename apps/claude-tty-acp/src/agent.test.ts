@@ -28,11 +28,11 @@ test("creates probe sessions without starting a runtime", async () => {
   assert.ok(session);
   assert.equal(session.cwd, "/work/probe");
   assert.equal(session.started, false);
-  assert.equal(created.models?.currentModelId, "default");
+  assert.equal(created.models?.currentModelId, "inherit");
   assert.deepEqual(
     created.models?.availableModels.map((model) => model.modelId),
     [
-      "default",
+      "inherit",
       "opus",
       "fable",
       "sonnet",

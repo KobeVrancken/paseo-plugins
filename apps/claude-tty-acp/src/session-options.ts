@@ -1,7 +1,10 @@
 import type { ModelInfo, SessionModeState, SessionModelState } from "@agentclientprotocol/sdk";
 
+// Paseo reads a literal "default" model id as "no model selected" and then refuses to list a draft agent's commands.
+export const INHERIT_MODEL_ID = "inherit";
+
 export const MODELS: ModelInfo[] = [
-  { modelId: "default", name: "Default", description: "Use Claude Code's configured default model" },
+  { modelId: INHERIT_MODEL_ID, name: "Default", description: "Use Claude Code's configured default model" },
   { modelId: "opus", name: "Opus (latest)", description: "Claude Code's rolling Opus alias" },
   { modelId: "fable", name: "Fable (latest)", description: "Claude Code's rolling Fable alias" },
   { modelId: "sonnet", name: "Sonnet (latest)", description: "Claude Code's rolling Sonnet alias" },
@@ -43,6 +46,10 @@ export function modeState(currentModeId: string): SessionModeState {
       { id: "auto", name: "Auto", description: "Let Claude Code handle permissions automatically" },
     ],
   };
+}
+
+export function migrateModelId(value: string): string {
+  return value === "default" ? INHERIT_MODEL_ID : value;
 }
 
 export function assertModelId(value: string): void {

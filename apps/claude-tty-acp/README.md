@@ -92,7 +92,7 @@ Multiple sessions run concurrently; work within one session remains serialized.
 A second adapter process cannot open the same active session on one host, while stale locks from dead processes are recovered.
 
 The native model selector offers Claude Code's rolling aliases plus the full model catalog also exposed by Paseo's native Claude provider, including explicit releases and 1M-context variants.
-Claude Code has no supported command for listing models without opening an interactive session, so this catalog is versioned with the adapter while `default`, `opus`, `fable`, `sonnet`, and `haiku` continue to follow Claude's rolling aliases.
+Claude Code has no supported command for listing models without opening an interactive session, so this catalog is versioned with the adapter while `inherit`, `opus`, `fable`, `sonnet`, and `haiku` continue to follow Claude's rolling aliases.
 The native mode selector offers Default, Accept Edits, Plan, and Auto.
 Changing either control before launch changes startup flags; changing one while idle restarts and resumes Claude with deterministic flags; changing one during a turn is rejected.
 
@@ -105,6 +105,7 @@ Listing commands for an agent that does not exist yet, which is what a draft age
 Paseo only waits for the first batch when the provider ID is one it special-cases, which is why this provider is registered as `traecli`: that client differs from the generic one only in waiting up to ten seconds.
 The agent view shows the configured label, so the borrowed ID stays invisible, but a genuine Trae CLI provider cannot be registered next to it, and a future Paseo release may drop the special case.
 Under any other provider ID the composer stays empty until the agent has taken its first turn, after which the live session has the commands cached.
+A draft also has to carry a model id that is not literally `default`, which is why the pass-through entry is `inherit`: Paseo reads `default` as "no model selected" and returns an empty list before it launches the adapter.
 
 ## Question UI limitation
 

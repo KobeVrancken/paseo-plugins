@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import type { AgentSideConnection } from "@agentclientprotocol/sdk";
 import { HookServer } from "./hook-server.ts";
 import { SessionRegistry } from "./session-registry.ts";
+import { StateStore } from "./state-store.ts";
 
 function createRegistry(): SessionRegistry {
   return new SessionRegistry({} as AgentSideConnection, new HookServer());
@@ -30,4 +34,32 @@ test("clears probe-only sessions without external state", async () => {
   registry.create("/work/probe");
   await registry.clear();
   assert.equal(registry.size, 0);
+});
+
+test("loads sessions persisted before the model id rename", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "session-registry-test-"));
+  const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const store = new StateStore(root);
+  const registry = new SessionRegistry(
+    { sessionUpdate: async () => undefined } as unknown as AgentSideConnection,
+    new HookServer(),
+    { claudeConfigDir: root },
+    store,
+  );
+  try {
+    await store.save({
+      version: 1,
+      acpSessionId: sessionId,
+      claudeSessionId: sessionId,
+      cwd: root,
+      model: "default",
+      mode: "default",
+      lastActivity: 1,
+    });
+    const session = await registry.load(sessionId, root);
+    assert.equal(session.models.currentModelId, "inherit");
+  } finally {
+    await registry.clear();
+    await rm(root, { force: true, recursive: true });
+  }
 });

@@ -10,6 +10,7 @@ import { InteractionBridge } from "./interactions.ts";
 import { writeLog } from "./log.ts";
 import { cleanupPromptFiles, materializePrompt } from "./prompt-content.ts";
 import { markRuntimeDirectory, runtimePrefix } from "./runtime-directories.ts";
+import { INHERIT_MODEL_ID } from "./session-options.ts";
 import { TerminalScreen } from "./terminal-screen.ts";
 import { TranscriptReader } from "./transcript-reader.ts";
 import { TranscriptTranslator } from "./transcript-translator.ts";
@@ -97,7 +98,7 @@ export class ClaudeRuntime {
     this.claudeConfigDir = dependencies.claudeConfigDir;
     this.initialTranscriptFilePath = dependencies.transcriptFilePath;
     this.resumeNextLaunch = dependencies.resume === true;
-    this.model = dependencies.model ?? "default";
+    this.model = dependencies.model ?? INHERIT_MODEL_ID;
     this.mode = dependencies.mode ?? "default";
     this.onClaudeSessionChange = dependencies.onClaudeSessionChange;
     this.interactions = new InteractionBridge(sessionId, cwd, connection);
@@ -439,7 +440,7 @@ function shellQuote(value: string): string {
 
 function selectionArgs(model: string, mode: string): string[] {
   const args: string[] = [];
-  if (model !== "default") args.push("--model", model);
+  if (model !== INHERIT_MODEL_ID) args.push("--model", model);
   if (mode !== "default") args.push("--permission-mode", mode);
   return args;
 }
