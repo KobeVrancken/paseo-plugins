@@ -10,6 +10,13 @@ import { readProviderEntry } from "./status.server.ts";
 
 const DIAGNOSE_TIMEOUT_MS = 60_000;
 
+/** Kept so a report run from the command centre is still there when the surface opens. */
+let lastReport: DoctorPayload | null = null;
+
+export function lastDoctorReport(): DoctorPayload | null {
+  return lastReport;
+}
+
 export async function runDoctor(paseo: PaseoApi): Promise<DoctorPayload> {
   const [repo, existing] = await Promise.all([resolveRepoRoot(paseo), readProviderEntry(paseo)]);
   /** What the daemon would launch, which is the only executable worth diagnosing. */
@@ -19,7 +26,8 @@ export async function runDoctor(paseo: PaseoApi): Promise<DoctorPayload> {
     readDaemonDiagnostic(paseo),
     readSnapshotEntry(paseo),
   ]);
-  return { ranAt: Date.now(), adapter: { binary, ...adapter }, daemon, snapshot };
+  lastReport = { ranAt: Date.now(), adapter: { binary, ...adapter }, daemon, snapshot };
+  return lastReport;
 }
 
 async function checkAdapter(binary: string | null, cwd: string): Promise<Omit<DoctorPayload["adapter"], "binary">> {

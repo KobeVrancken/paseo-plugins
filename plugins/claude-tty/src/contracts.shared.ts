@@ -103,6 +103,12 @@ export const runDoctor = defineRpc({
   output: DoctorSchema,
 });
 
+export const getDoctor = defineRpc({
+  name: "claude-tty.doctor.last",
+  input: z.object({}),
+  output: DoctorSchema.nullable(),
+});
+
 export const SessionSchema = z.object({
   id: z.string(),
   claudeSessionId: z.string().nullable(),
@@ -139,4 +145,24 @@ export const quarantineSession = defineRpc({
   name: "claude-tty.sessions.quarantine",
   input: z.object({ id: z.string() }),
   output: SessionsSchema,
+});
+
+export const releaseStaleLocks = defineRpc({
+  name: "claude-tty.locks.release-stale",
+  input: z.object({}),
+  output: SessionsSchema,
+});
+
+export const UninstallSchema = z.object({
+  removedProvider: z.boolean(),
+  removedState: z.boolean(),
+  detail: z.string(),
+});
+
+export type UninstallPayload = z.output<typeof UninstallSchema>;
+
+export const runUninstall = defineRpc({
+  name: "claude-tty.uninstall.run",
+  input: z.object({ removeState: z.boolean() }),
+  output: UninstallSchema,
 });

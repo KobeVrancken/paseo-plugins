@@ -7,6 +7,7 @@ import * as contracts from "../contracts.shared.ts";
 import { DoctorSection } from "./doctor.client.tsx";
 import { InstallSection } from "./install.client.tsx";
 import { SessionsSection } from "./sessions.client.tsx";
+import { UninstallSection } from "./uninstall.client.tsx";
 import { MAX_CONTENT_WIDTH, fontSize, leading, spacing } from "./theme.client.ts";
 import {
   Monospace,
@@ -112,6 +113,8 @@ export function ClaudeTtySurface({ theme, layout }: PluginSurfaceProps) {
           shows that host's own answer.
         </Text>
       </Section>
+
+      <UninstallSection palette={palette} onSettled={refreshStatus} />
     </ScrollView>
   );
 }

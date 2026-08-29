@@ -33,6 +33,16 @@ export async function releaseLock(id: string): Promise<SessionsPayload> {
   return listSessions();
 }
 
+/** Safe by construction: a live lock is never a candidate, so this needs no confirmation of its own. */
+export async function releaseStaleLocks(): Promise<SessionsPayload> {
+  const directory = locksDirectory(defaultStateDirectory());
+  const stale = (await listSessions()).sessions.filter((entry) => entry.lock !== null && !entry.lock.live);
+  for (const entry of stale) {
+    await unlink(path.join(directory, `${entry.id}${LOCK_SUFFIX}`)).catch(() => undefined);
+  }
+  return listSessions();
+}
+
 /** Moves a session file aside rather than deleting it, so the failure can still be diagnosed. */
 export async function quarantineSession(id: string): Promise<SessionsPayload> {
   const entry = await requireEntry(id);

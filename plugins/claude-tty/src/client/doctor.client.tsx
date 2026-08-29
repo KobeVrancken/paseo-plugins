@@ -1,5 +1,5 @@
 import { useRpc } from "@getpaseo/plugin";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React from "react";
 import { Text, View } from "react-native";
 import * as contracts from "../contracts.shared.ts";
@@ -8,10 +8,18 @@ import { fontSize, leading, spacing, type Palette } from "./theme.client.ts";
 import { Monospace, ReadingRow, type Reading } from "./status.client.tsx";
 import { Button, Card, Row, Section } from "./ui.client.tsx";
 
+export const DOCTOR_QUERY_KEY = ["claude-tty", "doctor"];
+
 export function DoctorSection({ palette }: { palette: Palette }) {
+  const queryClient = useQueryClient();
+  const getDoctor = useRpc(contracts.getDoctor);
   const runDoctor = useRpc(contracts.runDoctor);
-  const run = useMutation({ mutationFn: () => runDoctor({}) });
-  const report = run.data ?? null;
+  const query = useQuery({ queryKey: DOCTOR_QUERY_KEY, queryFn: () => getDoctor({}) });
+  const run = useMutation({
+    mutationFn: () => runDoctor({}),
+    onSuccess: (next) => queryClient.setQueryData(DOCTOR_QUERY_KEY, next),
+  });
+  const report = query.data ?? null;
 
   return (
     <Section

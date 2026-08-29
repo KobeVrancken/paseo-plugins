@@ -1,8 +1,15 @@
 import type { PaseoApi } from "@getpaseo/client";
-import type { DoctorPayload, InstallJobPayload, SessionsPayload, StatusPayload } from "../contracts.shared.ts";
-import { runDoctor } from "./doctor.server.ts";
+import type {
+  DoctorPayload,
+  InstallJobPayload,
+  SessionsPayload,
+  StatusPayload,
+  UninstallPayload,
+} from "../contracts.shared.ts";
+import { lastDoctorReport, runDoctor } from "./doctor.server.ts";
 import { currentInstall, startInstall } from "./install.server.ts";
-import { listSessions, quarantineSession, releaseLock } from "./sessions.server.ts";
+import { listSessions, quarantineSession, releaseLock, releaseStaleLocks } from "./sessions.server.ts";
+import { runUninstall } from "./uninstall.server.ts";
 import { readStatus } from "./status.server.ts";
 
 export function statusHandler(paseo: PaseoApi): Promise<StatusPayload> {
@@ -31,4 +38,16 @@ export function releaseLockHandler(input: { id: string }): Promise<SessionsPaylo
 
 export function quarantineSessionHandler(input: { id: string }): Promise<SessionsPayload> {
   return quarantineSession(input.id);
+}
+
+export function lastDoctorHandler(): DoctorPayload | null {
+  return lastDoctorReport();
+}
+
+export function releaseStaleLocksHandler(): Promise<SessionsPayload> {
+  return releaseStaleLocks();
+}
+
+export function uninstallHandler(paseo: PaseoApi, input: { removeState: boolean }): Promise<UninstallPayload> {
+  return runUninstall(paseo, input);
 }
