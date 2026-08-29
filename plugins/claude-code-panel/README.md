@@ -1,4 +1,8 @@
-# Claude Code panel
+# Claude Code panel (deprecated)
+
+> [!WARNING]
+> This plugin is deprecated in favor of the [Interactive Claude Code ACP app](../../apps/claude-tty-acp), which runs the genuine interactive Claude Code CLI in Paseo's native agent view.
+> Existing installations can continue to use the panel, but new installations should use the ACP app instead.
 
 View and control local Claude Code CLI sessions from a Paseo workspace panel.
 
@@ -28,7 +32,21 @@ This plugin avoids the Agent SDK by connecting Paseo directly to the CLI. The tr
 
 ![Session transcript](./docs/screenshots/transcript.png)
 
-## Installation
+## Migration
+
+Install and configure the [Interactive Claude Code ACP app](../../apps/claude-tty-acp#install-on-a-paseo-host) on each Paseo host where Claude should be available.
+After confirming the `claude-tty` provider works, remove this plugin with:
+
+```sh
+paseo plugin remove claude-code-panel
+```
+
+The ACP app has separate host-local session state and does not import sessions or settings from this panel.
+
+## Legacy installation
+
+New installations should use the ACP app above.
+The following command remains documented for existing users who need the legacy panel:
 
 ```sh
 paseo plugin install "/absolute/path/to/paseo-plugins/plugins/claude-code-panel"

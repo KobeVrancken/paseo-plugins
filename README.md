@@ -8,7 +8,7 @@ Extensions for [Paseo](https://github.com/getpaseo/paseo), organized in a pnpm w
 
 | Plugin | Description |
 | --- | --- |
-| [Claude Code panel](plugins/claude-code-panel) | View and control local Claude Code CLI sessions from Paseo. |
+| [Claude Code panel (deprecated)](plugins/claude-code-panel) | Legacy panel superseded by the Interactive Claude Code ACP app. |
 | [Discord Rich Presence](plugins/discord-rich-presence) | Show your current Paseo activity on Discord. |
 | [Catppuccin theme](plugins/catppuccin-theme) | Add all four Catppuccin flavours as app themes. |
 

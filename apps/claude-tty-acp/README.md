@@ -4,7 +4,7 @@ Use a genuine interactive Claude Code process from Paseo's native agent view.
 
 The adapter speaks ACP over stdio, owns one real PTY per active session, and turns Claude's transcripts and supported hooks into native Paseo messages, reasoning, tools, plans, usage, permissions, question fallbacks, models, modes, commands, attachments, cancellation, and history.
 It never invokes `claude -p` and never uses the Claude Agent SDK.
-The original [Claude Code panel plugin](../../plugins/claude-code-panel) remains a separate option and is not required by this app.
+The deprecated [Claude Code panel plugin](../../plugins/claude-code-panel) remains available for existing installations and is not required by this app.
 
 ## Requirements
 
