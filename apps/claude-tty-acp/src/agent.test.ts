@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
-import { PROTOCOL_VERSION, type AgentSideConnection } from "@agentclientprotocol/sdk";
+import { PROTOCOL_VERSION, type AgentSideConnection, type SessionNotification } from "@agentclientprotocol/sdk";
 import { ClaudeTtyAgent } from "./agent.ts";
+import { createDeferred } from "./deferred.ts";
 
 function createAgent(): ClaudeTtyAgent {
   return new ClaudeTtyAgent({ sessionUpdate: async () => undefined } as unknown as AgentSideConnection);
@@ -61,4 +65,28 @@ test("rejects injected MCP servers", async () => {
     }),
     /does not accept ACP-injected MCP servers/,
   );
+});
+
+test("publishes available commands after session/new responds", async () => {
+  const configDir = await mkdtemp(path.join(os.tmpdir(), "claude-tty-acp-commands-"));
+  const published = createDeferred<{ afterResponse: boolean; update: SessionNotification["update"] }>();
+  let responded = false;
+  const agent = new ClaudeTtyAgent(
+    {
+      sessionUpdate: async (params: SessionNotification) => {
+        published.resolve({ afterResponse: responded, update: params.update });
+      },
+    } as unknown as AgentSideConnection,
+    { claudeConfigDir: configDir },
+  );
+
+  const created = await agent.newSession({ cwd: configDir, mcpServers: [] });
+  responded = true;
+  const notification = await published.promise;
+
+  assert.equal(notification.afterResponse, true);
+  assert.equal(notification.update.sessionUpdate, "available_commands_update");
+  assert.ok(created.sessionId);
+  await agent.close();
+  await rm(configDir, { force: true, recursive: true });
 });

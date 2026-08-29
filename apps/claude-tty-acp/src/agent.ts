@@ -18,7 +18,7 @@ import {
 import { APP_NAME, APP_TITLE, APP_VERSION } from "./constants.ts";
 import { HookServer } from "./hook-server.ts";
 import { writeLog } from "./log.ts";
-import { SessionRegistry } from "./session-registry.ts";
+import { type ClaudeSession, SessionRegistry } from "./session-registry.ts";
 import type { RuntimeDependencies } from "./claude-runtime.ts";
 
 export class ClaudeTtyAgent implements Agent {
@@ -56,7 +56,8 @@ export class ClaudeTtyAgent implements Agent {
       throw new Error(`${APP_TITLE} does not accept ACP-injected MCP servers`);
     }
     const session = this.sessions.create(params.cwd);
-    await session.emitCommands();
+    // The client first learns this session id from the response below, so an update sent any earlier has nowhere to land.
+    setImmediate(() => void this.publishCommands(session));
     writeLog({ level: "info", message: "Created lazy ACP session", sessionId: session.id, cwd: session.cwd });
     return { sessionId: session.id, models: session.models, modes: session.modes };
   }
@@ -101,4 +102,16 @@ export class ClaudeTtyAgent implements Agent {
     await this.sessions.clear();
     await this.hooks.close();
   }
+
+  private async publishCommands(session: ClaudeSession): Promise<void> {
+    try {
+      await session.emitCommands();
+    } catch (error) {
+      writeLog({ level: "warn", message: "Failed to publish available commands", sessionId: session.id, error: errorMessage(error) });
+    }
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
