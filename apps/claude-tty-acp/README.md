@@ -2,7 +2,7 @@
 
 Use a genuine interactive Claude Code process from Paseo's native agent view.
 
-The adapter speaks ACP over stdio, owns one real PTY per active session, and turns Claude's transcripts and supported hooks into native Paseo messages, reasoning, tools, plans, usage, permissions, questions, models, modes, commands, attachments, cancellation, and history.
+The adapter speaks ACP over stdio, owns one real PTY per active session, and turns Claude's transcripts and supported hooks into native Paseo messages, reasoning, tools, plans, usage, permissions, question fallbacks, models, modes, commands, attachments, cancellation, and history.
 It never invokes `claude -p` and never uses the Claude Agent SDK.
 The original [Claude Code panel plugin](../../plugins/claude-code-panel) remains a separate option and is not required by this app.
 
@@ -90,6 +90,16 @@ Claude Code has no supported command for listing models without opening an inter
 The native mode selector offers Default, Accept Edits, Plan, and Auto.
 Changing either control before launch changes startup flags; changing one while idle restarts and resumes Claude with deterministic flags; changing one during a turn is rejected.
 
+## Question UI limitation
+
+Claude's `AskUserQuestion` tool does not currently use Paseo's native question and chooser UI when this external provider is selected.
+Paseo's generic ACP provider only exposes the standard ACP permission request path, so the adapter presents each question as a permission card with one action per answer.
+Single-select answers work through those actions, and multi-select questions repeat the card until Done is selected.
+Choose Reply in next message when the answer requires free-form text; the adapter asks Claude to restate the question conversationally and waits for the next normal message.
+
+The native chooser is currently available only to Paseo's direct providers because plugins cannot intercept or transform ACP requests, contribute permission renderers, or emit native agent question events.
+Supporting it here requires Paseo's generic ACP provider to implement ACP `session/elicitation`, or a Paseo-specific equivalent, and return structured answers to the adapter.
+
 Images and embedded resources become mode-0600 host-local files for the duration of a turn.
 Host-local file links become `@path` references.
 Audio and remote resource links are rejected with an explicit error.
@@ -126,7 +136,7 @@ Repeat these checks on the VPS while connecting from the normal Paseo client:
 - Run `claude --version`, an interactive `claude` login check, and `claude-tty-acp --diagnose` as the Paseo daemon user.
 - Confirm Paseo provider diagnostics create a native Claude Code agent without launching a saved Claude session.
 - Open three agent sessions in different projects and complete prompts in parallel without crossed output.
-- Exercise allow once, a durable permission, deny, an `AskUserQuestion` chooser, multi-select Done, and plan approval.
+- Exercise allow once, a durable permission, deny, the `AskUserQuestion` permission-card fallback, multi-select Done, Reply in next message, and plan approval.
 - Cancel one running session and confirm the others continue.
 - Restart the adapter or daemon, load a prior session, and confirm transcript history replays before the next lazy resume.
 - Run `/clear`, send another prompt, reconnect, and confirm the stable Paseo session follows the rotated Claude session.
