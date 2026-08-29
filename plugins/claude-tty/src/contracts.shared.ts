@@ -102,3 +102,41 @@ export const runDoctor = defineRpc({
   input: z.object({}),
   output: DoctorSchema,
 });
+
+export const SessionSchema = z.object({
+  id: z.string(),
+  claudeSessionId: z.string().nullable(),
+  cwd: z.string().nullable(),
+  model: z.string().nullable(),
+  mode: z.string().nullable(),
+  lastActivity: z.number().nullable(),
+  corrupt: z.boolean(),
+  orphanLock: z.boolean(),
+  lock: z.object({ pid: z.number(), createdAt: z.number(), live: z.boolean() }).nullable(),
+});
+
+export const SessionsSchema = z.object({
+  stateDirectory: z.string(),
+  problem: z.string().nullable(),
+  sessions: z.array(SessionSchema),
+});
+
+export type SessionsPayload = z.output<typeof SessionsSchema>;
+
+export const getSessions = defineRpc({
+  name: "claude-tty.sessions.list",
+  input: z.object({}),
+  output: SessionsSchema,
+});
+
+export const releaseLock = defineRpc({
+  name: "claude-tty.locks.release",
+  input: z.object({ id: z.string() }),
+  output: SessionsSchema,
+});
+
+export const quarantineSession = defineRpc({
+  name: "claude-tty.sessions.quarantine",
+  input: z.object({ id: z.string() }),
+  output: SessionsSchema,
+});

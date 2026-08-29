@@ -6,6 +6,7 @@ import { ScrollView, Text, View } from "react-native";
 import * as contracts from "../contracts.shared.ts";
 import { DoctorSection } from "./doctor.client.tsx";
 import { InstallSection } from "./install.client.tsx";
+import { SessionsSection } from "./sessions.client.tsx";
 import { MAX_CONTENT_WIDTH, fontSize, leading, spacing } from "./theme.client.ts";
 import {
   Monospace,
@@ -89,6 +90,8 @@ export function ClaudeTtySurface({ theme, layout }: PluginSurfaceProps) {
       <InstallSection palette={palette} status={status} onSettled={refreshStatus} />
 
       <DoctorSection palette={palette} />
+
+      <SessionsSection palette={palette} />
 
       <Section palette={palette} title="This host">
         <Card palette={palette}>

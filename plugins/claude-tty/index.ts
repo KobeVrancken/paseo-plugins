@@ -1,6 +1,14 @@
 import type { PluginContext } from "@getpaseo/plugin";
 import * as contracts from "./src/contracts.shared.ts";
-import { doctorHandler, installStatusHandler, startInstallHandler, statusHandler } from "./src/server/handlers.server.ts";
+import {
+  doctorHandler,
+  installStatusHandler,
+  quarantineSessionHandler,
+  releaseLockHandler,
+  sessionsHandler,
+  startInstallHandler,
+  statusHandler,
+} from "./src/server/handlers.server.ts";
 import { ClaudeTtySurface } from "./src/client/surface.client.tsx";
 
 export const SURFACE_ID = "claude-tty";
@@ -10,6 +18,9 @@ export default function contribute(plugin: PluginContext) {
   plugin.handle(contracts.startInstall, (input, { paseo }) => startInstallHandler(paseo, input));
   plugin.handle(contracts.getInstall, () => installStatusHandler());
   plugin.handle(contracts.runDoctor, (_input, { paseo }) => doctorHandler(paseo));
+  plugin.handle(contracts.getSessions, () => sessionsHandler());
+  plugin.handle(contracts.releaseLock, (input) => releaseLockHandler(input));
+  plugin.handle(contracts.quarantineSession, (input) => quarantineSessionHandler(input));
 
   plugin.addSurface(SURFACE_ID, ClaudeTtySurface);
 
