@@ -132,20 +132,6 @@ pnpm --filter @paseo-plugins/claude-tty-acp smoke:live -- /absolute/project/path
 
 The live smoke test consumes normal Claude usage and asks Claude for a fixed tool-free response.
 
-## VPS acceptance checklist
-
-Repeat these checks on the VPS while connecting from the normal Paseo client:
-
-- Run `claude --version`, an interactive `claude` login check, and `claude-tty-acp --diagnose` as the Paseo daemon user.
-- Confirm Paseo provider diagnostics create a native Claude Code agent without launching a saved Claude session.
-- Open three agent sessions in different projects and complete prompts in parallel without crossed output.
-- Exercise allow once, a durable permission, deny, the `AskUserQuestion` permission-card fallback, multi-select Done, Reply in next message, and plan approval.
-- Cancel one running session and confirm the others continue.
-- Restart the adapter or daemon, load a prior session, and confirm transcript history replays before the next lazy resume.
-- Run `/clear`, send another prompt, reconnect, and confirm the stable Paseo session follows the rotated Claude session.
-- Send an image and a local file resource, then confirm temporary attachments disappear after the turn.
-- Verify the local provider still runs independently with the same provider ID.
-
 ## Troubleshooting
 
 | Symptom | Action |
