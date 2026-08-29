@@ -150,6 +150,7 @@ Slash commands are the one thing the adapter never asks Claude for: an interacti
 
 A prompt is flattened into one block of text: images and embedded resources become files in the runtime directory referenced as `@path`, and host-local resource links become `@path` directly.
 The adapter writes that text into the PTY wrapped in bracketed paste, waits briefly, then writes Enter, exactly as a person pasting into the terminal would.
+
 Cancellation is the same kind of impersonation: an Escape keystroke, plus a short fallback that ends the turn when no `Stop` hook follows.
 Changing the model or mode while idle sends Ctrl-D, waits for the process to exit, and relaunches with `--resume`, which is why the change survives as a real flag rather than an in-band command.
 
@@ -157,13 +158,16 @@ Changing the model or mode while idle sends Ctrl-D, waits for the process to exi
 
 Nothing that reaches Paseo is scraped from the terminal.
 Claude appends its own JSONL transcript under its projects directory, and the adapter tails that file by byte offset every 40ms, re-reading from the start when the first bytes of the file change because Claude rewrote or replaced it.
+
 A translator turns each record into an ACP session update — user and agent chunks, thinking, tool calls with diffs and file locations, `TodoWrite` into a plan, token usage into a context-window update — and dedupes by record key so re-reads and history replay never emit the same thing twice.
 Loading a persisted session runs that translator over the whole file to rebuild the conversation, and still launches nothing until the next prompt.
 
 ### Hooks carry everything interactive
 
 The adapter runs a single loopback HTTP server whose URL carries a per-process secret and a per-session route, and the generated hook client posts each hook payload to it and hands the JSON answer back to Claude.
+
 `Stop`, `StopFailure` and `SessionEnd` end the turn with `end_turn`, `refusal` and `cancelled`, each first flushing the transcript until the file stops growing so the updates land before the turn does.
+
 `PermissionRequest` becomes an ACP permission request offering Allow once, Claude's own permission suggestions as always-allow options, and Deny, and the answer becomes the hook's decision.
 `PreToolUse` intercepts two tools before they run: `AskUserQuestion` renders as permission cards, and `ExitPlanMode` renders as a plan approval.
 
