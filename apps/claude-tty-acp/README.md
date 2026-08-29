@@ -1,4 +1,4 @@
-# Interactive Claude Code ACP
+# Claude TTY ACP
 
 Run the genuine interactive Claude Code CLI as a native Paseo agent.
 

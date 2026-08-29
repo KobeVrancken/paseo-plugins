@@ -1,6 +1,6 @@
 # Claude TTY
 
-Install, diagnose, and manage the [Interactive Claude Code ACP adapter](../../apps/claude-tty-acp) on the host running the Paseo daemon.
+Install, diagnose, and manage the [Claude TTY ACP adapter](../../apps/claude-tty-acp) on the host running the Paseo daemon.
 
 The adapter's own setup is a checklist a person follows on each host: build it, check it, add a provider entry, reload the daemon. This plugin does that from Paseo's sidebar instead, on whichever host is selected.
 
