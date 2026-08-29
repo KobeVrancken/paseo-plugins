@@ -37,7 +37,7 @@ Add this provider to that host's Paseo configuration:
     "providers": {
       "claude-tty": {
         "extends": "acp",
-        "label": "Claude Code (Interactive)",
+        "label": "Claude Code (interactive)",
         "command": [
           "/opt/paseo-plugins/apps/claude-tty-acp/bin/claude-tty-acp"
         ],
