@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback } from "react";
 import { ScrollView, Text, View } from "react-native";
 import * as contracts from "../contracts.shared.ts";
+import { DoctorSection } from "./doctor.client.tsx";
 import { InstallSection } from "./install.client.tsx";
 import { MAX_CONTENT_WIDTH, fontSize, leading, spacing } from "./theme.client.ts";
 import {
@@ -86,6 +87,8 @@ export function ClaudeTtySurface({ theme, layout }: PluginSurfaceProps) {
       </Section>
 
       <InstallSection palette={palette} status={status} onSettled={refreshStatus} />
+
+      <DoctorSection palette={palette} />
 
       <Section palette={palette} title="This host">
         <Card palette={palette}>

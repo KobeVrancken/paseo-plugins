@@ -67,3 +67,38 @@ export const getInstall = defineRpc({
   input: z.object({}),
   output: InstallJobSchema.nullable(),
 });
+
+export const DiagnosticCheckSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  ok: z.boolean(),
+  detail: z.string(),
+});
+
+export const DoctorSchema = z.object({
+  ranAt: z.number(),
+  adapter: z.object({
+    /** The executable the daemon would launch, which is not always the one this checkout builds. */
+    binary: z.string().nullable(),
+    ok: z.boolean(),
+    problem: z.string().nullable(),
+    checks: z.array(DiagnosticCheckSchema),
+  }),
+  daemon: z.object({
+    diagnostic: z.string().nullable(),
+    error: z.string().nullable(),
+  }),
+  snapshot: z.object({
+    registered: z.boolean(),
+    status: z.string().nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export type DoctorPayload = z.output<typeof DoctorSchema>;
+
+export const runDoctor = defineRpc({
+  name: "claude-tty.doctor.run",
+  input: z.object({}),
+  output: DoctorSchema,
+});

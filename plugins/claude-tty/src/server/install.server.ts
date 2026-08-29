@@ -7,6 +7,7 @@ import {
   type InstallStepId,
   type StepOutcome,
 } from "../install.shared.ts";
+import { failedChecks, parseDiagnosticsReport } from "../diagnostics.shared.ts";
 import { ADAPTER_PACKAGE, adapterBinaryPath, adapterEntryPath, executableCandidates } from "../paths.shared.ts";
 import { PROVIDER_ID, classifyProviderEntry, providerEntryFor } from "../provider.shared.ts";
 import { runCommand } from "./exec.server.ts";
@@ -72,11 +73,11 @@ async function runInstall(paseo: PaseoApi, options: { repair: boolean }): Promis
   const diagnosed = await step("diagnose", async () => {
     const result = await runCommand(built, ["--diagnose", "--json"], { cwd: repo, timeoutMs: DIAGNOSE_TIMEOUT_MS });
     if (result.spawnError !== null) return outcomeOf(result, "--diagnose --json");
-    const report = parseDiagnostics(result.stdout);
+    const report = parseDiagnosticsReport(result.stdout);
     if (report === null) {
       return { ...outcomeOf(result, "The adapter did not report its checks as JSON."), ok: false };
     }
-    const failures = report.checks.filter((check) => !check.ok);
+    const failures = failedChecks(report);
     return {
       ok: report.ok,
       detail: report.ok
@@ -157,18 +158,3 @@ function outcomeOf(
   };
 }
 
-type DiagnosticsReport = { ok: boolean; checks: { id: string; label: string; ok: boolean; detail: string }[] };
-
-function parseDiagnostics(text: string): DiagnosticsReport | null {
-  const line = text.trim().split("\n").at(-1);
-  if (line === undefined || line === "") return null;
-  try {
-    const parsed: unknown = JSON.parse(line);
-    if (parsed === null || typeof parsed !== "object") return null;
-    const record = parsed as Record<string, unknown>;
-    if (typeof record.ok !== "boolean" || !Array.isArray(record.checks)) return null;
-    return { ok: record.ok, checks: record.checks as DiagnosticsReport["checks"] };
-  } catch {
-    return null;
-  }
-}
