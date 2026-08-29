@@ -3,7 +3,7 @@
 Run the genuine interactive Claude Code CLI as a native Paseo agent.
 
 Paseo speaks [ACP](https://agentclientprotocol.com) to this adapter, and the adapter keeps a single real `claude` process in a PTY per session.
-It translates that process's transcripts and hooks into native Paseo messages, reasoning, tool calls, plans, usage, permissions, models, modes, slash commands, attachments, cancellation, and history.
+It translates that process's transcripts and hooks into native Paseo messages, reasoning, tool calls, plans, permissions, models, modes, slash commands, attachments, cancellation, and history.
 There is no `claude -p` and no Claude Agent SDK anywhere in the path.
 
 ## Why?
@@ -223,6 +223,18 @@ Claude then waits at a dialog inside its PTY and no `Stop` hook follows, so the 
 Cancel the turn from Paseo to recover, which sends Escape into the PTY and dismisses the dialog; sending a new prompt does the same, because Paseo cancels before it replaces the turn.
 Default mode avoids the limit entirely, because there every decision reaches the adapter through the `PermissionRequest` hook.
 Claude does report the wait over its `Notification` hook, which the adapter does not register yet, so a future release can surface the dialog or end the turn with an explicit error instead of hanging.
+
+### The token usage meter stays empty
+
+Paseo's token usage meter renders only once it knows both a context window size and the tokens currently in it, and it fills those in for its own providers alone.
+ACP carries the pair as a `usage_update` session notification, which Paseo's generic ACP provider validates and then discards, so nothing an external provider reports can reach the meter.
+
+The adapter cannot supply the numbers from the transcript either.
+Claude records per-message `usage` counts there, enough to total the tokens in context, but never the size of the window holding them, and a model ID alone does not imply one because the 1M variants are not distinguishable in the transcript.
+
+Supporting this looks possible from both ends.
+Claude's status line receives a `context_window` payload carrying `context_window_size` alongside the current totals, refreshed whenever token usage changes, which the adapter could forward over the hook channel it already runs.
+That leaves Paseo's generic ACP provider needing to honour `usage_update` the way its direct providers report usage.
 
 ## Troubleshooting
 
