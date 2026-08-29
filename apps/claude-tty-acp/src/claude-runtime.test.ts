@@ -194,11 +194,11 @@ test("applies native model and mode controls and restarts an idle session", asyn
 
   try {
     const created = await agent.newSession({ cwd: "/work/controls", mcpServers: [] });
-    await agent.unstable_setSessionModel({ sessionId: created.sessionId, modelId: "opus" });
+    await agent.unstable_setSessionModel({ sessionId: created.sessionId, modelId: "claude-opus-5" });
     await agent.setSessionMode({ sessionId: created.sessionId, modeId: "plan" });
     const turn = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "plan it" }] });
     await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
-    assert.deepEqual(spawns[0]!.args.slice(0, 6), ["--session-id", created.sessionId, "--model", "opus", "--permission-mode", "plan"]);
+    assert.deepEqual(spawns[0]!.args.slice(0, 6), ["--session-id", created.sessionId, "--model", "claude-opus-5", "--permission-mode", "plan"]);
     await assert.rejects(agent.setSessionMode({ sessionId: created.sessionId, modeId: "auto" }), /active turn/);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: created.sessionId, last_assistant_message: "planned" });
     await turn;

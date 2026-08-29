@@ -85,7 +85,8 @@ Each active session has an isolated PTY, hook route, transcript reader, permissi
 Multiple sessions run concurrently; work within one session remains serialized.
 A second adapter process cannot open the same active session on one host, while stale locks from dead processes are recovered.
 
-The native model selector offers Default, Sonnet, Opus, and Haiku.
+The native model selector offers Claude Code's rolling aliases plus the full model catalog also exposed by Paseo's native Claude provider, including explicit releases and 1M-context variants.
+Claude Code has no supported command for listing models without opening an interactive session, so this catalog is versioned with the adapter while `default`, `opus`, `fable`, `sonnet`, and `haiku` continue to follow Claude's rolling aliases.
 The native mode selector offers Default, Accept Edits, Plan, and Auto.
 Changing either control before launch changes startup flags; changing one while idle restarts and resumes Claude with deterministic flags; changing one during a turn is rejected.
 

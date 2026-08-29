@@ -25,6 +25,29 @@ test("creates probe sessions without starting a runtime", async () => {
   assert.equal(session.cwd, "/work/probe");
   assert.equal(session.started, false);
   assert.equal(created.models?.currentModelId, "default");
+  assert.deepEqual(
+    created.models?.availableModels.map((model) => model.modelId),
+    [
+      "default",
+      "opus",
+      "fable",
+      "sonnet",
+      "haiku",
+      "claude-opus-5",
+      "claude-fable-5",
+      "claude-opus-4-8[1m]",
+      "claude-opus-4-8",
+      "claude-sonnet-5",
+      "claude-sonnet-5[1m]",
+      "claude-opus-4-7[1m]",
+      "claude-opus-4-7",
+      "claude-opus-4-6[1m]",
+      "claude-opus-4-6",
+      "claude-sonnet-4-6[1m]",
+      "claude-sonnet-4-6",
+      "claude-haiku-4-5",
+    ],
+  );
   assert.equal(created.modes?.currentModeId, "default");
   await agent.close();
 });
