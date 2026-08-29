@@ -17,6 +17,7 @@ import { TranscriptWatcher } from "./transcript-watcher.ts";
 
 const STARTUP_TIMEOUT_MS = 15_000;
 const CANCEL_TIMEOUT_MS = 2_000;
+const SUBMIT_DELAY_MS = 150;
 const BRACKETED_PASTE_START = "\u001b[200~";
 const BRACKETED_PASTE_END = "\u001b[201~";
 const ESCAPE = "\u001b";
@@ -28,7 +29,9 @@ type SpawnPty = (file: string, args: string[], options: nodePty.IPtyForkOptions)
 export type RuntimeDependencies = {
   spawnPty?: SpawnPty;
   startupTimeoutMs?: number;
+  readinessTimeoutMs?: number;
   cancelTimeoutMs?: number;
+  submitDelayMs?: number;
   runtimeRoot?: string;
   claudeConfigDir?: string;
   transcriptFilePath?: string;
@@ -51,7 +54,9 @@ export class ClaudeRuntime {
   private currentClaudeSessionId: string;
   private readonly spawnPty: SpawnPty;
   private readonly startupTimeoutMs: number;
+  private readonly readinessTimeoutMs: number;
   private readonly cancelTimeoutMs: number;
+  private readonly submitDelayMs: number;
   private readonly runtimeRoot: string;
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
@@ -98,7 +103,9 @@ export class ClaudeRuntime {
     this.interactions = new InteractionBridge(sessionId, cwd, connection);
     this.spawnPty = dependencies.spawnPty ?? nodePty.spawn;
     this.startupTimeoutMs = dependencies.startupTimeoutMs ?? STARTUP_TIMEOUT_MS;
+    this.readinessTimeoutMs = dependencies.readinessTimeoutMs ?? STARTUP_TIMEOUT_MS;
     this.cancelTimeoutMs = dependencies.cancelTimeoutMs ?? CANCEL_TIMEOUT_MS;
+    this.submitDelayMs = dependencies.submitDelayMs ?? SUBMIT_DELAY_MS;
     this.runtimeRoot = dependencies.runtimeRoot ?? os.tmpdir();
     this.translator = dependencies.translator ?? new TranscriptTranslator(sessionId, cwd, connection);
     this.transcript = this.createTranscriptWatcher(claudeSessionId, dependencies.transcriptFilePath);
@@ -123,7 +130,9 @@ export class ClaudeRuntime {
     this.cancelRequested = false;
     this.interactions.beginTurn();
     this.assistantBaseline = this.translator.assistantChunks;
-    this.pty?.write(`${BRACKETED_PASTE_START}${prompt.text}${BRACKETED_PASTE_END}\r`);
+    this.pty?.write(`${BRACKETED_PASTE_START}${prompt.text}${BRACKETED_PASTE_END}`);
+    await delay(this.submitDelayMs);
+    if (!this.cancelRequested) this.pty?.write("\r");
     try {
       const result = await turn.promise;
       if (result.assistantMessage) {
@@ -156,8 +165,6 @@ export class ClaudeRuntime {
     if (!turn) return;
     this.cancelRequested = true;
     this.interactions.cancelPending();
-    this.intentionalExit?.resolve();
-    this.intentionalExit = null;
     this.pty?.write(ESCAPE);
     if (this.cancelTimer) clearTimeout(this.cancelTimer);
     this.cancelTimer = setTimeout(() => void this.finishCancelled(), this.cancelTimeoutMs);
@@ -170,6 +177,8 @@ export class ClaudeRuntime {
     this.cancelTimer = null;
     this.ready?.reject(new Error(`Session ${this.sessionId} closed before Claude became ready`));
     this.ready = null;
+    this.intentionalExit?.resolve();
+    this.intentionalExit = null;
     this.finishTurn({ response: { stopReason: "cancelled" } });
     this.interactions.cancelPending();
     this.hookRegistration?.unregister();
@@ -190,6 +199,7 @@ export class ClaudeRuntime {
 
   private async ensureStarted(): Promise<void> {
     if (this.pty) return;
+    this.screen.reset();
     await this.hooks.start();
     this.runtimeDirectory = await mkdtemp(runtimePrefix(this.runtimeRoot));
     await chmod(this.runtimeDirectory, 0o700);
@@ -229,6 +239,7 @@ export class ClaudeRuntime {
     } finally {
       this.ready = null;
     }
+    await this.waitForTerminalReady();
     await this.transcript.start();
     this.resumeNextLaunch = true;
     writeLog({ level: "info", message: "Started interactive Claude session", sessionId: this.sessionId, pid: this.pty?.pid, cwd: this.cwd });
@@ -384,6 +395,16 @@ export class ClaudeRuntime {
     await this.transcript.close();
     await this.removeRuntimeDirectory();
   }
+
+  private async waitForTerminalReady(): Promise<void> {
+    if (this.readinessTimeoutMs === 0) return;
+    const deadline = Date.now() + this.readinessTimeoutMs;
+    while (Date.now() < deadline) {
+      if (isReadyScreen(this.screen.snapshot())) return;
+      await delay(25);
+    }
+    await this.failedStartup(`Claude completed its SessionStart hook but its interactive prompt did not become ready within ${this.readinessTimeoutMs}ms. Check the terminal output:\n${this.screen.snapshot()}`);
+  }
 }
 
 function createHookSettings(command: string): Record<string, unknown> {
@@ -422,6 +443,10 @@ function selectionArgs(model: string, mode: string): string[] {
   return args;
 }
 
+function isReadyScreen(screen: string): boolean {
+  return /\?\s+for shortcuts|\d+(?:\.\d+)?[km]?\/\d+(?:\.\d+)?[km]? tokens|(?:auto|plan|accept edits|manual) mode on|(^|\n)\s*❯\s*($|\n)/i.test(screen);
+}
+
 async function withTimeout<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   try {
@@ -434,6 +459,10 @@ async function withTimeout<T>(promise: Promise<T>, milliseconds: number, message
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function asString(value: unknown): string | undefined {

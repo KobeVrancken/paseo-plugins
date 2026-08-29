@@ -12,6 +12,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "diagnose": "pnpm build && ./bin/claude-tty-acp --diagnose",
+    "smoke:live": "pnpm build && node dist/live-smoke.js",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"src/**/*.test.ts\""
   },

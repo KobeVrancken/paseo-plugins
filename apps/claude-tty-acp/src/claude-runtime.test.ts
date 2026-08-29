@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -60,7 +60,7 @@ function createConnection(updates: SessionNotification[]): AgentSideConnection {
   } as AgentSideConnection;
 }
 
-test("starts isolated interactive PTYs and completes parallel turns through hooks", async () => {
+test("keeps three parallel PTYs, hooks, cancellation, and attachments isolated", async () => {
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-test-"));
   const spawns: SpawnRecord[] = [];
   const updates: SessionNotification[] = [];
@@ -72,29 +72,46 @@ test("starts isolated interactive PTYs and completes parallel turns through hook
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500 });
+  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0 });
 
   try {
     const first = await agent.newSession({ cwd: "/work/one", mcpServers: [] });
     const second = await agent.newSession({ cwd: "/work/two", mcpServers: [] });
+    const third = await agent.newSession({ cwd: "/work/three", mcpServers: [] });
     const firstTurn = agent.prompt({ sessionId: first.sessionId, prompt: [{ type: "text", text: "first $(safe)" }] });
     const secondTurn = agent.prompt({ sessionId: second.sessionId, prompt: [{ type: "text", text: "second" }] });
-    await waitFor(() => spawns.length === 2 && spawns.every((spawn) => spawn.pty.writes.length === 1));
+    const thirdTurn = agent.prompt({
+      sessionId: third.sessionId,
+      prompt: [
+        { type: "text", text: "third" },
+        { type: "image", mimeType: "image/png", data: Buffer.from("third-image").toString("base64") },
+      ],
+    });
+    await waitFor(() => spawns.length === 3 && spawns.every((spawn) => spawn.pty.writes.length === 2));
 
     const firstSpawn = spawns.find((spawn) => spawn.args[1] === first.sessionId);
     const secondSpawn = spawns.find((spawn) => spawn.args[1] === second.sessionId);
+    const thirdSpawn = spawns.find((spawn) => spawn.args[1] === third.sessionId);
     assert.equal(firstSpawn?.file, "claude");
     assert.deepEqual(firstSpawn?.args.slice(0, 2), ["--session-id", first.sessionId]);
     assert.equal(firstSpawn?.options.cwd, "/work/one");
     assert.equal(secondSpawn?.options.cwd, "/work/two");
-    assert.equal(firstSpawn?.pty.writes[0], "\u001b[200~first $(safe)\u001b[201~\r");
-    assert.equal(secondSpawn?.pty.writes[0], "\u001b[200~second\u001b[201~\r");
+    assert.equal(thirdSpawn?.options.cwd, "/work/three");
+    assert.equal(firstSpawn?.pty.writes.join(""), "\u001b[200~first $(safe)\u001b[201~\r");
+    assert.equal(secondSpawn?.pty.writes.join(""), "\u001b[200~second\u001b[201~\r");
+    const attachment = /@(\/[^\u001b\n]+\.png)/.exec(thirdSpawn?.pty.writes[0] ?? "")?.[1];
+    assert.ok(attachment);
+    assert.equal(path.dirname(attachment), path.dirname(thirdSpawn!.args.at(-1)!));
+    assert.notEqual(path.dirname(attachment), path.dirname(firstSpawn!.args.at(-1)!));
 
+    await agent.cancel({ sessionId: second.sessionId });
     await Promise.all([
       agent.hooks.dispatch({ hook_event_name: "Stop", session_id: first.sessionId, last_assistant_message: "one done" }),
       agent.hooks.dispatch({ hook_event_name: "Stop", session_id: second.sessionId, last_assistant_message: "two done" }),
+      agent.hooks.dispatch({ hook_event_name: "Stop", session_id: third.sessionId, last_assistant_message: "three done" }),
     ]);
-    assert.deepEqual(await Promise.all([firstTurn, secondTurn]), [{ stopReason: "end_turn" }, { stopReason: "end_turn" }]);
+    assert.deepEqual(await Promise.all([firstTurn, secondTurn, thirdTurn]), [{ stopReason: "end_turn" }, { stopReason: "cancelled" }, { stopReason: "end_turn" }]);
+    await assert.rejects(stat(attachment), /ENOENT/);
     assert.deepEqual(
       updates.map((notification) => notification.update.sessionUpdate).filter((update) => update !== "available_commands_update"),
       ["agent_message_chunk", "agent_message_chunk"],
@@ -117,12 +134,12 @@ test("cancels an active turn with Escape", async () => {
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return spawned;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, cancelTimeoutMs: 5 });
+  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, cancelTimeoutMs: 5, submitDelayMs: 0 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/cancel", mcpServers: [] });
     const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "cancel me" }] });
-    await waitFor(() => spawned !== null && spawned.writes.length === 1);
+    await waitFor(() => spawned !== null && spawned.writes.length === 2);
     await agent.cancel({ sessionId: session.sessionId });
     assert.deepEqual(await turn, { stopReason: "cancelled" });
     assert.equal((spawned as FakePty | null)?.writes.at(-1), "\u001b");
@@ -140,6 +157,8 @@ test("fails closed when Claude never completes the startup hook", async () => {
     runtimeRoot,
     stateDirectory: path.join(runtimeRoot, "state"),
     startupTimeoutMs: 5,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
   });
 
   try {
@@ -171,14 +190,14 @@ test("applies native model and mode controls and restarts an idle session", asyn
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500 });
+  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0 });
 
   try {
     const created = await agent.newSession({ cwd: "/work/controls", mcpServers: [] });
     await agent.unstable_setSessionModel({ sessionId: created.sessionId, modelId: "opus" });
     await agent.setSessionMode({ sessionId: created.sessionId, modeId: "plan" });
     const turn = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "plan it" }] });
-    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 1);
+    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
     assert.deepEqual(spawns[0]!.args.slice(0, 6), ["--session-id", created.sessionId, "--model", "opus", "--permission-mode", "plan"]);
     await assert.rejects(agent.setSessionMode({ sessionId: created.sessionId, modeId: "auto" }), /active turn/);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: created.sessionId, last_assistant_message: "planned" });

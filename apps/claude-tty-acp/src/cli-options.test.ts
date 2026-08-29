@@ -13,6 +13,10 @@ test("prints help and version without starting ACP", () => {
   assert.deepEqual(parseCliArgs(["--version"]), { kind: "print", text: "0.1.0" });
 });
 
+test("selects host diagnostics", () => {
+  assert.deepEqual(parseCliArgs(["--diagnose"]), { kind: "diagnose" });
+});
+
 test("rejects unknown flags", () => {
   assert.throws(() => parseCliArgs(["--wat"]), /Unknown arguments/);
 });

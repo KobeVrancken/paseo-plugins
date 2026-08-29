@@ -22,6 +22,10 @@ export class TerminalScreen {
     return lines.join("\n").slice(-8_000);
   }
 
+  reset(): void {
+    this.terminal.reset();
+  }
+
   dispose(): void {
     this.terminal.dispose();
   }

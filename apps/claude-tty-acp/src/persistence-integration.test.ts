@@ -77,7 +77,7 @@ test("loads history lazily, resumes Claude, and follows clear session rotation",
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: resumedId, source: "resume", transcript_path: transcriptPath }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(connection, { claudeConfigDir: configDirectory, runtimeRoot, stateDirectory, spawnPty, startupTimeoutMs: 500 });
+  agent = new ClaudeTtyAgent(connection, { claudeConfigDir: configDirectory, runtimeRoot, stateDirectory, spawnPty, startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0 });
 
   try {
     await agent.loadSession({ sessionId: acpSessionId, cwd, mcpServers: [] });
@@ -85,7 +85,7 @@ test("loads history lazily, resumes Claude, and follows clear session rotation",
     assert.deepEqual(updates.map((notification) => notification.update.sessionUpdate), ["user_message_chunk", "agent_message_chunk", "available_commands_update"]);
 
     const turn = agent.prompt({ sessionId: acpSessionId, prompt: [{ type: "text", text: "/clear" }] });
-    await waitFor(() => pty.writes.length === 1);
+    await waitFor(() => pty.writes.length === 2);
     assert.deepEqual(spawns[0]?.slice(0, 2), ["--resume", claudeSessionId]);
     await agent.hooks.dispatch(
       { hook_event_name: "SessionStart", session_id: nextClaudeSessionId, source: "clear", transcript_path: path.join(projectDirectory, `${nextClaudeSessionId}.jsonl`) },
