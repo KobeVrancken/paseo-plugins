@@ -11,6 +11,7 @@ Extensions for [Paseo](https://github.com/getpaseo/paseo), organized in a pnpm w
 | [Claude Code panel (deprecated)](plugins/claude-code-panel) | Legacy panel superseded by the Interactive Claude Code ACP app. |
 | [Discord Rich Presence](plugins/discord-rich-presence) | Show your current Paseo activity on Discord. |
 | [Catppuccin theme](plugins/catppuccin-theme) | Add all four Catppuccin flavours as app themes. |
+| [Claude Code (interactive)](plugins/claude-tty) | Install, diagnose, and manage the Interactive Claude Code ACP adapter on the daemon host. |
 
 Each app and plugin has its own README with installation, settings, and development details.
 

@@ -31,6 +31,9 @@ It is deprecated in favour of this app, still works for existing installations, 
 Setup is host-local: the adapter runs wherever the Paseo daemon runs, so repeat every step below on each host that should offer Claude.
 See [Multiple hosts](#multiple-hosts) for what that means in practice.
 
+The [Claude Code plugin](../../plugins/claude-tty) does all of this from Paseo's sidebar, on whichever host is selected, and manages the provider entry afterwards.
+Install it instead if you would rather not run the steps below by hand; you still have to authenticate Claude yourself, as in [step 2](#2-authenticate-claude).
+
 ### 1. Build the adapter
 
 ```sh

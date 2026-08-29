@@ -1,0 +1,54 @@
+# Working on this plugin
+
+Run `paseo plugin reload claude-tty` after every change, then `paseo plugin logs claude-tty`.
+The reload is the only compile check of the two bundles the daemon builds.
+Do this yourself; never leave it to the user.
+
+`paseo plugin install <directory>` works against a 0.6 daemon and writes the `plugins` entry itself, but the plugin only loads once `pluginsEnabled` is true in `~/.paseo/config.json` and `paseo reload` has run.
+
+To exercise a handler without a client, invoke it over the daemon's own plugin RPC:
+
+```js
+import { connectToDaemon } from "/usr/lib/node_modules/@getpaseo/cli/dist/utils/client.js";
+const client = await connectToDaemon({});
+console.log(await client.invokePluginRpc("claude-tty", "claude-tty.status", {}));
+```
+
+That is the only way to see what a step machine or a filesystem guard actually does, so use it rather than reasoning about the code.
+
+## The checkout is not discoverable
+
+The plugin manages the adapter in the checkout it was installed from, and a bundled plugin has no path of its own to walk up from.
+`paseo.config.get().plugins["claude-tty"].path` is the one source, and `apps/claude-tty-acp/package.json` has to exist two levels above it before anything else is worth reporting.
+
+## Constraints that are not obvious
+
+The daemon's `PATH` is not your shell's.
+A systemd daemon typically has `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin` and nothing else, so pnpm and Claude are routinely missing from it.
+That is a reading the surface reports, not an error to hide, and every spawn failure has to read as a sentence rather than a stack trace.
+
+`config.patch` applies to the live provider registry without a daemon restart, because `agents.providers` is reloadable and the daemon stages the change into the registry as it persists it.
+`deepMerge` replaces arrays wholesale but keeps keys the patch does not mention, so repointing an entry has to `removeProviders` first and re-add, or a stale `env` or `models` survives the rewrite.
+The daemon validates a custom provider on its way in: the ID must match `^[a-z][a-z0-9-]*$`, `extends` must be a builtin or `acp`, and `extends: "acp"` requires a non-empty `command`.
+
+A pnpm install outlives any request, so the installer's job lives in module scope and the client polls it.
+Module scope is the only state a plugin process has between RPC calls.
+
+Session and lock liveness is decided with signal 0 exactly the way the adapter decides it, so the two never disagree about which lock is stale.
+
+## index.ts is AST-filtered
+
+The daemon builds both bundles from the entry, deleting `plugin.handle(...)` and `*.server` imports for the client, and `plugin.add*` and `*.client` imports for the server.
+The deletion is textual, so only mention a server module inside `plugin.handle(...)` and a client module inside `plugin.add*`.
+The entry must default-export one function taking one named parameter with a block body, and RPC names must match `^[a-z][a-z0-9._-]*$`.
+
+## The panel is styled off paseo's own scale
+
+`src/client/theme.client.ts` and `src/client/ui.client.tsx` are copies of the Discord plugin's, because the host hands plugins six flat colours and no metrics and each plugin directory has to bundle from its own root.
+Build new controls out of those tokens rather than out of literals, and keep the two files in step with their originals.
+
+## Tests
+
+`pnpm test` is `node --test "src/**/*.test.ts"` through Node's type stripping, so no TypeScript that has to be emitted and relative imports keep their `.ts` extension.
+Tests must not import `contracts.shared.ts`, because `@getpaseo/plugin/server` only exists inside the daemon — keep the decisions in modules the tests can reach.
+`@getpaseo/client` is pinned to 0.6.1 here, not the 0.4 the other plugins use, because `paseo.config` and `paseo.providers` do not exist before that.
