@@ -122,6 +122,17 @@ Host-local file links become `@path` references.
 Audio and remote resource links are rejected with an explicit error.
 Claude keeps its own configured MCP servers, plugins, skills, permissions, and `CLAUDE.md` hierarchy; ACP-injected MCP servers are not supported.
 
+## Auto mode denial limit
+
+Auto mode decides permissions with a classifier, and after three consecutive or twenty total classifier denials Claude Code stops deciding and asks the person at the keyboard instead.
+That escalation deliberately bypasses every remote channel: it skips the `PermissionRequest` hook along with Claude's own bridge and channel callbacks, so the adapter is never consulted and Paseo shows no permission card.
+Claude waits at a dialog inside its PTY, no `Stop` hook follows, and the turn never finishes; the first escalation in a session denies itself after two minutes, and every later one waits indefinitely.
+While it waits, a new prompt is rejected because the session still has an active turn.
+
+Cancel the turn from Paseo to recover, which sends Escape into the PTY and dismisses the dialog.
+Stay in Default mode to avoid the limit entirely, because there every decision reaches the adapter through the `PermissionRequest` hook and Paseo can answer it.
+Claude Code does report the wait over its `Notification` hook, which the adapter does not register yet, so a future release can surface the dialog or end the turn with an explicit error instead of hanging.
+
 ## Diagnostics and development
 
 Check the host without starting ACP:
@@ -156,6 +167,7 @@ The live smoke test consumes normal Claude usage and asks Claude for a fixed too
 | Persisted session not found | Sessions are host-local; select the host that created it and verify `CLAUDE_TTY_ACP_STATE_DIR`. |
 | Session belongs to another cwd | Load it with its original absolute project path. |
 | Session already active | Close the other native agent connection; remove a lock only after verifying its recorded PID is dead. |
+| Turn never finishes in Auto mode | Claude is waiting at a keyboard-only dialog after the classifier denial limit; cancel the turn and prefer Default mode. |
 | PTY exits unexpectedly | Inspect structured adapter stderr and run Claude interactively in the same cwd and environment. |
 | Corrupt transcript or state | Preserve the file for diagnosis, then move only the named session JSON or transcript aside before retrying. |
 | Commands or plugins missing | Verify the daemon sees the expected `CLAUDE_CONFIG_DIR`, project `.claude` files, and enabled plugin settings. |
