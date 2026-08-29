@@ -1,8 +1,7 @@
 {
-  "name": "@paseo-plugins/claude-code-panel",
+  "name": "@paseo-plugins/claude-tty",
   "private": true,
   "version": "0.0.0",
-  "deprecated": "Use @paseo-plugins/claude-tty-acp instead.",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --test \"src/**/*.test.ts\""

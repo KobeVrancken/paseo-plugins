@@ -1,14 +1,19 @@
-# Paseo plugins
+# Paseo plugins and apps
 
-Plugins for [Paseo](https://github.com/getpaseo/paseo), organized in a pnpm workspace.
+Extensions for [Paseo](https://github.com/getpaseo/paseo), organized in a pnpm workspace.
+
+| App | Description |
+| --- | --- |
+| [Interactive Claude Code ACP](apps/claude-tty-acp) | Run genuine interactive Claude Code sessions in Paseo's native agent view. |
 
 | Plugin | Description |
 | --- | --- |
-| [Claude Code panel](plugins/claude-code-panel) | View and control local Claude Code CLI sessions from Paseo. |
+| [Claude Code panel (deprecated)](plugins/claude-code-panel) | Legacy panel superseded by the Interactive Claude Code ACP app. |
 | [Discord Rich Presence](plugins/discord-rich-presence) | Show your current Paseo activity on Discord. |
 | [Catppuccin theme](plugins/catppuccin-theme) | Add all four Catppuccin flavours as app themes. |
+| [Claude TTY](plugins/claude-tty) | Install, diagnose, and manage the Interactive Claude Code ACP adapter on the daemon host. |
 
-Each plugin has its own README with installation, settings, and development details.
+Each app and plugin has its own README with installation, settings, and development details.
 
 ## Local development
 
