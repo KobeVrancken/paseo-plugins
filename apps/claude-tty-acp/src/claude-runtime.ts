@@ -17,7 +17,9 @@ import { TranscriptTranslator } from "./transcript-translator.ts";
 import { TranscriptWatcher } from "./transcript-watcher.ts";
 
 const STARTUP_TIMEOUT_MS = 15_000;
-const CANCEL_TIMEOUT_MS = 2_000;
+// Paseo replaces a prompt sent mid-turn by cancelling the running turn and waiting 2s for session/prompt to answer, then starts the replacement anyway and fails it when the old turn is still open.
+// This fallback plus the transcript flush behind it has to settle well inside that budget.
+const CANCEL_TIMEOUT_MS = 600;
 const SUBMIT_DELAY_MS = 150;
 const BRACKETED_PASTE_START = "\u001b[200~";
 const BRACKETED_PASTE_END = "\u001b[201~";
@@ -170,8 +172,13 @@ export class ClaudeRuntime {
     if (!turn) return;
     this.cancelRequested = true;
     this.interactions.cancelPending();
-    this.pty?.write(ESCAPE);
     if (this.cancelTimer) clearTimeout(this.cancelTimer);
+    if (!this.pty) {
+      this.cancelTimer = null;
+      void this.finishCancelled();
+      return;
+    }
+    this.pty.write(ESCAPE);
     this.cancelTimer = setTimeout(() => void this.finishCancelled(), this.cancelTimeoutMs);
   }
 
