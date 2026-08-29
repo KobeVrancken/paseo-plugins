@@ -39,7 +39,7 @@ export default function contribute(plugin: PluginContext) {
 
   plugin.addCommandCenterItem({
     id: "claude-tty-install",
-    title: "Claude TTY adapter: install or update",
+    title: "Claude TTY: install or update",
     icon: "Download",
     keywords: ["claude", "adapter", "acp", "install", "build", "provider"],
     context: "global",
@@ -51,7 +51,7 @@ export default function contribute(plugin: PluginContext) {
 
   plugin.addCommandCenterItem({
     id: "claude-tty-doctor",
-    title: "Claude TTY adapter: run diagnostics",
+    title: "Claude TTY: run diagnostics",
     icon: "Stethoscope",
     keywords: ["claude", "adapter", "acp", "diagnose", "doctor", "provider"],
     context: "global",
@@ -63,7 +63,7 @@ export default function contribute(plugin: PluginContext) {
 
   plugin.addCommandCenterItem({
     id: "claude-tty-release-stale-locks",
-    title: "Claude TTY adapter: release stale session locks",
+    title: "Claude TTY: release stale session locks",
     icon: "LockOpen",
     keywords: ["claude", "adapter", "acp", "lock", "session", "stale"],
     context: "global",
