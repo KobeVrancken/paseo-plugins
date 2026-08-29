@@ -262,6 +262,14 @@ Check a host without starting ACP:
 pnpm --filter @paseo-plugins/claude-tty-acp diagnose
 ```
 
+`--json` prints the same checks as one machine-readable line instead of the report, for a caller that wants to act on them rather than read them:
+
+```sh
+apps/claude-tty-acp/bin/claude-tty-acp --diagnose --json
+```
+
+The line is `{ "version", "ok", "checks": [{ "id", "label", "ok", "detail" }] }`, the check IDs are `node`, `claude`, `config` and `state`, and the exit code is 1 when any check fails, exactly as without `--json`.
+
 Run the automated checks, none of which consume Claude usage:
 
 ```sh

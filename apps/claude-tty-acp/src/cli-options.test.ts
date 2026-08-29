@@ -14,7 +14,18 @@ test("prints help and version without starting ACP", () => {
 });
 
 test("selects host diagnostics", () => {
-  assert.deepEqual(parseCliArgs(["--diagnose"]), { kind: "diagnose" });
+  assert.deepEqual(parseCliArgs(["--diagnose"]), { kind: "diagnose", json: false });
+});
+
+test("selects machine-readable diagnostics with the flags in either order", () => {
+  assert.deepEqual(parseCliArgs(["--diagnose", "--json"]), { kind: "diagnose", json: true });
+  assert.deepEqual(parseCliArgs(["--json", "--diagnose"]), { kind: "diagnose", json: true });
+});
+
+test("rejects --json without --diagnose", () => {
+  assert.throws(() => parseCliArgs(["--json"]), /Unknown arguments/);
+  assert.throws(() => parseCliArgs(["--json", "--json"]), /Unknown arguments/);
+  assert.throws(() => parseCliArgs(["--diagnose", "--diagnose"]), /Unknown arguments/);
 });
 
 test("rejects unknown flags", () => {
