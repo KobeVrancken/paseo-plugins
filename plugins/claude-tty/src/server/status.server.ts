@@ -1,22 +1,12 @@
 import type { PaseoApi } from "@getpaseo/client";
 import type { StatusPayload } from "../contracts.shared.ts";
-import {
-  adapterBinaryPath,
-  adapterEntryPath,
-  claudeCandidates,
-  defaultStateDirectory,
-  executableCandidates,
-} from "../paths.shared.ts";
+import { adapterBinaryPath, adapterEntryPath, claudeCandidates, defaultStateDirectory } from "../paths.shared.ts";
 import { PROVIDER_ID, classifyProviderEntry, commandOf, providerEntryFor } from "../provider.shared.ts";
 import { fileExists, firstExecutable, resolveRepoRoot } from "./paths.server.ts";
 
 export async function readStatus(paseo: PaseoApi): Promise<StatusPayload> {
-  const [repo, pnpmBinary, claudeBinary] = await Promise.all([
-    resolveRepoRoot(paseo),
-    firstExecutable(executableCandidates("pnpm")),
-    firstExecutable(claudeCandidates()),
-  ]);
-  const host = { node: process.version, pnpm: pnpmBinary, claude: claudeBinary };
+  const [repo, claudeBinary] = await Promise.all([resolveRepoRoot(paseo), firstExecutable(claudeCandidates())]);
+  const host = { node: process.version, claude: claudeBinary };
   const stateDirectory = defaultStateDirectory();
 
   if (repo.root === null) {

@@ -14,13 +14,20 @@ _None yet._
 paseo plugin install "/absolute/path/to/paseo-plugins/plugins/claude-tty"
 ```
 
-The plugin manages the checkout it was itself installed from, so install it from the same clone that holds `apps/claude-tty-acp`. Then open **Claude TTY** in the Paseo sidebar and press **Install**.
+The plugin manages the checkout it was itself installed from, so install it from the same clone that holds `apps/claude-tty-acp`. Build the adapter there first:
 
-That runs `pnpm install --frozen-lockfile`, builds the adapter, runs its host checks, registers the `traecli` provider, and asks Paseo to re-probe its providers. No daemon restart is needed. The adapter README explains [why the provider ID is borrowed](../../apps/claude-tty-acp/README.md#slash-commands-need-a-borrowed-provider-id).
+```sh
+pnpm install --frozen-lockfile
+pnpm --filter @paseo-plugins/claude-tty-acp build
+```
+
+Then open **Claude TTY** in the Paseo sidebar and press **Install**.
+
+That checks the adapter is built, runs its host checks, registers the `traecli` provider, and asks Paseo to re-probe its providers. No daemon restart is needed. The adapter README explains [why the provider ID is borrowed](../../apps/claude-tty-acp/README.md#slash-commands-need-a-borrowed-provider-id).
 
 Two things stay yours to arrange, because the plugin cannot do them for you:
 
-- **pnpm on the daemon's PATH.** A daemon started by systemd usually has a shorter `PATH` than your shell. The surface says whether it can see pnpm before you press anything.
+- **A built adapter.** The plugin never builds one: it reports whether `apps/claude-tty-acp/dist/cli.js` exists and refuses to register a provider pointing at an executable that would not start. Rebuild it by hand after pulling, then press **Install** again.
 - **An authenticated Claude.** Run `claude` interactively as the user the daemon runs as. The plugin never touches Claude's configuration, credentials, or transcripts.
 
 Everything is host-local: selecting another host in Paseo shows that host's own answer, and each host is installed separately.

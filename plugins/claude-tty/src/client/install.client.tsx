@@ -131,10 +131,10 @@ function stepColor(palette: Palette, step: InstallStep): string {
 }
 
 function primaryLabel(status: StatusPayload): string {
-  return status.adapter.built && status.provider.state === "matching" ? "Rebuild and re-check" : "Install";
+  return status.adapter.built && status.provider.state === "matching" ? "Re-check" : "Install";
 }
 
 function intro(status: StatusPayload): string {
   if (status.problem !== null) return "Nothing can run until this plugin knows which checkout it belongs to.";
-  return "Installs the workspace dependencies, builds the adapter, checks this host, and registers the provider. Nothing here touches Claude's own configuration or credentials.";
+  return "Checks that the adapter is built, runs its host checks, and registers the provider. Building the adapter is yours to do; nothing here touches Claude's own configuration or credentials.";
 }

@@ -22,7 +22,6 @@ export const StatusSchema = z.object({
   }),
   host: z.object({
     node: z.string(),
-    pnpm: z.string().nullable(),
     claude: z.string().nullable(),
   }),
   stateDirectory: z.string(),

@@ -16,7 +16,7 @@ test("reads the report the adapter prints", () => {
 });
 
 test("ignores whatever the daemon's environment printed first", () => {
-  assert.deepEqual(parseDiagnosticsReport(`Corepack is preparing pnpm\n${JSON.stringify(report)}\n`), report);
+  assert.deepEqual(parseDiagnosticsReport(`(node:1) ExperimentalWarning: Type Stripping is an experimental feature\n${JSON.stringify(report)}\n`), report);
 });
 
 test("rejects output that is not a report", () => {

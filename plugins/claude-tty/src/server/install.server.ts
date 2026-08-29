@@ -8,18 +8,16 @@ import {
   type StepOutcome,
 } from "../install.shared.ts";
 import { failedChecks, parseDiagnosticsReport } from "../diagnostics.shared.ts";
-import { ADAPTER_PACKAGE, adapterBinaryPath, adapterEntryPath, executableCandidates } from "../paths.shared.ts";
+import { ADAPTER_PACKAGE, adapterBinaryPath, adapterEntryPath } from "../paths.shared.ts";
 import { PROVIDER_ID, classifyProviderEntry, providerEntryFor } from "../provider.shared.ts";
 import { runCommand } from "./exec.server.ts";
 import { fileExists, firstExecutable, messageOf, resolveRepoRoot } from "./paths.server.ts";
 import { readProviderEntry } from "./status.server.ts";
 
-const DEPENDENCIES_TIMEOUT_MS = 15 * 60_000;
-const BUILD_TIMEOUT_MS = 10 * 60_000;
 const DIAGNOSE_TIMEOUT_MS = 60_000;
 
 /**
- * The client cannot hold a request open for a pnpm install, so the job lives here and is polled.
+ * The job outlives the request that starts it, so it lives here and is polled.
  * Module scope is the only state a plugin process has that survives between RPC calls.
  */
 let job: InstallJob | null = null;
@@ -48,25 +46,17 @@ async function runInstall(paseo: PaseoApi, options: { repair: boolean }): Promis
   });
   if (repo === null) return;
 
-  const pnpmBinary = await step("dependencies", async () => {
-    const binary = await firstExecutable(executableCandidates("pnpm"));
-    if (binary === null) {
+  const built = await step("adapter", async () => {
+    if (!(await fileExists(adapterEntryPath(repo)))) {
       return {
         ok: false,
-        detail: "pnpm is not on the Paseo daemon's PATH. Install it for the daemon's user, or start the daemon from a shell that can find it.",
+        detail: `The adapter is not built. Run "pnpm install --frozen-lockfile" and "pnpm --filter ${ADAPTER_PACKAGE} build" in ${repo}, then install again.`,
       };
     }
-    const result = await runCommand(binary, ["install", "--frozen-lockfile"], { cwd: repo, timeoutMs: DEPENDENCIES_TIMEOUT_MS });
-    return { ...outcomeOf(result, `${binary} install --frozen-lockfile`), value: binary };
-  });
-  if (pnpmBinary === null) return;
-
-  const built = await step("build", async () => {
-    const result = await runCommand(pnpmBinary, ["--filter", ADAPTER_PACKAGE, "build"], { cwd: repo, timeoutMs: BUILD_TIMEOUT_MS });
-    if (result.spawnError !== null || result.exitCode !== 0) return outcomeOf(result, "pnpm build");
-    return (await fileExists(adapterEntryPath(repo)))
-      ? { ...outcomeOf(result, adapterBinaryPath(repo)), value: adapterBinaryPath(repo) }
-      : { ...outcomeOf(result, `The build reported success but ${adapterEntryPath(repo)} does not exist.`), ok: false };
+    const binary = await firstExecutable([adapterBinaryPath(repo)]);
+    return binary === null
+      ? { ok: false, detail: `${adapterBinaryPath(repo)} is not executable.` }
+      : { ok: true, detail: binary, value: binary };
   });
   if (built === null) return;
 

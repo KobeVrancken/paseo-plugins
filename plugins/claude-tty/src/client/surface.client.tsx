@@ -9,14 +9,7 @@ import { InstallSection } from "./install.client.tsx";
 import { SessionsSection } from "./sessions.client.tsx";
 import { UninstallSection } from "./uninstall.client.tsx";
 import { MAX_CONTENT_WIDTH, fontSize, leading, spacing } from "./theme.client.ts";
-import {
-  Monospace,
-  ReadingRow,
-  adapterReading,
-  claudeReading,
-  pnpmReading,
-  providerReading,
-} from "./status.client.tsx";
+import { Monospace, ReadingRow, adapterReading, claudeReading, providerReading } from "./status.client.tsx";
 import { Card, Row, Section, usePalette } from "./ui.client.tsx";
 
 export const STATUS_QUERY_KEY = ["claude-tty", "status"];
@@ -98,7 +91,6 @@ export function ClaudeTtySurface({ theme, layout }: PluginSurfaceProps) {
         <Card palette={palette}>
           <Row palette={palette} title="Node.js" hint={status.host.node} />
           <ReadingRow palette={palette} title="Claude Code" reading={claudeReading(status)} divided />
-          <ReadingRow palette={palette} title="pnpm" reading={pnpmReading(status)} divided />
           <Row palette={palette} title="State directory" hint={status.stateDirectory} divided />
         </Card>
         <Text

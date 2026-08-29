@@ -34,15 +34,15 @@ test("strips a trailing separator from the installed plugin path", () => {
 });
 
 test("lists PATH candidates in the order a shell would try them", () => {
-  assert.deepEqual(executableCandidates("pnpm", { PATH: ["/usr/local/bin", "", "/usr/bin"].join(path.delimiter) }), [
-    "/usr/local/bin/pnpm",
-    "/usr/bin/pnpm",
+  assert.deepEqual(executableCandidates("claude", { PATH: ["/usr/local/bin", "", "/usr/bin"].join(path.delimiter) }), [
+    "/usr/local/bin/claude",
+    "/usr/bin/claude",
   ]);
-  assert.deepEqual(executableCandidates("pnpm", {}), []);
+  assert.deepEqual(executableCandidates("claude", {}), []);
 });
 
 test("takes a command containing a separator as the only candidate", () => {
-  assert.deepEqual(executableCandidates("/opt/bin/pnpm", { PATH: "/usr/bin" }), ["/opt/bin/pnpm"]);
+  assert.deepEqual(executableCandidates("/opt/bin/claude", { PATH: "/usr/bin" }), ["/opt/bin/claude"]);
 });
 
 test("prefers CLAUDE_BIN over PATH, as the adapter does", () => {

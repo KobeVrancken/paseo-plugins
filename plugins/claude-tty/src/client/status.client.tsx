@@ -29,22 +29,16 @@ export function providerReading(status: StatusPayload): Reading {
 }
 
 export function adapterReading(status: StatusPayload): Reading {
-  if (status.adapter.binary === null) return { hint: "No checkout to build", tone: "muted" };
+  if (status.adapter.binary === null) return { hint: "No checkout to look in", tone: "muted" };
   return status.adapter.built
     ? { hint: status.adapter.binary, tone: "ok" }
-    : { hint: "Not built yet", tone: "muted" };
+    : { hint: "Not built yet — build it in the checkout", tone: "muted" };
 }
 
 export function claudeReading(status: StatusPayload): Reading {
   return status.host.claude === null
     ? { hint: "Not found — set CLAUDE_BIN, or put it on the daemon's PATH", tone: "danger" }
     : { hint: status.host.claude, tone: "ok" };
-}
-
-export function pnpmReading(status: StatusPayload): Reading {
-  return status.host.pnpm === null
-    ? { hint: "Not on the daemon's PATH — the adapter cannot be built from here", tone: "danger" }
-    : { hint: status.host.pnpm, tone: "ok" };
 }
 
 /** A settings row whose hint is a reading, marked with the dot paseo uses for provider health. */

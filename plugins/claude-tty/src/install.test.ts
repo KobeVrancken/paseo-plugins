@@ -43,16 +43,16 @@ test("finishes the job only once the last step is ok", () => {
 
 test("stops at the first failure and leaves the rest pending", () => {
   const job = withStepSettled(
-    withStepRunning(startJob(1), "build"),
-    "build",
-    { ok: false, detail: "tsc exited 2", stderr: "error TS1005", exitCode: 2 },
+    withStepRunning(startJob(1), "diagnose"),
+    "diagnose",
+    { ok: false, detail: "--diagnose --json exited 2", stderr: "claude is not on PATH", exitCode: 2 },
     4,
   );
   assert.equal(job.state, "failed");
   assert.equal(job.finishedAt, 4);
-  assert.equal(failedStep(job)?.id, "build");
+  assert.equal(failedStep(job)?.id, "diagnose");
   assert.equal(failedStep(job)?.exitCode, 2);
-  assert.ok(job.steps.filter((step) => step.id !== "build").every((step) => step.state === "pending"));
+  assert.ok(job.steps.filter((step) => step.id !== "diagnose").every((step) => step.state === "pending"));
 });
 
 test("names the step in flight", () => {
@@ -62,12 +62,12 @@ test("names the step in flight", () => {
 });
 
 test("clears an earlier attempt's output when a step restarts", () => {
-  const failed = withStepSettled(startJob(1), "build", { ok: false, detail: "no", stderr: "boom", exitCode: 1 }, 2);
-  const retried = withStepRunning(failed, "build");
-  assert.equal(stepOutput(retried.steps.find((step) => step.id === "build")!), "");
+  const failed = withStepSettled(startJob(1), "diagnose", { ok: false, detail: "no", stderr: "boom", exitCode: 1 }, 2);
+  const retried = withStepRunning(failed, "diagnose");
+  assert.equal(stepOutput(retried.steps.find((step) => step.id === "diagnose")!), "");
 });
 
 test("reads a step's output the way a terminal showed it", () => {
-  const job = withStepSettled(startJob(1), "build", { ok: false, detail: "no", stdout: "out\n", stderr: "err\n" }, 2);
-  assert.equal(stepOutput(job.steps.find((step) => step.id === "build")!), "out\nerr");
+  const job = withStepSettled(startJob(1), "diagnose", { ok: false, detail: "no", stdout: "out\n", stderr: "err\n" }, 2);
+  assert.equal(stepOutput(job.steps.find((step) => step.id === "diagnose")!), "out\nerr");
 });

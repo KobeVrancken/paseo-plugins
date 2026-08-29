@@ -24,14 +24,17 @@ The plugin manages the adapter in the checkout it was installed from, and a bund
 ## Constraints that are not obvious
 
 The daemon's `PATH` is not your shell's.
-A systemd daemon typically has `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin` and nothing else, so pnpm and Claude are routinely missing from it.
+A systemd daemon typically has `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin` and nothing else, so Claude is routinely missing from it.
 That is a reading the surface reports, not an error to hide, and every spawn failure has to read as a sentence rather than a stack trace.
+
+The plugin never builds the adapter, because a daemon that cannot see a package manager cannot be made to.
+It reports whether `dist/cli.js` is there and leaves the build to whoever owns the checkout.
 
 `config.patch` applies to the live provider registry without a daemon restart, because `agents.providers` is reloadable and the daemon stages the change into the registry as it persists it.
 `deepMerge` replaces arrays wholesale but keeps keys the patch does not mention, so repointing an entry has to `removeProviders` first and re-add, or a stale `env` or `models` survives the rewrite.
 The daemon validates a custom provider on its way in: the ID must match `^[a-z][a-z0-9-]*$`, `extends` must be a builtin or `acp`, and `extends: "acp"` requires a non-empty `command`.
 
-A pnpm install outlives any request, so the installer's job lives in module scope and the client polls it.
+The installer's job outlives the request that starts it, so it lives in module scope and the client polls it.
 Module scope is the only state a plugin process has between RPC calls.
 
 Session and lock liveness is decided with signal 0 exactly the way the adapter decides it, so the two never disagree about which lock is stale.

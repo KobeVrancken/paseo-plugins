@@ -1,11 +1,10 @@
-export const INSTALL_STEP_IDS = ["repo", "dependencies", "build", "diagnose", "register", "refresh"] as const;
+export const INSTALL_STEP_IDS = ["repo", "adapter", "diagnose", "register", "refresh"] as const;
 
 export type InstallStepId = (typeof INSTALL_STEP_IDS)[number];
 
 const STEP_LABELS: Record<InstallStepId, string> = {
   repo: "Locate the checkout",
-  dependencies: "Install workspace dependencies",
-  build: "Build the adapter",
+  adapter: "Find the built adapter",
   diagnose: "Check this host",
   register: "Register the provider",
   refresh: "Refresh Paseo's provider list",
