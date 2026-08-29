@@ -127,6 +127,51 @@ Images and embedded resources become mode-0600 host-local files for the duration
 Host-local file links become `@path` references.
 Audio and remote resource links are rejected with an explicit error.
 
+## How it works
+
+```text
+Paseo ──ACP over stdio──► claude-tty-acp ──keystrokes over a PTY──► claude
+                               ▲    ▲
+        hooks over loopback HTTP┘    └transcript JSONL, polled
+```
+
+The daemon starts one adapter process per provider connection, and that process speaks ACP as newline-delimited JSON on stdout while its structured logs go to stderr.
+Every session of that connection lives in that one process, and each session owns its own `claude` process in a PTY.
+
+A session starts empty: `session/new` returns an ID immediately and launches nothing, so a provider probe or an untouched draft never spawns Claude.
+The first prompt launches `claude --session-id <id>` and later launches reuse `claude --resume <id>`, with the model and mode selectors translated into `--model` and `--permission-mode`.
+
+Every launch gets a private runtime directory holding a generated `settings.json` and hook client, passed with `--settings`, so the adapter registers its hooks without touching the user's Claude configuration.
+Startup is complete once the `SessionStart` hook has arrived and Claude's interactive prompt appears on a headless xterm screen that mirrors the PTY; that screen is used only for readiness and for the terminal snapshot in startup errors.
+
+Slash commands are the one thing the adapter never asks Claude for: an interactive session has no way to list them, so the adapter walks the user's, the project's and every enabled plugin's command and skill directories itself and publishes the result as ACP available commands.
+
+### Prompts go in as keystrokes
+
+A prompt is flattened into one block of text: images and embedded resources become files in the runtime directory referenced as `@path`, and host-local resource links become `@path` directly.
+The adapter writes that text into the PTY wrapped in bracketed paste, waits briefly, then writes Enter, exactly as a person pasting into the terminal would.
+Cancellation is the same kind of impersonation: an Escape keystroke, plus a short fallback that ends the turn when no `Stop` hook follows.
+Changing the model or mode while idle sends Ctrl-D, waits for the process to exit, and relaunches with `--resume`, which is why the change survives as a real flag rather than an in-band command.
+
+### Output comes out of the transcript
+
+Nothing that reaches Paseo is scraped from the terminal.
+Claude appends its own JSONL transcript under its projects directory, and the adapter tails that file by byte offset every 40ms, re-reading from the start when the first bytes of the file change because Claude rewrote or replaced it.
+A translator turns each record into an ACP session update — user and agent chunks, thinking, tool calls with diffs and file locations, `TodoWrite` into a plan, token usage into a context-window update — and dedupes by record key so re-reads and history replay never emit the same thing twice.
+Loading a persisted session runs that translator over the whole file to rebuild the conversation, and still launches nothing until the next prompt.
+
+### Hooks carry everything interactive
+
+The adapter runs a single loopback HTTP server whose URL carries a per-process secret and a per-session route, and the generated hook client posts each hook payload to it and hands the JSON answer back to Claude.
+`Stop`, `StopFailure` and `SessionEnd` end the turn with `end_turn`, `refusal` and `cancelled`, each first flushing the transcript until the file stops growing so the updates land before the turn does.
+`PermissionRequest` becomes an ACP permission request offering Allow once, Claude's own permission suggestions as always-allow options, and Deny, and the answer becomes the hook's decision.
+`PreToolUse` intercepts two tools before they run: `AskUserQuestion` renders as permission cards, and `ExitPlanMode` renders as a plan approval.
+
+### State on disk
+
+The state directory holds one JSON file per session, mapping the Paseo session ID to Claude's own session ID, cwd, model and mode, plus a lock file naming the process that has the session open.
+Runtime directories live in the host's temporary directory, record their owner PID, and are swept on the next adapter startup if that process is gone.
+
 ## Limitations
 
 Claude keeps its own MCP servers, plugins, skills, permissions, and `CLAUDE.md` hierarchy, but MCP servers injected by Paseo over ACP are rejected, as explained in [step 3](#3-register-the-provider).
