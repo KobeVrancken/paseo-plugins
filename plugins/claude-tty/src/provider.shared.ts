@@ -7,7 +7,7 @@ import { ADAPTER_BINARY_NAME, adapterBinaryPath } from "./paths.shared.ts";
  */
 export const PROVIDER_ID = "traecli";
 
-export const PROVIDER_LABEL = "Claude Code (interactive)";
+export const PROVIDER_LABEL = "Claude TTY";
 
 export type ProviderEntry = {
   extends: "acp";

@@ -1,4 +1,4 @@
-# Claude Code (interactive)
+# Claude TTY
 
 Install, diagnose, and manage the [Interactive Claude Code ACP adapter](../../apps/claude-tty-acp) on the host running the Paseo daemon.
 
@@ -14,7 +14,7 @@ _None yet._
 paseo plugin install "/absolute/path/to/paseo-plugins/plugins/claude-tty"
 ```
 
-The plugin manages the checkout it was itself installed from, so install it from the same clone that holds `apps/claude-tty-acp`. Then open **Claude Code** in the Paseo sidebar and press **Install**.
+The plugin manages the checkout it was itself installed from, so install it from the same clone that holds `apps/claude-tty-acp`. Then open **Claude TTY** in the Paseo sidebar and press **Install**.
 
 That runs `pnpm install --frozen-lockfile`, builds the adapter, runs its host checks, registers the `traecli` provider, and asks Paseo to re-probe its providers. No daemon restart is needed. The adapter README explains [why the provider ID is borrowed](../../apps/claude-tty-acp/README.md#slash-commands-need-a-borrowed-provider-id).
 

@@ -7,7 +7,7 @@ const expected = providerEntryFor("/opt/paseo-plugins");
 test("builds the entry the adapter README documents", () => {
   assert.deepEqual(expected, {
     extends: "acp",
-    label: "Claude Code (interactive)",
+    label: "Claude TTY",
     command: ["/opt/paseo-plugins/apps/claude-tty-acp/bin/claude-tty-acp"],
     params: { supportsMcpServers: false },
   });
