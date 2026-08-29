@@ -153,13 +153,25 @@ Choose *Reply in next message* when an answer needs free-form text; the adapter 
 The native chooser is available only to Paseo's direct providers, because plugins cannot intercept or transform ACP requests, contribute permission renderers, or emit native agent question events.
 Supporting it here requires Paseo's generic ACP provider to implement ACP `session/elicitation`, or a Paseo-specific equivalent, and return structured answers to the adapter.
 
+### Prompts sent mid-turn interrupt the turn
+
+Paseo cannot steer a running turn on an external provider: an ACP session offers `session/prompt` and `session/cancel` and nothing that injects text into a turn that is already in flight.
+Sending a prompt while Claude is working therefore takes Paseo's replace path, which cancels the active turn, waits for the pending `session/prompt` to answer, and starts the new turn once it does.
+
+The adapter cancels the way a person would, by sending Escape into the PTY, and ends the turn as soon as Claude's `Stop` hook confirms the interrupt or, when no hook follows, after a short fallback.
+Both settle inside the 2 second budget Paseo allows before it gives up and fails the replacement with `A foreground turn is already active`.
+
+So a mid-turn prompt discards whatever Claude was doing rather than queueing behind it the way typing into the Claude CLI does, and Claude sees the interruption in its own transcript.
+If Escape has not taken effect by the time the fallback fires, Claude also queues the replacement itself and answers it after the interrupted work unwinds.
+Real steering would need Paseo's generic ACP provider to offer external providers an entrypoint for it.
+
 ### Auto mode can hang on the denial limit
 
 Auto mode decides permissions with a classifier, and after 3 consecutive or 20 total classifier denials Claude Code stops deciding and asks the person at the keyboard instead.
 That escalation deliberately bypasses every remote channel — the `PermissionRequest` hook, Claude's bridge, and its channel callbacks — so the adapter is never consulted and Paseo shows no permission card.
-Claude then waits at a dialog inside its PTY and no `Stop` hook follows, so the turn never finishes: the first escalation in a session denies itself after 2 minutes, every later one waits indefinitely, and meanwhile a new prompt is rejected because the session still has an active turn.
+Claude then waits at a dialog inside its PTY and no `Stop` hook follows, so the turn never finishes: the first escalation in a session denies itself after 2 minutes, and every later one waits indefinitely.
 
-Cancel the turn from Paseo to recover, which sends Escape into the PTY and dismisses the dialog.
+Cancel the turn from Paseo to recover, which sends Escape into the PTY and dismisses the dialog; sending a new prompt does the same, because Paseo cancels before it replaces the turn.
 Default mode avoids the limit entirely, because there every decision reaches the adapter through the `PermissionRequest` hook.
 Claude does report the wait over its `Notification` hook, which the adapter does not register yet, so a future release can surface the dialog or end the turn with an explicit error instead of hanging.
 
@@ -173,6 +185,7 @@ Claude does report the wait over its `Notification` hook, which the adapter does
 | Persisted session not found | Select the host that created it and verify `CLAUDE_TTY_ACP_STATE_DIR`. |
 | Session belongs to another cwd | Load it with its original absolute project path. |
 | Session already active | Close the other native agent connection; remove a lock only after verifying its recorded PID is dead. |
+| `A foreground turn is already active` | The interrupted turn had not settled when Paseo started its replacement; send the prompt again. |
 | Turn never finishes in Auto mode | Claude is waiting at a keyboard-only dialog after the classifier denial limit; cancel the turn and prefer Default mode. |
 | PTY exits unexpectedly | Inspect structured adapter stderr and run Claude interactively in the same cwd and environment. |
 | Corrupt transcript or state | Preserve the file for diagnosis, then move only the named session JSON or transcript aside before retrying. |
