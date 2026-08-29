@@ -33,6 +33,7 @@ export type RuntimeDependencies = {
   readinessTimeoutMs?: number;
   cancelTimeoutMs?: number;
   submitDelayMs?: number;
+  transcriptPollIntervalMs?: number;
   runtimeRoot?: string;
   claudeConfigDir?: string;
   transcriptFilePath?: string;
@@ -58,6 +59,7 @@ export class ClaudeRuntime {
   private readonly readinessTimeoutMs: number;
   private readonly cancelTimeoutMs: number;
   private readonly submitDelayMs: number;
+  private readonly transcriptPollIntervalMs: number | undefined;
   private readonly runtimeRoot: string;
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
@@ -107,6 +109,7 @@ export class ClaudeRuntime {
     this.readinessTimeoutMs = dependencies.readinessTimeoutMs ?? STARTUP_TIMEOUT_MS;
     this.cancelTimeoutMs = dependencies.cancelTimeoutMs ?? CANCEL_TIMEOUT_MS;
     this.submitDelayMs = dependencies.submitDelayMs ?? SUBMIT_DELAY_MS;
+    this.transcriptPollIntervalMs = dependencies.transcriptPollIntervalMs;
     this.runtimeRoot = dependencies.runtimeRoot ?? os.tmpdir();
     this.translator = dependencies.translator ?? new TranscriptTranslator(sessionId, cwd, connection);
     this.transcript = this.createTranscriptWatcher(claudeSessionId, dependencies.transcriptFilePath);
@@ -263,9 +266,13 @@ export class ClaudeRuntime {
 
   private async handleHook(payload: HookPayload): Promise<HookResponse> {
     switch (payload.hook_event_name) {
+      // Hooks arrive over their own channel, ahead of the transcript the watcher is still polling.
+      // Draining first keeps the prompt from landing before the assistant text that explains it.
       case "PreToolUse":
+        await this.transcript.flushUntilStable();
         return this.interactions.handlePreToolUse(payload);
       case "PermissionRequest":
+        await this.transcript.flushUntilStable();
         return this.interactions.handlePermissionRequest(payload);
       case "SessionStart":
         await this.handleSessionStart(payload);
@@ -369,6 +376,7 @@ export class ClaudeRuntime {
     return new TranscriptWatcher(
       new TranscriptReader(claudeSessionId, this.cwd, { configDir: this.claudeConfigDir, filePath }),
       this.translator,
+      this.transcriptPollIntervalMs,
     );
   }
 

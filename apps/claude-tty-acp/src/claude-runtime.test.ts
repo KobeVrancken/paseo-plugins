@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import type { AgentSideConnection, SessionNotification } from "@agentclientprotocol/sdk";
+import type { AgentSideConnection, RequestPermissionRequest, RequestPermissionResponse, SessionNotification } from "@agentclientprotocol/sdk";
 import type { IPty, IPtyForkOptions } from "node-pty";
 import { ClaudeTtyAgent } from "./agent.ts";
+import { escapeProjectDirName } from "./transcript-reader.ts";
 
 class FakePty {
   readonly pid: number;
@@ -212,6 +213,79 @@ test("applies native model and mode controls and restarts an idle session", asyn
     await rm(runtimeRoot, { force: true, recursive: true });
   }
 });
+
+test("delivers the assistant text before an interactive hook prompts", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-flush-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = "/work/questions";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(runtimeRoot, { recursive: true });
+  const updates: SessionNotification[] = [];
+  const textWhenAsked: string[] = [];
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    spawned = new FakePty(3000);
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return spawned;
+  };
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      updates.push(notification);
+    },
+    requestPermission: async (_request: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
+      textWhenAsked.push(...assistantText(updates));
+      return { outcome: { outcome: "selected", optionId: "answer-0" } };
+    },
+  } as AgentSideConnection;
+  agent = new ClaudeTtyAgent(connection, {
+    spawnPty,
+    runtimeRoot,
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    // Only the hook's own drain can deliver the transcript, so a passing run cannot be the background poll.
+    transcriptPollIntervalMs: 60_000,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "ask me" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 2);
+    await writeFile(
+      path.join(projectDirectory, `${session.sessionId}.jsonl`),
+      `${JSON.stringify({ type: "assistant", uuid: "preamble", message: { content: [{ type: "text", text: "Two ways to do this." }] } })}\n`,
+    );
+    const answered = await agent.hooks.dispatch({
+      hook_event_name: "PreToolUse",
+      session_id: session.sessionId,
+      tool_use_id: "question-tool",
+      tool_name: "AskUserQuestion",
+      tool_input: { questions: [{ question: "Which way?", header: "Approach", options: [{ label: "First" }, { label: "Second" }] }] },
+    });
+
+    assert.deepEqual(textWhenAsked, ["Two ways to do this."]);
+    assert.equal((answered.hookSpecificOutput as { updatedInput?: { answers?: Record<string, string> } } | undefined)?.updatedInput?.answers?.["Which way?"], "First");
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    await turn;
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+function assistantText(updates: SessionNotification[]): string[] {
+  return updates.flatMap((notification) => {
+    const update = notification.update as { sessionUpdate: string; content?: { type: string; text?: string } };
+    if (update.sessionUpdate !== "agent_message_chunk" || update.content?.type !== "text") return [];
+    return [update.content.text ?? ""];
+  });
+}
 
 async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
