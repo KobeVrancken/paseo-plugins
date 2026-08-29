@@ -50,6 +50,9 @@ Add this provider to that host's Paseo configuration:
 }
 ```
 
+> `supportsMcpServers` refers only to MCP servers that Paseo injects over ACP, which this adapter rejects because a running interactive Claude process cannot adopt them.
+> Claude's own MCP servers keep working; it loads them from its usual configuration at startup.
+
 Restart or reload the Paseo daemon after changing its provider configuration.
 The executable writes ACP only to stdout and sends structured diagnostics to stderr.
 
