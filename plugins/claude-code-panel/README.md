@@ -35,7 +35,7 @@ This plugin avoids the Agent SDK by connecting Paseo directly to the CLI. The tr
 ## Migration
 
 Install and configure the [Interactive Claude Code ACP app](../../apps/claude-tty-acp#install-on-a-paseo-host) on each Paseo host where Claude should be available.
-After confirming the `claude-tty` provider works, remove this plugin with:
+After confirming the interactive provider works, remove this plugin with:
 
 ```sh
 paseo plugin remove claude-code-panel

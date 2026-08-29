@@ -35,7 +35,7 @@ Add this provider to that host's Paseo configuration:
 {
   "agents": {
     "providers": {
-      "claude-tty": {
+      "traecli": {
         "extends": "acp",
         "label": "Claude Code (interactive)",
         "command": [
@@ -53,6 +53,9 @@ Add this provider to that host's Paseo configuration:
 > `supportsMcpServers` refers only to MCP servers that Paseo injects over ACP, which this adapter rejects because a running interactive Claude process cannot adopt them.
 > Claude's own MCP servers keep working; it loads them from its usual configuration at startup.
 
+> The borrowed `traecli` provider ID is what makes slash commands and skills reachable from a draft agent's composer.
+> See [Slash command discovery](#slash-command-discovery) before choosing a different ID.
+
 Restart or reload the Paseo daemon after changing its provider configuration.
 The executable writes ACP only to stdout and sends structured diagnostics to stderr.
 
@@ -60,7 +63,7 @@ The executable writes ACP only to stdout and sends structured diagnostics to std
 
 Provider setup is host-local.
 When a client selects a VPS, the VPS daemon launches its own adapter and interactive Claude process, reads the VPS Claude configuration and transcripts, and streams ACP back to the client.
-The local machine and VPS may use the same `claude-tty` provider ID because they do not share processes, ports, locks, state, credentials, paths, or sessions.
+The local machine and VPS may use the same provider ID because they do not share processes, ports, locks, state, credentials, paths, or sessions.
 
 Install, build, authenticate Claude, and add the provider configuration independently on each host.
 The provider command must be an absolute path that exists on the selected host; it does not refer back to the client machine.
@@ -92,6 +95,16 @@ The native model selector offers Claude Code's rolling aliases plus the full mod
 Claude Code has no supported command for listing models without opening an interactive session, so this catalog is versioned with the adapter while `default`, `opus`, `fable`, `sonnet`, and `haiku` continue to follow Claude's rolling aliases.
 The native mode selector offers Default, Accept Edits, Plan, and Auto.
 Changing either control before launch changes startup flags; changing one while idle restarts and resumes Claude with deterministic flags; changing one during a turn is rejected.
+
+## Slash command discovery
+
+Paseo learns this adapter's slash commands, and with them Claude's skills, from an ACP `available_commands_update` notification.
+The adapter sends that notification as soon as `session/new` returns, because Paseo drops any session update that carries a session ID it has not received yet.
+
+Listing commands for an agent that does not exist yet, which is what a draft agent's composer does, spawns a throwaway session, reads the commands back, and closes it without waiting for that notification.
+Paseo only waits for the first batch when the provider ID is one it special-cases, which is why this provider is registered as `traecli`: that client differs from the generic one only in waiting up to ten seconds.
+The agent view shows the configured label, so the borrowed ID stays invisible, but a genuine Trae CLI provider cannot be registered next to it, and a future Paseo release may drop the special case.
+Under any other provider ID the composer stays empty until the agent has taken its first turn, after which the live session has the commands cached.
 
 ## Question UI limitation
 
@@ -160,5 +173,5 @@ pnpm --filter @paseo-plugins/claude-tty-acp build
 Restart the Paseo daemon after the build.
 Persistent session files are versioned and remain in the configured state directory.
 
-To uninstall, remove the `claude-tty` provider from that host's Paseo configuration, restart the daemon, and remove the source checkout when no other app or plugin uses it.
+To uninstall, remove the `traecli` provider from that host's Paseo configuration, restart the daemon, and remove the source checkout when no other app or plugin uses it.
 Delete the host's `claude-tty-acp` state directory only if session resume mappings are no longer needed.
