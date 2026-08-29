@@ -136,6 +136,7 @@ export class ClaudeRuntime {
     try {
       const result = await turn.promise;
       if (result.assistantMessage) {
+        this.translator.suppressNextAssistantText(result.assistantMessage);
         await this.connection.sessionUpdate({
           sessionId: this.sessionId,
           update: {

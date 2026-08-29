@@ -46,6 +46,41 @@ test("streams a delayed transcript and flushes its final offset", async () => {
   }
 });
 
+test("does not consider a partial final JSONL record stable", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "transcript-watcher-test-"));
+  const cwd = "/work/watch-partial";
+  const sessionId = "55555555-5555-4555-8555-555555555555";
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as AgentSideConnection;
+  const watcher = new TranscriptWatcher(
+    new TranscriptReader(sessionId, cwd, { configDir: root }),
+    new TranscriptTranslator(sessionId, cwd, connection),
+    5,
+  );
+
+  try {
+    await watcher.start();
+    const projectDir = path.join(root, "projects", escapeProjectDirName(cwd));
+    const filePath = path.join(projectDir, `${sessionId}.jsonl`);
+    await mkdir(projectDir, { recursive: true });
+    const assistant = JSON.stringify({ type: "assistant", uuid: "assistant", message: { content: [{ type: "text", text: "done" }] } });
+    await writeFile(filePath, assistant);
+    const flush = watcher.flushUntilStable();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(notifications.length, 0);
+    await appendFile(filePath, "\n");
+    await flush;
+    assert.deepEqual(notifications.map((notification) => notification.update.sessionUpdate), ["agent_message_chunk"]);
+  } finally {
+    await watcher.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {

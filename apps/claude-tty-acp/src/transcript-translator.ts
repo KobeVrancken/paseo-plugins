@@ -58,6 +58,7 @@ export class TranscriptTranslator {
   private lastPlan = "";
   private lastUsage = "";
   private assistantChunkCount = 0;
+  private suppressedAssistantText: string | null = null;
 
   constructor(sessionId: string, cwd: string, connection: AgentSideConnection) {
     this.sessionId = sessionId;
@@ -67,6 +68,10 @@ export class TranscriptTranslator {
 
   get assistantChunks(): number {
     return this.assistantChunkCount;
+  }
+
+  suppressNextAssistantText(text: string): void {
+    this.suppressedAssistantText = text.trim() || null;
   }
 
   async translate(records: TranscriptRecord[]): Promise<void> {
@@ -97,6 +102,7 @@ export class TranscriptTranslator {
     const message = objectValue(record.message);
     const content = message?.content;
     const recordId = stringValue(record.uuid) || stableUuid(JSON.stringify(record));
+    if (record.isMeta !== true && record.isSidechain !== true) this.suppressedAssistantText = null;
     if (typeof content === "string") {
       await this.emitUserText(`${recordId}:text`, recordId, content, record);
       return;
@@ -131,7 +137,12 @@ export class TranscriptTranslator {
       switch (block.type) {
         case "text": {
           const text = stringValue(block.text)?.trim();
-          if (text) await this.emitContent("agent_message_chunk", key, messageId, { type: "text", text });
+          if (text && text === this.suppressedAssistantText) {
+            this.suppressedAssistantText = null;
+            this.emitted.add(key);
+          } else if (text) {
+            await this.emitContent("agent_message_chunk", key, messageId, { type: "text", text });
+          }
           break;
         }
         case "thinking": {

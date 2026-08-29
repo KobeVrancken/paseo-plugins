@@ -71,3 +71,25 @@ test("translates messages, reasoning, tools, plans, usage, images, and system ac
   assert.ok(chunks.every((notification) => "messageId" in notification.update && /^[0-9a-f-]{36}$/.test(String(notification.update.messageId))));
   assert.equal(translator.assistantChunks, 3);
 });
+
+test("suppresses a transcript answer already emitted from the Stop fallback", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+
+  translator.suppressNextAssistantText("Hello from Claude");
+  await translator.translate([
+    { type: "assistant", uuid: "late-answer", message: { content: [{ type: "text", text: "Hello from Claude" }] } },
+  ]);
+  assert.equal(notifications.length, 0);
+
+  await translator.translate([{ type: "user", uuid: "next-user", message: { content: "next" } }]);
+  await translator.translate([
+    { type: "assistant", uuid: "next-answer", message: { content: [{ type: "text", text: "Hello from Claude" }] } },
+  ]);
+  assert.deepEqual(notifications.map((notification) => notification.update.sessionUpdate), ["user_message_chunk", "agent_message_chunk"]);
+});

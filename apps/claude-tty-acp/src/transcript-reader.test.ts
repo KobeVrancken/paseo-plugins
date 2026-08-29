@@ -19,9 +19,13 @@ test("reads appended JSONL records and holds partial lines", async () => {
     assert.deepEqual((await reader.read()).records.map((record) => record.uuid), ["first"]);
     const second = `${JSON.stringify({ type: "assistant", uuid: "second" })}\n`;
     await appendFile(filePath, second.slice(0, 15));
-    assert.deepEqual((await reader.read()).records, []);
+    const partial = await reader.read();
+    assert.deepEqual(partial.records, []);
+    assert.equal(partial.complete, false);
     await appendFile(filePath, second.slice(15));
-    assert.deepEqual((await reader.read()).records.map((record) => record.uuid), ["second"]);
+    const complete = await reader.read();
+    assert.deepEqual(complete.records.map((record) => record.uuid), ["second"]);
+    assert.equal(complete.complete, true);
   } finally {
     await rm(root, { force: true, recursive: true });
   }

@@ -39,9 +39,9 @@ export class TranscriptWatcher {
     let stableReads = 0;
     let sawFile = false;
     for (let attempt = 0; attempt < FLUSH_ATTEMPTS; attempt += 1) {
-      const size = await this.syncWithSize();
+      const { size, complete } = await this.syncWithState();
       if (size !== null) sawFile = true;
-      stableReads = sawFile && size === previousSize ? stableReads + 1 : 0;
+      stableReads = sawFile && complete && size === previousSize ? stableReads + 1 : 0;
       if (stableReads >= 2) return;
       previousSize = size;
       await delay(FLUSH_INTERVAL_MS);
@@ -59,22 +59,25 @@ export class TranscriptWatcher {
     await this.translator.translate(result.records);
   }
 
-  private syncWithSize(): Promise<number | null> {
+  private syncWithState(): Promise<{ size: number | null; complete: boolean }> {
     let size: number | null = null;
+    let complete = true;
     const operation = this.queue.then(
       async () => {
         const result = await this.reader.read();
         size = result.size;
+        complete = result.complete;
         await this.translator.translate(result.records);
       },
       async () => {
         const result = await this.reader.read();
         size = result.size;
+        complete = result.complete;
         await this.translator.translate(result.records);
       },
     );
     this.queue = operation.catch(() => undefined);
-    return operation.then(() => size);
+    return operation.then(() => ({ size, complete }));
   }
 }
 

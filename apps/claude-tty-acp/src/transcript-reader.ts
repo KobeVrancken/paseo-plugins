@@ -10,6 +10,7 @@ export type TranscriptRead = {
   records: TranscriptRecord[];
   reset: boolean;
   size: number | null;
+  complete: boolean;
 };
 
 export type TranscriptReaderOptions = {
@@ -34,7 +35,7 @@ export class TranscriptReader {
     try {
       fileStat = await stat(this.filePath);
     } catch (error) {
-      if (isMissing(error)) return { records: [], reset: false, size: null };
+      if (isMissing(error)) return { records: [], reset: false, size: null, complete: true };
       throw error;
     }
 
@@ -51,7 +52,7 @@ export class TranscriptReader {
       this.signature = currentSignature;
     }
 
-    if (fileStat.size <= this.offset) return { records: [], reset, size: fileStat.size };
+    if (fileStat.size <= this.offset) return { records: [], reset, size: fileStat.size, complete: this.partialLine.length === 0 };
     const chunk = await readRange(this.filePath, this.offset, fileStat.size - this.offset);
     this.offset = fileStat.size;
     const lines = `${this.partialLine}${chunk}`.split("\n");
@@ -61,7 +62,7 @@ export class TranscriptReader {
       const parsed = parseLine(line);
       if (parsed) records.push(parsed);
     }
-    return { records, reset, size: fileStat.size };
+    return { records, reset, size: fileStat.size, complete: this.partialLine.length === 0 };
   }
 }
 
