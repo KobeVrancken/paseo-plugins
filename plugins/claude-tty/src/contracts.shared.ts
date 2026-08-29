@@ -1,5 +1,6 @@
 import { defineRpc } from "@getpaseo/plugin/server";
 import { z } from "zod";
+import { INSTALL_STEP_IDS } from "./install.shared.ts";
 
 export const ProviderStateSchema = z.enum(["absent", "matching", "mismatched", "foreign"]);
 
@@ -33,4 +34,36 @@ export const getStatus = defineRpc({
   name: "claude-tty.status",
   input: z.object({}),
   output: StatusSchema,
+});
+
+export const InstallStepSchema = z.object({
+  id: z.enum(INSTALL_STEP_IDS),
+  label: z.string(),
+  state: z.enum(["pending", "running", "ok", "failed"]),
+  detail: z.string(),
+  stdout: z.string(),
+  stderr: z.string(),
+  exitCode: z.number().nullable(),
+});
+
+export const InstallJobSchema = z.object({
+  state: z.enum(["running", "ok", "failed"]),
+  startedAt: z.number(),
+  finishedAt: z.number().nullable(),
+  steps: z.array(InstallStepSchema),
+});
+
+export type InstallJobPayload = z.output<typeof InstallJobSchema>;
+
+export const startInstall = defineRpc({
+  name: "claude-tty.install.start",
+  /** Repointing an entry that already exists is never part of an ordinary install. */
+  input: z.object({ repair: z.boolean() }),
+  output: InstallJobSchema,
+});
+
+export const getInstall = defineRpc({
+  name: "claude-tty.install.status",
+  input: z.object({}),
+  output: InstallJobSchema.nullable(),
 });

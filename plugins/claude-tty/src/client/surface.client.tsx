@@ -1,9 +1,10 @@
 import type { PluginSurfaceProps } from "@getpaseo/plugin";
 import { useRpc } from "@getpaseo/plugin";
-import { useQuery } from "@tanstack/react-query";
-import React from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import React, { useCallback } from "react";
 import { ScrollView, Text, View } from "react-native";
 import * as contracts from "../contracts.shared.ts";
+import { InstallSection } from "./install.client.tsx";
 import { MAX_CONTENT_WIDTH, fontSize, leading, spacing } from "./theme.client.ts";
 import {
   Monospace,
@@ -20,6 +21,7 @@ const REFETCH_MS = 5_000;
 
 export function ClaudeTtySurface({ theme, layout }: PluginSurfaceProps) {
   const palette = usePalette(theme);
+  const queryClient = useQueryClient();
   const getStatus = useRpc(contracts.getStatus);
   const query = useQuery({
     queryKey: STATUS_QUERY_KEY,
@@ -27,6 +29,9 @@ export function ClaudeTtySurface({ theme, layout }: PluginSurfaceProps) {
     refetchInterval: REFETCH_MS,
   });
   const status = query.data ?? null;
+  const refreshStatus = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: STATUS_QUERY_KEY });
+  }, [queryClient]);
 
   if (!status) {
     return (
@@ -79,6 +84,8 @@ export function ClaudeTtySurface({ theme, layout }: PluginSurfaceProps) {
           />
         </Card>
       </Section>
+
+      <InstallSection palette={palette} status={status} onSettled={refreshStatus} />
 
       <Section palette={palette} title="This host">
         <Card palette={palette}>
