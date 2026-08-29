@@ -87,11 +87,6 @@ export const DoctorSchema = z.object({
     diagnostic: z.string().nullable(),
     error: z.string().nullable(),
   }),
-  snapshot: z.object({
-    registered: z.boolean(),
-    status: z.string().nullable(),
-    error: z.string().nullable(),
-  }),
 });
 
 export type DoctorPayload = z.output<typeof DoctorSchema>;

@@ -30,6 +30,9 @@ That is a reading the surface reports, not an error to hide, and every spawn fai
 The plugin never builds the adapter, because a daemon that cannot see a package manager cannot be made to.
 It reports whether `dist/cli.js` is there and leaves the build to whoever owns the checkout.
 
+A plugin session cannot see a custom provider in `providers.snapshot()`.
+The daemon filters every entry through `isProviderVisibleToClient`, which falls back to `claude`, `codex` and `opencode` for any session that does not declare an `appVersion`, so the doctor reads `providers.diagnostic` instead, which is not filtered.
+
 `config.patch` applies to the live provider registry without a daemon restart, because `agents.providers` is reloadable and the daemon stages the change into the registry as it persists it.
 `deepMerge` replaces arrays wholesale but keeps keys the patch does not mention, so repointing an entry has to `removeProviders` first and re-add, or a stale `env` or `models` survives the rewrite.
 The daemon validates a custom provider on its way in: the ID must match `^[a-z][a-z0-9-]*$`, `extends` must be a builtin or `acp`, and `extends: "acp"` requires a non-empty `command`.

@@ -21,12 +21,11 @@ export async function runDoctor(paseo: PaseoApi): Promise<DoctorPayload> {
   const [repo, existing] = await Promise.all([resolveRepoRoot(paseo), readProviderEntry(paseo)]);
   /** What the daemon would launch, which is the only executable worth diagnosing. */
   const binary = commandOf(existing)?.[0] ?? (repo.root === null ? null : adapterBinaryPath(repo.root));
-  const [adapter, daemon, snapshot] = await Promise.all([
+  const [adapter, daemon] = await Promise.all([
     checkAdapter(binary, repo.root ?? os.tmpdir()),
     readDaemonDiagnostic(paseo),
-    readSnapshotEntry(paseo),
   ]);
-  lastReport = { ranAt: Date.now(), adapter: { binary, ...adapter }, daemon, snapshot };
+  lastReport = { ranAt: Date.now(), adapter: { binary, ...adapter }, daemon };
   return lastReport;
 }
 
@@ -55,13 +54,3 @@ async function readDaemonDiagnostic(paseo: PaseoApi): Promise<DoctorPayload["dae
   }
 }
 
-async function readSnapshotEntry(paseo: PaseoApi): Promise<DoctorPayload["snapshot"]> {
-  try {
-    const payload = await paseo.providers.snapshot();
-    const entry = payload.entries.find((candidate) => candidate.provider === PROVIDER_ID);
-    if (entry === undefined) return { status: null, error: null, registered: false };
-    return { status: entry.status, error: entry.error ?? null, registered: true };
-  } catch (error) {
-    return { status: null, error: messageOf(error), registered: false };
-  }
-}

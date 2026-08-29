@@ -5,7 +5,7 @@ import { Text, View } from "react-native";
 import * as contracts from "../contracts.shared.ts";
 import type { DoctorPayload } from "../contracts.shared.ts";
 import { fontSize, leading, spacing, type Palette } from "./theme.client.ts";
-import { Monospace, ReadingRow, type Reading } from "./status.client.tsx";
+import { Monospace, ReadingRow } from "./status.client.tsx";
 import { Button, Card, Row, Section } from "./ui.client.tsx";
 
 export const DOCTOR_QUERY_KEY = ["claude-tty", "doctor"];
@@ -73,7 +73,6 @@ function DoctorReport({ palette, report }: { palette: Palette; report: DoctorPay
             divided
           />
         ))}
-        <ReadingRow palette={palette} title="Paseo's provider" reading={snapshotReading(report)} divided />
       </Card>
 
       {report.adapter.problem === null ? null : <Monospace palette={palette} text={report.adapter.problem} />}
@@ -91,11 +90,3 @@ function DoctorReport({ palette, report }: { palette: Palette; report: DoctorPay
   );
 }
 
-function snapshotReading(report: DoctorPayload): Reading {
-  const snapshot = report.snapshot;
-  if (!snapshot.registered) {
-    return { hint: snapshot.error ?? "Paseo does not know this provider", tone: "muted" };
-  }
-  if (snapshot.error !== null) return { hint: `${snapshot.status ?? "error"} — ${snapshot.error}`, tone: "danger" };
-  return { hint: snapshot.status ?? "unknown", tone: snapshot.status === "ready" ? "ok" : "muted" };
-}
