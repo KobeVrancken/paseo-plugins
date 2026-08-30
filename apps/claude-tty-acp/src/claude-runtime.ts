@@ -25,6 +25,11 @@ const BRACKETED_PASTE_START = "\u001b[200~";
 const BRACKETED_PASTE_END = "\u001b[201~";
 const ESCAPE = "\u001b";
 const CONTROL_D = "\u0004";
+const CURSOR_DOWN = "\u001b[B";
+const ENTER = "\r";
+const STARTUP_POLL_INTERVAL_MS = 25;
+const WORKSPACE_TRUST_KEY_DELAY_MS = 500;
+const WORKSPACE_TRUST_SELECTION_TIMEOUT_MS = 3_000;
 
 type PtyProcess = Pick<nodePty.IPty, "pid" | "write" | "kill" | "onData" | "onExit">;
 type SpawnPty = (file: string, args: string[], options: nodePty.IPtyForkOptions) => PtyProcess;
@@ -36,6 +41,8 @@ export type RuntimeDependencies = {
   cancelTimeoutMs?: number;
   submitDelayMs?: number;
   transcriptPollIntervalMs?: number;
+  workspaceTrustKeyDelayMs?: number;
+  workspaceTrustSelectionTimeoutMs?: number;
   runtimeRoot?: string;
   claudeConfigDir?: string;
   transcriptFilePath?: string;
@@ -62,6 +69,8 @@ export class ClaudeRuntime {
   private readonly cancelTimeoutMs: number;
   private readonly submitDelayMs: number;
   private readonly transcriptPollIntervalMs: number | undefined;
+  private readonly workspaceTrustKeyDelayMs: number;
+  private readonly workspaceTrustSelectionTimeoutMs: number;
   private readonly runtimeRoot: string;
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
@@ -79,6 +88,7 @@ export class ClaudeRuntime {
   private runtimeDirectory: string | null = null;
   private hookRegistration: HookRegistration | null = null;
   private ready: Deferred<void> | null = null;
+  private trustPrompt: Deferred<void> | null = null;
   private turn: Deferred<TurnResult> | null = null;
   private cancelTimer: NodeJS.Timeout | null = null;
   private cancelRequested = false;
@@ -112,6 +122,8 @@ export class ClaudeRuntime {
     this.cancelTimeoutMs = dependencies.cancelTimeoutMs ?? CANCEL_TIMEOUT_MS;
     this.submitDelayMs = dependencies.submitDelayMs ?? SUBMIT_DELAY_MS;
     this.transcriptPollIntervalMs = dependencies.transcriptPollIntervalMs;
+    this.workspaceTrustKeyDelayMs = dependencies.workspaceTrustKeyDelayMs ?? WORKSPACE_TRUST_KEY_DELAY_MS;
+    this.workspaceTrustSelectionTimeoutMs = dependencies.workspaceTrustSelectionTimeoutMs ?? WORKSPACE_TRUST_SELECTION_TIMEOUT_MS;
     this.runtimeRoot = dependencies.runtimeRoot ?? os.tmpdir();
     this.translator = dependencies.translator ?? new TranscriptTranslator(sessionId, cwd, connection);
     this.transcript = this.createTranscriptWatcher(claudeSessionId, dependencies.transcriptFilePath);
@@ -223,6 +235,7 @@ export class ClaudeRuntime {
     const hookCommand = `${shellQuote(process.execPath)} ${shellQuote(hookClientPath)}`;
     await writeFile(settingsPath, `${JSON.stringify(createHookSettings(hookCommand))}\n`, { mode: 0o600 });
     this.ready = createDeferred<void>();
+    this.trustPrompt = createDeferred<void>();
     const claudeBin = process.env.CLAUDE_BIN || "claude";
     const sessionArgs = this.resumeNextLaunch
       ? ["--resume", this.currentClaudeSessionId]
@@ -238,18 +251,20 @@ export class ClaudeRuntime {
     } catch (error) {
       await this.failedStartup(`Could not start ${claudeBin}: ${errorMessage(error)}`);
     }
-    this.pty?.onData((data) => this.screen.write(data));
+    this.pty?.onData((data) =>
+      this.screen.write(data, () => {
+        const trustPrompt = this.trustPrompt;
+        if (trustPrompt && isWorkspaceTrustScreen(this.screen.snapshot())) trustPrompt.resolve();
+      }),
+    );
     this.pty?.onExit(({ exitCode, signal }) => this.handleExit(exitCode, signal));
     try {
-      await withTimeout(
-        this.ready.promise,
-        this.startupTimeoutMs,
-        `Claude did not complete the SessionStart hook handshake within ${this.startupTimeoutMs}ms. Check Claude hook policy and the terminal output:\n${this.screen.snapshot()}`,
-      );
+      await this.waitForSessionStart();
     } catch (error) {
       await this.failedStartup(errorMessage(error));
     } finally {
       this.ready = null;
+      this.trustPrompt = null;
     }
     await this.waitForTerminalReady();
     await this.transcript.start();
@@ -260,6 +275,8 @@ export class ClaudeRuntime {
   private async failedStartup(message: string): Promise<never> {
     this.hookRegistration?.unregister();
     this.hookRegistration = null;
+    this.ready = null;
+    this.trustPrompt = null;
     const pty = this.pty;
     this.pty = null;
     if (pty) {
@@ -328,6 +345,7 @@ export class ClaudeRuntime {
     const details = this.screen.snapshot();
     const error = new Error(`Claude PTY exited unexpectedly with code ${exitCode}${signal === undefined ? "" : ` and signal ${signal}`}.${details ? `\n${details}` : ""}`);
     this.ready?.reject(error);
+    this.interactions.cancelPending();
     if (this.turn) {
       const turn = this.turn;
       this.turn = null;
@@ -422,6 +440,61 @@ export class ClaudeRuntime {
     }
     await this.failedStartup(`Claude completed its SessionStart hook but its interactive prompt did not become ready within ${this.readinessTimeoutMs}ms. Check the terminal output:\n${this.screen.snapshot()}`);
   }
+
+  private async waitForSessionStart(): Promise<void> {
+    if (!this.ready) throw new Error("Claude startup readiness was not initialized");
+    if (!this.trustPrompt) throw new Error("Claude workspace-trust detection was not initialized");
+    const ready = this.ready.promise.then(() => "ready" as const);
+    const trustPrompt = this.trustPrompt.promise.then(() => "trust-prompt" as const);
+    let deadline = Date.now() + this.startupTimeoutMs;
+    let trustHandled = false;
+    while (true) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error(this.startupTimeoutMessage());
+      const waits: Array<Promise<"ready" | "poll" | "trust-prompt">> = [
+        ready,
+        delay(Math.min(STARTUP_POLL_INTERVAL_MS, remaining)).then(() => "poll" as const),
+      ];
+      if (!trustHandled) waits.push(trustPrompt);
+      const result = await Promise.race(waits);
+      if (result === "ready") return;
+      if (trustHandled || (result !== "trust-prompt" && !isWorkspaceTrustScreen(this.screen.snapshot()))) continue;
+      trustHandled = true;
+      const approved = await this.interactions.requestWorkspaceTrust();
+      if (!approved) throw new Error(`Claude requires workspace trust for ${this.cwd}, but it was not approved in Paseo.`);
+      await this.confirmWorkspaceTrust();
+      // A human may take longer than the normal startup window to answer the permission card.
+      // Give Claude a full handshake window after the explicit decision.
+      deadline = Date.now() + this.startupTimeoutMs;
+    }
+  }
+
+  private startupTimeoutMessage(): string {
+    return `Claude did not complete the SessionStart hook handshake within ${this.startupTimeoutMs}ms. Check Claude hook policy and the terminal output:\n${this.screen.snapshot()}`;
+  }
+
+  private async confirmWorkspaceTrust(): Promise<void> {
+    const pty = this.pty;
+    if (!pty) throw new Error("Claude exited before workspace trust could be confirmed");
+    // Claude paints this screen just before its input state settles. Immediate input can be
+    // displayed but ignored, and Enter sent in the same state update can confirm the old choice.
+    await delay(this.workspaceTrustKeyDelayMs);
+    if (this.pty !== pty) throw new Error("Claude exited before workspace trust could be confirmed");
+    pty.write(CURSOR_DOWN);
+    const deadline = Date.now() + this.workspaceTrustSelectionTimeoutMs;
+    while (Date.now() < deadline) {
+      if (this.pty !== pty) throw new Error("Claude exited before workspace trust could be confirmed");
+      if (isWorkspaceTrustSelected(this.screen.snapshot())) {
+        await delay(this.workspaceTrustKeyDelayMs);
+        if (this.pty !== pty) throw new Error("Claude exited before workspace trust could be confirmed");
+        if (!isWorkspaceTrustSelected(this.screen.snapshot())) continue;
+        pty.write(ENTER);
+        return;
+      }
+      await delay(STARTUP_POLL_INTERVAL_MS);
+    }
+    throw new Error(`Claude did not select the workspace trust option after approval in Paseo. Terminal output:\n${this.screen.snapshot()}`);
+  }
 }
 
 function createHookSettings(command: string): Record<string, unknown> {
@@ -464,18 +537,18 @@ function isReadyScreen(screen: string): boolean {
   return /\?\s+for shortcuts|\d+(?:\.\d+)?[km]?\/\d+(?:\.\d+)?[km]? tokens|(?:auto|plan|accept edits|manual) mode on|(^|\n)\s*❯\s*($|\n)/i.test(screen);
 }
 
-async function withTimeout<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), milliseconds);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
+function isWorkspaceTrustScreen(screen: string): boolean {
+  return (
+    /Accessing workspace:/i.test(screen) &&
+    /Quick safety check:/i.test(screen) &&
+    /No,\s*exit/i.test(screen) &&
+    /Yes,\s*I trust this folder/i.test(screen) &&
+    /Enter to confirm/i.test(screen)
+  );
+}
+
+function isWorkspaceTrustSelected(screen: string): boolean {
+  return /(?:^|\n)[ \t]*❯[ \t]*Yes,[ \t]*I trust this folder(?:$|\n)/i.test(screen);
 }
 
 function delay(milliseconds: number): Promise<void> {

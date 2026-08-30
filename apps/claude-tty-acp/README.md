@@ -145,7 +145,10 @@ A session starts empty: `session/new` returns an ID immediately and launches not
 The first prompt launches `claude --session-id <id>` and later launches reuse `claude --resume <id>`, with the model and mode selectors translated into `--model` and `--permission-mode`.
 
 Every launch gets a private runtime directory holding a generated `settings.json` and hook client, passed with `--settings`, so the adapter registers its hooks without touching the user's Claude configuration.
-Startup is complete once the `SessionStart` hook has arrived and Claude's interactive prompt appears on a headless xterm screen that mirrors the PTY; that screen is used only for readiness and for the terminal snapshot in startup errors.
+No global hooks are required; remove any legacy hooks left in `~/.claude/settings.json` after uninstalling the old panel plugin.
+Startup is complete once the `SessionStart` hook has arrived and Claude's interactive prompt appears on a headless xterm screen that mirrors the PTY; that screen is used only for readiness, workspace-trust detection, and the terminal snapshot in startup errors.
+If Claude stops first at its workspace-trust screen, the adapter surfaces the exact cwd as an ACP permission card in Paseo.
+Approving the card selects **Yes, I trust this folder** in the PTY and gives Claude a fresh startup window; denying or cancelling it fails closed without changing Claude's trust state.
 
 Slash commands are the one thing the adapter never asks Claude for: an interactive session has no way to list them, so the adapter walks the user's, the project's and every enabled plugin's command and skill directories itself and publishes the result as ACP available commands.
 
@@ -244,7 +247,8 @@ That leaves Paseo's generic ACP provider needing to honour `usage_update` the wa
 | Symptom | Action |
 | --- | --- |
 | `Could not start claude` | Set `CLAUDE_BIN` to an absolute executable path visible to the daemon. |
-| SessionStart handshake timeout | Check Claude organization hook policy, inherited settings, loopback access, and the terminal snapshot in adapter stderr. |
+| Workspace trust permission appears | Approve only when the displayed folder is a project you created or trust; Claude remembers the choice. |
+| SessionStart handshake timeout | If no workspace trust card appeared, check Claude organization hook policy, inherited settings, loopback access, and the terminal snapshot in adapter stderr. |
 | Claude opens a login screen | Authenticate as the Paseo daemon user and verify `HOME` or `CLAUDE_CONFIG_DIR`. |
 | Persisted session not found | Select the host that created it and verify `CLAUDE_TTY_ACP_STATE_DIR`. |
 | Session belongs to another cwd | Load it with its original absolute project path. |
