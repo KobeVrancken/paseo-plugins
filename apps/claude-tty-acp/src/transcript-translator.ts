@@ -10,6 +10,7 @@ import type {
   ToolKind,
 } from "@agentclientprotocol/sdk";
 import { writeLog } from "./log.ts";
+import { questionText } from "./question-text.ts";
 import type { TranscriptRecord } from "./transcript-reader.ts";
 
 const IGNORED_RECORD_TYPES = new Set([
@@ -327,6 +328,14 @@ function toolLocations(input: TranscriptRecord, cwd: string): ToolCallLocation[]
 }
 
 function toolContents(name: string, input: TranscriptRecord, cwd: string): ToolCallContent[] {
+  if (name === "AskUserQuestion" && Array.isArray(input.questions)) {
+    const questions = input.questions.flatMap((value) => {
+      const question = objectValue(value);
+      const text = stringValue(question?.question)?.trim();
+      return question && text ? [questionText(question, text)] : [];
+    });
+    if (questions.length > 0) return [{ type: "content", content: { type: "text", text: questions.join("\n\n") } }];
+  }
   const filePath = stringValue(input.file_path) || stringValue(input.notebook_path);
   const resolvedPath = filePath ? (path.isAbsolute(filePath) ? filePath : path.resolve(cwd, filePath)) : null;
   if ((name === "Edit" || name === "NotebookEdit") && resolvedPath) {

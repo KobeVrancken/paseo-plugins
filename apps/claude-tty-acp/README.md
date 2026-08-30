@@ -200,7 +200,7 @@ Related, a draft must carry a model ID that is not literally `default`: Paseo re
 
 Claude's `AskUserQuestion` tool cannot use Paseo's native question and chooser UI while an external provider is selected, because Paseo's generic ACP provider exposes only the standard ACP permission request path.
 The adapter renders each question as a permission card with an action per answer: single-select answers work through those actions, and multi-select questions repeat the card until Done is selected.
-Choose *Reply in next message* when an answer needs free-form text; the adapter asks Claude to restate the question conversationally and waits for the next normal message.
+Choose *Answer this question in chat* when an answer needs free-form text; the adapter defers that question, continues through the remaining cards, preserves their answers, and asks Claude to restate only the deferred questions before waiting for the next normal message.
 
 The native chooser is available only to Paseo's direct providers, because plugins cannot intercept or transform ACP requests, contribute permission renderers, or emit native agent question events.
 Supporting it here requires Paseo's generic ACP provider to implement ACP `session/elicitation`, or a Paseo-specific equivalent, and return structured answers to the adapter.
