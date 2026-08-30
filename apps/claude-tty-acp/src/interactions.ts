@@ -54,6 +54,29 @@ export class InteractionBridge {
     this.pendingRequests.clear();
   }
 
+  async requestWorkspaceTrust(): Promise<boolean> {
+    const response = await this.request({
+      toolCall: {
+        toolCallId: `workspace-trust-${randomUUID()}`,
+        title: "Is this a project you created or one you trust?",
+        kind: "other",
+        status: "pending",
+        rawInput: {
+          workspace: this.cwd,
+          effect: "Claude Code will remember this workspace as trusted.",
+        },
+        locations: [{ path: this.cwd }],
+      },
+      options: [
+        // Paseo's automatic permission modes accept allow options without showing a card.
+        // A workspace trust decision must always remain an explicit human choice.
+        { optionId: "trust-workspace", name: "Yes, trust this folder", kind: "reject_once" },
+        { optionId: "deny-workspace", name: "No, exit", kind: "reject_once" },
+      ],
+    });
+    return response.outcome.outcome === "selected" && response.outcome.optionId === "trust-workspace";
+  }
+
   async handlePreToolUse(payload: HookPayload): Promise<HookResponse> {
     const name = stringValue(payload.tool_name) || "Tool";
     const input = objectValue(payload.tool_input) || {};

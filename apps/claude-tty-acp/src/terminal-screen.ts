@@ -7,8 +7,8 @@ const { Terminal } = require("@xterm/headless") as { Terminal: typeof XtermTermi
 export class TerminalScreen {
   private readonly terminal: XtermTerminal = new Terminal({ allowProposedApi: true, cols: 120, rows: 40, scrollback: 500 });
 
-  write(data: string): void {
-    this.terminal.write(data);
+  write(data: string, callback?: () => void): void {
+    this.terminal.write(data, callback);
   }
 
   snapshot(): string {

@@ -181,6 +181,137 @@ test("fails closed when Claude never completes the startup hook", async () => {
   }
 });
 
+test("asks through ACP before accepting Claude workspace trust", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-trust-test-"));
+  const cwd = "/work/new-project";
+  const permissionRequests: RequestPermissionRequest[] = [];
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const connection = {
+    sessionUpdate: async () => undefined,
+    requestPermission: async (request: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
+      permissionRequests.push(request);
+      return { outcome: { outcome: "selected", optionId: "trust-workspace" } };
+    },
+  } as unknown as AgentSideConnection;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    let confirmed = false;
+    const pty = new FakePty(3100, (data) => {
+      if (data === "\u001b[B") {
+        setImmediate(() => pty.emitData("\r\n  No, exit\r\n❯ Yes, I trust this folder\r\nEnter to confirm · Esc to cancel"));
+      }
+      // Claude runs SessionStart once, after the trust screen is confirmed; the later submit key is not a second startup.
+      if (data === "\r" && !confirmed) {
+        confirmed = true;
+        setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+      }
+    });
+    spawned = pty;
+    setImmediate(() => pty.emitData(workspaceTrustScreen(cwd)));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(connection, {
+    spawnPty,
+    runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    workspaceTrustKeyDelayMs: 0,
+    workspaceTrustSelectionTimeoutMs: 50,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => permissionRequests.length === 1 && spawned !== null && spawned.writes.length === 4);
+    assert.equal(permissionRequests[0]!.toolCall.title, "Is this a project you created or one you trust?");
+    assert.deepEqual(permissionRequests[0]!.toolCall.locations, [{ path: cwd }]);
+    assert.deepEqual(permissionRequests[0]!.options, [
+      { optionId: "trust-workspace", name: "Yes, trust this folder", kind: "reject_once" },
+      { optionId: "deny-workspace", name: "No, exit", kind: "reject_once" },
+    ]);
+    assert.deepEqual((spawned as unknown as FakePty).writes, ["\u001b[B", "\r", "\u001b[200~hello \u001b[201~", "\r"]);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+test("never confirms workspace trust unless Claude visibly selects Yes", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-trust-selection-test-"));
+  const cwd = "/work/selection-ignored";
+  const pty = new FakePty(3150);
+  const connection = {
+    sessionUpdate: async () => undefined,
+    requestPermission: async (): Promise<RequestPermissionResponse> => ({ outcome: { outcome: "selected", optionId: "trust-workspace" } }),
+  } as unknown as AgentSideConnection;
+  const agent = new ClaudeTtyAgent(connection, {
+    spawnPty: () => {
+      setImmediate(() => pty.emitData(workspaceTrustScreen(cwd)));
+      return pty;
+    },
+    runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    workspaceTrustKeyDelayMs: 0,
+    workspaceTrustSelectionTimeoutMs: 5,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    await assert.rejects(
+      agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] }),
+      /did not select the workspace trust option/,
+    );
+    assert.deepEqual(pty.writes, ["\u001b[B"]);
+    assert.equal(pty.killed, true);
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+test("fails closed when Claude workspace trust is denied", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-trust-denied-test-"));
+  const cwd = "/work/untrusted-project";
+  const pty = new FakePty(3200);
+  const connection = {
+    sessionUpdate: async () => undefined,
+    requestPermission: async (): Promise<RequestPermissionResponse> => ({ outcome: { outcome: "selected", optionId: "deny-workspace" } }),
+  } as unknown as AgentSideConnection;
+  const agent = new ClaudeTtyAgent(connection, {
+    spawnPty: () => {
+      setImmediate(() => pty.emitData(workspaceTrustScreen(cwd)));
+      return pty;
+    },
+    runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    await assert.rejects(
+      agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] }),
+      /requires workspace trust.*not approved in Paseo/,
+    );
+    assert.deepEqual(pty.writes, []);
+    assert.equal(pty.killed, true);
+    assert.equal((await readdir(runtimeRoot)).some((name) => name.startsWith("claude-tty-acp-")), false);
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
 test("applies native model and mode controls and restarts an idle session", async () => {
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-test-"));
   const spawns: SpawnRecord[] = [];
@@ -290,6 +421,21 @@ function assistantText(updates: SessionNotification[]): string[] {
     if (update.sessionUpdate !== "agent_message_chunk" || update.content?.type !== "text") return [];
     return [update.content.text ?? ""];
   });
+}
+
+function workspaceTrustScreen(cwd: string): string {
+  return [
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "Accessing workspace:",
+    cwd,
+    "Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source",
+    "project, or work from your team). If not, take a moment to review what's in this folder first.",
+    "Claude Code'll be able to read, edit, and execute files here.",
+    "Security guide",
+    "❯ No, exit",
+    "  Yes, I trust this folder",
+    "Enter to confirm · Esc to cancel",
+  ].join("\r\n");
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
