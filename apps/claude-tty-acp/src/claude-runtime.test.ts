@@ -41,12 +41,12 @@ class FakePty {
     return { dispose: () => undefined };
   }
 
-  emitExit(): void {
-    for (const handler of this.exitHandlers) handler({ exitCode: 0 });
-  }
-
   emitData(data: string): void {
     for (const handler of this.dataHandlers) handler(data);
+  }
+
+  emitExit(): void {
+    for (const handler of this.exitHandlers) handler({ exitCode: 0 });
   }
 }
 
@@ -102,10 +102,11 @@ test("keeps three parallel PTYs, hooks, cancellation, and attachments isolated",
     assert.equal(firstSpawn?.options.cwd, "/work/one");
     assert.equal(secondSpawn?.options.cwd, "/work/two");
     assert.equal(thirdSpawn?.options.cwd, "/work/three");
-    assert.equal(firstSpawn?.pty.writes.join(""), "\u001b[200~first $(safe)\u001b[201~\r");
-    assert.equal(secondSpawn?.pty.writes.join(""), "\u001b[200~second\u001b[201~\r");
-    const attachment = /@(\/[^\u001b\n]+\.png)/.exec(thirdSpawn?.pty.writes[0] ?? "")?.[1];
+    assert.equal(firstSpawn?.pty.writes.join(""), "\u001b[200~first $(safe) \u001b[201~\r");
+    assert.equal(secondSpawn?.pty.writes.join(""), "\u001b[200~second \u001b[201~\r");
+    const attachment = /@(\/[^\u001b\n ]+\.png)/.exec(thirdSpawn?.pty.writes[0] ?? "")?.[1];
     assert.ok(attachment);
+    assert.equal(thirdSpawn?.pty.writes[0], `\u001b[200~third\n@${attachment} \u001b[201~`);
     assert.equal(path.dirname(attachment), path.dirname(thirdSpawn!.args.at(-1)!));
     assert.notEqual(path.dirname(attachment), path.dirname(firstSpawn!.args.at(-1)!));
 
@@ -195,11 +196,16 @@ test("asks through ACP before accepting Claude workspace trust", async () => {
   } as unknown as AgentSideConnection;
   const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
     const sessionId = args[args.indexOf("--session-id") + 1]!;
+    let confirmed = false;
     const pty = new FakePty(3100, (data) => {
       if (data === "\u001b[B") {
         setImmediate(() => pty.emitData("\r\n  No, exit\r\n❯ Yes, I trust this folder\r\nEnter to confirm · Esc to cancel"));
       }
-      if (data === "\r") setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+      // Claude runs SessionStart once, after the trust screen is confirmed; the later submit key is not a second startup.
+      if (data === "\r" && !confirmed) {
+        confirmed = true;
+        setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+      }
     });
     spawned = pty;
     setImmediate(() => pty.emitData(workspaceTrustScreen(cwd)));
@@ -226,7 +232,7 @@ test("asks through ACP before accepting Claude workspace trust", async () => {
       { optionId: "trust-workspace", name: "Yes, trust this folder", kind: "reject_once" },
       { optionId: "deny-workspace", name: "No, exit", kind: "reject_once" },
     ]);
-    assert.deepEqual((spawned as unknown as FakePty).writes, ["\u001b[B", "\r", "\u001b[200~hello\u001b[201~", "\r"]);
+    assert.deepEqual((spawned as unknown as FakePty).writes, ["\u001b[B", "\r", "\u001b[200~hello \u001b[201~", "\r"]);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
     assert.deepEqual(await turn, { stopReason: "end_turn" });
   } finally {
@@ -439,3 +445,35 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<voi
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
 }
+
+test("resubmits a prompt Claude leaves sitting in its input box", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-test-"));
+  const updates: SessionNotification[] = [];
+  let agent!: ClaudeTtyAgent;
+  let pty!: FakePty;
+  let submits = 0;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    pty = new FakePty(2000, (text) => {
+      if (text.startsWith("\u001b[200~")) pty.emitData("\u001b[2J\u001b[H\u276f hello there\r\n");
+      // Claude only takes the prompt on the second submit key, the way it does while it is still settling a paste.
+      if (text === "\r" && (submits += 1) > 1) pty.emitData("\u001b[2J\u001b[H\u276f\r\n");
+    });
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/one", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello there" }] });
+    await waitFor(() => submits === 2);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+    assert.equal(submits, 2);
+    assert.equal(pty.writes[0], "\u001b[200~hello there \u001b[201~");
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});

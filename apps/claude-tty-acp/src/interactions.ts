@@ -3,6 +3,7 @@ import path from "node:path";
 import type { AgentSideConnection, PermissionOption, RequestPermissionResponse, ToolCallUpdate, ToolKind } from "@agentclientprotocol/sdk";
 import { createDeferred, type Deferred } from "./deferred.ts";
 import type { HookPayload, HookResponse } from "./hook-server.ts";
+import { questionText } from "./question-text.ts";
 
 type PermissionSuggestion = Record<string, unknown>;
 
@@ -116,6 +117,7 @@ export class InteractionBridge {
   private async handleQuestions(toolUseId: string, input: Record<string, unknown>): Promise<HookResponse> {
     const questions = Array.isArray(input.questions) ? input.questions : [];
     const answers: Record<string, string> = {};
+    const deferredQuestions: string[] = [];
     for (let index = 0; index < questions.length; index += 1) {
       const question = objectValue(questions[index]);
       const text = stringValue(question?.question);
@@ -131,7 +133,7 @@ export class InteractionBridge {
           return [questionOption(`answer-${optionIndex}`, `${selected.has(label) ? "✓ " : ""}${label}`)];
         });
         if (question.multiSelect === true) options.push(questionOption("done", "Done"));
-        options.push(questionOption("reply-next", "Reply in next message"));
+        options.push(questionOption("reply-next", "Answer this question in chat"));
         const response = await this.request({
           toolCall: {
             toolCallId: `${toolUseId}-question-${index}-${round}`,
@@ -139,10 +141,22 @@ export class InteractionBridge {
             kind: "other",
             status: "pending",
             rawInput: question,
+            content: [{ type: "content", content: { type: "text", text: questionText(question, text) } }],
           },
           options,
         });
-        if (response.outcome.outcome === "cancelled" || response.outcome.optionId === "reply-next") return conversationalQuestionFallback();
+        if (response.outcome.outcome === "cancelled") {
+          const remainingQuestions = questions.slice(index).flatMap((value) => {
+            const remaining = objectValue(value);
+            const remainingText = stringValue(remaining?.question);
+            return remainingText ? [remainingText] : [];
+          });
+          return conversationalQuestionFallback(answers, [...deferredQuestions, ...remainingQuestions]);
+        }
+        if (response.outcome.optionId === "reply-next") {
+          deferredQuestions.push(text);
+          break;
+        }
         if (response.outcome.optionId === "done") {
           answers[text] = [...selected].join(", ");
           break;
@@ -160,6 +174,7 @@ export class InteractionBridge {
         round += 1;
       }
     }
+    if (deferredQuestions.length > 0) return conversationalQuestionFallback(answers, deferredQuestions);
     return preToolAllow({ ...input, answers });
   }
 
@@ -226,8 +241,12 @@ function preToolDeny(reason: string): HookResponse {
   return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } };
 }
 
-function conversationalQuestionFallback(): HookResponse {
-  return preToolDeny("Restate the question conversationally, end this turn, and wait for the user to answer in their next message.");
+function conversationalQuestionFallback(answers: Record<string, string> = {}, deferredQuestions: string[] = []): HookResponse {
+  const completed = Object.keys(answers).length > 0 ? ` Keep these completed answers: ${JSON.stringify(answers)}.` : "";
+  const deferred = deferredQuestions.length > 0 ? ` Ask only these deferred questions: ${JSON.stringify(deferredQuestions)}.` : "";
+  return preToolDeny(
+    `The user chose to answer some questions in chat.${completed}${deferred} Restate the deferred questions conversationally in one message, then end this turn and wait for the user's response.`,
+  );
 }
 
 function questionOption(optionId: string, name: string): PermissionOption {

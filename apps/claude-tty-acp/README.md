@@ -146,7 +146,7 @@ The first prompt launches `claude --session-id <id>` and later launches reuse `c
 
 Every launch gets a private runtime directory holding a generated `settings.json` and hook client, passed with `--settings`, so the adapter registers its hooks without touching the user's Claude configuration.
 No global hooks are required; remove any legacy hooks left in `~/.claude/settings.json` after uninstalling the old panel plugin.
-Startup is complete once the `SessionStart` hook has arrived and Claude's interactive prompt appears on a headless xterm screen that mirrors the PTY; that screen is used only for readiness, workspace-trust detection, and the terminal snapshot in startup errors.
+Startup is complete once the `SessionStart` hook has arrived and Claude's interactive prompt appears on a headless xterm screen that mirrors the PTY; that screen is used only for readiness, workspace-trust detection, confirming a prompt left the input box, and the terminal snapshot in startup errors.
 If Claude stops first at its workspace-trust screen, the adapter surfaces the exact cwd as an ACP permission card in Paseo.
 Approving the card selects **Yes, I trust this folder** in the PTY and gives Claude a fresh startup window; denying or cancelling it fails closed without changing Claude's trust state.
 
@@ -156,6 +156,7 @@ Slash commands are the one thing the adapter never asks Claude for: an interacti
 
 A prompt is flattened into one block of text: images and embedded resources become files in the runtime directory referenced as `@path`, and host-local resource links become `@path` directly.
 The adapter writes that text into the PTY wrapped in bracketed paste, waits briefly, then writes Enter, exactly as a person pasting into the terminal would.
+The paste ends with a space so Claude's completion menu is closed rather than swallowing that Enter, and the adapter watches its input box on the headless screen and presses Enter again while the prompt is still sitting there, because Claude drops the key while it is settling a paste.
 
 Cancellation is the same kind of impersonation: an Escape keystroke, plus a short fallback that ends the turn when no `Stop` hook follows.
 Changing the model or mode while idle sends Ctrl-D, waits for the process to exit, and relaunches with `--resume`, which is why the change survives as a real flag rather than an in-band command.
@@ -203,7 +204,7 @@ Related, a draft must carry a model ID that is not literally `default`: Paseo re
 
 Claude's `AskUserQuestion` tool cannot use Paseo's native question and chooser UI while an external provider is selected, because Paseo's generic ACP provider exposes only the standard ACP permission request path.
 The adapter renders each question as a permission card with an action per answer: single-select answers work through those actions, and multi-select questions repeat the card until Done is selected.
-Choose *Reply in next message* when an answer needs free-form text; the adapter asks Claude to restate the question conversationally and waits for the next normal message.
+Choose *Answer this question in chat* when an answer needs free-form text; the adapter defers that question, continues through the remaining cards, preserves their answers, and asks Claude to restate only the deferred questions before waiting for the next normal message.
 
 The native chooser is available only to Paseo's direct providers, because plugins cannot intercept or transform ACP requests, contribute permission renderers, or emit native agent question events.
 Supporting it here requires Paseo's generic ACP provider to implement ACP `session/elicitation`, or a Paseo-specific equivalent, and return structured answers to the adapter.

@@ -93,3 +93,48 @@ test("suppresses a transcript answer already emitted from the Stop fallback", as
   ]);
   assert.deepEqual(notifications.map((notification) => notification.update.sessionUpdate), ["user_message_chunk", "agent_message_chunk"]);
 });
+
+test("renders question tool calls as readable text instead of raw JSON", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const input = {
+    questions: [
+      {
+        question: "Choose runtime",
+        header: "Runtime",
+        options: [
+          { label: "Node", description: "Use the established runtime" },
+          { label: "Bun", description: "Use the faster alternative" },
+        ],
+        multiSelect: false,
+      },
+    ],
+  };
+
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "question-message",
+      message: { content: [{ type: "tool_use", id: "question-tool", name: "AskUserQuestion", input }] },
+    },
+  ]);
+
+  assert.equal(notifications.length, 1);
+  const update = notifications[0]?.update;
+  assert.ok(update?.sessionUpdate === "tool_call");
+  assert.deepEqual(update.rawInput, input);
+  assert.deepEqual(update.content, [
+    {
+      type: "content",
+      content: {
+        type: "text",
+        text: "Choose runtime\n\n- Node — Use the established runtime\n- Bun — Use the faster alternative",
+      },
+    },
+  ]);
+});
