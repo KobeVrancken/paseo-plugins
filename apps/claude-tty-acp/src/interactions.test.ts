@@ -90,8 +90,8 @@ test("collects sequential and multi-select question answers without auto-allow o
     tool_input: { questions },
   });
 
+  assert.ok(requests.every((request) => request.options.every((option) => option.kind !== "allow_once")));
   assert.ok(requests.every((request) => request.options.length >= 2));
-  assert.ok(requests.every((request) => request.options.every((option) => option.kind === "reject_once")));
   assert.deepEqual(requests[0]?.toolCall.content, [
     {
       type: "content",
