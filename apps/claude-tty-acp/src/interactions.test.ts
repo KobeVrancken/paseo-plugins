@@ -54,7 +54,7 @@ test("correlates ordinary permissions and returns exact durable suggestions", as
   });
 });
 
-test("collects sequential and multi-select question answers without auto-allow options", async () => {
+test("uses affirmative chooser actions for question answers", async () => {
   const requests: RequestPermissionRequest[] = [];
   const answers = ["answer-1", "answer-0", "answer-1", "done"];
   const bridge = new InteractionBridge(
@@ -87,7 +87,11 @@ test("collects sequential and multi-select question answers without auto-allow o
     tool_input: { questions },
   });
 
-  assert.ok(requests.every((request) => request.options.every((option) => option.kind !== "allow_once")));
+  assert.ok(
+    requests.every((request) =>
+      request.options.every((option) => option.kind === (option.optionId === "reply-next" ? "reject_once" : "allow_once")),
+    ),
+  );
   assert.deepEqual(response, {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",

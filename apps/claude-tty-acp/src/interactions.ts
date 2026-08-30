@@ -250,7 +250,7 @@ function conversationalQuestionFallback(answers: Record<string, string> = {}, de
 }
 
 function questionOption(optionId: string, name: string): PermissionOption {
-  return { optionId, name, kind: "reject_once" };
+  return { optionId, name, kind: optionId === "reply-next" ? "reject_once" : "allow_once" };
 }
 
 function toolCall(id: string, name: string, input: Record<string, unknown>, cwd: string): ToolCallUpdate {
