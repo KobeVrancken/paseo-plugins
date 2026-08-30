@@ -21,9 +21,18 @@ const STARTUP_TIMEOUT_MS = 15_000;
 // This fallback plus the transcript flush behind it has to settle well inside that budget.
 const CANCEL_TIMEOUT_MS = 600;
 const SUBMIT_DELAY_MS = 150;
+// Claude drops the submit key while it is still settling a paste, so the prompt is re-submitted until its input box lets go of it.
+const SUBMIT_ATTEMPTS = 6;
+const SUBMIT_CONFIRM_MS = 400;
+const PASTE_ECHO_MS = 300;
+const PROMPT_ECHO_CHARS = 40;
 const BRACKETED_PASTE_START = "\u001b[200~";
 const BRACKETED_PASTE_END = "\u001b[201~";
+// Claude keeps its completion menu open while the cursor sits at the end of an @mention or a /command, and the submit key then picks an entry instead of sending the prompt.
+// A trailing space closes the menu, so every paste ends with one.
+const COMPLETION_DISMISS = " ";
 const ESCAPE = "\u001b";
+const CARRIAGE_RETURN = "\r";
 const CONTROL_D = "\u0004";
 
 type PtyProcess = Pick<nodePty.IPty, "pid" | "write" | "kill" | "onData" | "onExit">;
@@ -136,9 +145,7 @@ export class ClaudeRuntime {
     this.cancelRequested = false;
     this.interactions.beginTurn();
     this.assistantBaseline = this.translator.assistantChunks;
-    this.pty?.write(`${BRACKETED_PASTE_START}${prompt.text}${BRACKETED_PASTE_END}`);
-    await delay(this.submitDelayMs);
-    if (!this.cancelRequested) this.pty?.write("\r");
+    await this.submit(prompt.text);
     try {
       const result = await turn.promise;
       if (result.assistantMessage) {
@@ -413,6 +420,29 @@ export class ClaudeRuntime {
     await this.removeRuntimeDirectory();
   }
 
+  private async submit(text: string): Promise<void> {
+    this.pty?.write(`${BRACKETED_PASTE_START}${text}${COMPLETION_DISMISS}${BRACKETED_PASTE_END}`);
+    const echo = promptEcho(text);
+    const pasted = await this.screenSettles((screen) => inputBoxHolds(screen, echo), PASTE_ECHO_MS);
+    for (let attempt = 0; attempt < SUBMIT_ATTEMPTS; attempt += 1) {
+      await delay(this.submitDelayMs);
+      if (this.cancelRequested) return;
+      this.pty?.write(CARRIAGE_RETURN);
+      if (!pasted) return;
+      if (await this.screenSettles((screen) => !inputBoxHolds(screen, echo), SUBMIT_CONFIRM_MS)) return;
+    }
+    writeLog({ level: "warn", message: "Claude kept the prompt in its input box after every submit attempt", sessionId: this.sessionId });
+  }
+
+  private async screenSettles(predicate: (screen: string) => boolean, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    do {
+      if (predicate(this.screen.snapshot())) return true;
+      await delay(25);
+    } while (Date.now() < deadline);
+    return false;
+  }
+
   private async waitForTerminalReady(): Promise<void> {
     if (this.readinessTimeoutMs === 0) return;
     const deadline = Date.now() + this.readinessTimeoutMs;
@@ -458,6 +488,20 @@ function selectionArgs(model: string, mode: string): string[] {
   if (model !== INHERIT_MODEL_ID) args.push("--model", model);
   if (mode !== "default") args.push("--permission-mode", mode);
   return args;
+}
+
+function promptEcho(text: string): string {
+  return text.trim().split("\n", 1)[0]!.trim().slice(0, PROMPT_ECHO_CHARS);
+}
+
+// The last prompt marker on screen is Claude's input box; the ones above it are prompts it has already taken.
+function inputBoxHolds(screen: string, echo: string): boolean {
+  const lines = screen.split("\n");
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const match = /^\s*❯\s?(.*)$/.exec(lines[index]!);
+    if (match) return match[1]!.trim().startsWith(echo);
+  }
+  return false;
 }
 
 function isReadyScreen(screen: string): boolean {
