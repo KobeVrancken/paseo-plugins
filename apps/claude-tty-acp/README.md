@@ -145,7 +145,7 @@ A session starts empty: `session/new` returns an ID immediately and launches not
 The first prompt launches `claude --session-id <id>` and later launches reuse `claude --resume <id>`, with the model and mode selectors translated into `--model` and `--permission-mode`.
 
 Every launch gets a private runtime directory holding a generated `settings.json` and hook client, passed with `--settings`, so the adapter registers its hooks without touching the user's Claude configuration.
-Startup is complete once the `SessionStart` hook has arrived and Claude's interactive prompt appears on a headless xterm screen that mirrors the PTY; that screen is used only for readiness and for the terminal snapshot in startup errors.
+Startup is complete once the `SessionStart` hook has arrived and Claude's interactive prompt appears on a headless xterm screen that mirrors the PTY; that screen is used only for readiness, for confirming a prompt left the input box, and for the terminal snapshot in startup errors.
 
 Slash commands are the one thing the adapter never asks Claude for: an interactive session has no way to list them, so the adapter walks the user's, the project's and every enabled plugin's command and skill directories itself and publishes the result as ACP available commands.
 
@@ -153,6 +153,7 @@ Slash commands are the one thing the adapter never asks Claude for: an interacti
 
 A prompt is flattened into one block of text: images and embedded resources become files in the runtime directory referenced as `@path`, and host-local resource links become `@path` directly.
 The adapter writes that text into the PTY wrapped in bracketed paste, waits briefly, then writes Enter, exactly as a person pasting into the terminal would.
+The paste ends with a space so Claude's completion menu is closed rather than swallowing that Enter, and the adapter watches its input box on the headless screen and presses Enter again while the prompt is still sitting there, because Claude drops the key while it is settling a paste.
 
 Cancellation is the same kind of impersonation: an Escape keystroke, plus a short fallback that ends the turn when no `Stop` hook follows.
 Changing the model or mode while idle sends Ctrl-D, waits for the process to exit, and relaunches with `--resume`, which is why the change survives as a real flag rather than an in-band command.
