@@ -101,7 +101,7 @@ test("collects sequential and multi-select question answers without auto-allow o
 });
 
 test("falls back to a conversational answer and approves plans natively", async () => {
-  const responses = [selected("reply-next"), selected("approve-plan")];
+  const responses = [selected("answer-0"), selected("reply-next"), selected("answer-0"), selected("approve-plan")];
   const bridge = new InteractionBridge(
     "session",
     "/work/repo",
@@ -110,13 +110,20 @@ test("falls back to a conversational answer and approves plans natively", async 
   const question = await bridge.handlePreToolUse({
     tool_name: "AskUserQuestion",
     tool_use_id: "question",
-    tool_input: { questions: [{ question: "Name?", options: [{ label: "Alice" }] }] },
+    tool_input: {
+      questions: [
+        { question: "Name?", options: [{ label: "Alice" }] },
+        { question: "Notes?", options: [{ label: "None" }] },
+        { question: "Proceed?", options: [{ label: "Yes" }] },
+      ],
+    },
   });
   assert.deepEqual(question, {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
-      permissionDecisionReason: "Restate the question conversationally, end this turn, and wait for the user to answer in their next message.",
+      permissionDecisionReason:
+        'The user chose to answer some questions in chat. Keep these completed answers: {"Name?":"Alice","Proceed?":"Yes"}. Ask only these deferred questions: ["Notes?"]. Restate the deferred questions conversationally in one message, then end this turn and wait for the user\'s response.',
     },
   });
 
@@ -125,6 +132,46 @@ test("falls back to a conversational answer and approves plans natively", async 
   assert.deepEqual(plan, {
     hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: input },
   });
+});
+
+test("renders question permission cards as readable text instead of raw JSON", async () => {
+  const requests: RequestPermissionRequest[] = [];
+  const bridge = new InteractionBridge(
+    "session",
+    "/work/repo",
+    connectionWith(async (request) => {
+      requests.push(request);
+      return selected("answer-1");
+    }),
+  );
+  const question = {
+    question: "Choose runtime",
+    header: "Runtime",
+    options: [
+      { label: "Node", description: "Use the established runtime" },
+      { label: "Bun", description: "Use the faster alternative" },
+    ],
+    multiSelect: false,
+  };
+
+  await bridge.handlePreToolUse({
+    hook_event_name: "PreToolUse",
+    session_id: "session",
+    tool_use_id: "question-tool",
+    tool_name: "AskUserQuestion",
+    tool_input: { questions: [question] },
+  });
+
+  assert.deepEqual(requests[0]?.toolCall.rawInput, question);
+  assert.deepEqual(requests[0]?.toolCall.content, [
+    {
+      type: "content",
+      content: {
+        type: "text",
+        text: "Choose runtime\n\n- Node — Use the established runtime\n- Bun — Use the faster alternative",
+      },
+    },
+  ]);
 });
 
 test("cancels outstanding hook waits when the turn ends", async () => {
