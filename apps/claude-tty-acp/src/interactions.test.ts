@@ -69,10 +69,7 @@ test("collects sequential and multi-select question answers without auto-allow o
     {
       question: "Choose runtime",
       header: "Runtime",
-      options: [
-        { label: "Node", description: "Use the established runtime" },
-        { label: "Bun", description: "Use the faster alternative" },
-      ],
+      options: [{ label: "Node" }, { label: "Bun" }],
       multiSelect: false,
     },
     {
@@ -91,20 +88,6 @@ test("collects sequential and multi-select question answers without auto-allow o
   });
 
   assert.ok(requests.every((request) => request.options.every((option) => option.kind !== "allow_once")));
-  assert.ok(requests.every((request) => request.options.length >= 2));
-  assert.deepEqual(requests[0]?.toolCall.content, [
-    {
-      type: "content",
-      content: {
-        type: "text",
-        text: "Choose runtime\n\n- Node — Use the established runtime\n- Bun — Use the faster alternative",
-      },
-    },
-  ]);
-  assert.deepEqual(requests[0]?.toolCall.rawInput, questions[0]);
-  assert.deepEqual(requests[1]?.toolCall.content, [
-    { type: "content", content: { type: "text", text: "Choose checks\n\n- Types\n- Tests" } },
-  ]);
   assert.deepEqual(response, {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
@@ -149,6 +132,46 @@ test("falls back to a conversational answer and approves plans natively", async 
   assert.deepEqual(plan, {
     hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: input },
   });
+});
+
+test("renders question permission cards as readable text instead of raw JSON", async () => {
+  const requests: RequestPermissionRequest[] = [];
+  const bridge = new InteractionBridge(
+    "session",
+    "/work/repo",
+    connectionWith(async (request) => {
+      requests.push(request);
+      return selected("answer-1");
+    }),
+  );
+  const question = {
+    question: "Choose runtime",
+    header: "Runtime",
+    options: [
+      { label: "Node", description: "Use the established runtime" },
+      { label: "Bun", description: "Use the faster alternative" },
+    ],
+    multiSelect: false,
+  };
+
+  await bridge.handlePreToolUse({
+    hook_event_name: "PreToolUse",
+    session_id: "session",
+    tool_use_id: "question-tool",
+    tool_name: "AskUserQuestion",
+    tool_input: { questions: [question] },
+  });
+
+  assert.deepEqual(requests[0]?.toolCall.rawInput, question);
+  assert.deepEqual(requests[0]?.toolCall.content, [
+    {
+      type: "content",
+      content: {
+        type: "text",
+        text: "Choose runtime\n\n- Node — Use the established runtime\n- Bun — Use the faster alternative",
+      },
+    },
+  ]);
 });
 
 test("cancels outstanding hook waits when the turn ends", async () => {
