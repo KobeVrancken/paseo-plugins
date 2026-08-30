@@ -105,9 +105,9 @@ export class InteractionBridge {
           const option = objectValue(value);
           const label = stringValue(option?.label);
           if (!label) return [];
-          return [answerOption(`answer-${optionIndex}`, `${selected.has(label) ? "✓ " : ""}${label}`)];
+          return [questionOption(`answer-${optionIndex}`, `${selected.has(label) ? "✓ " : ""}${label}`)];
         });
-        if (question.multiSelect === true) options.push(answerOption("done", "Done"));
+        if (question.multiSelect === true) options.push(questionOption("done", "Done"));
         options.push(questionOption("reply-next", "Reply in next message"));
         const response = await this.request({
           toolCall: {
@@ -208,11 +208,7 @@ function conversationalQuestionFallback(): HookResponse {
 }
 
 function questionOption(optionId: string, name: string): PermissionOption {
-  return { optionId, name, kind: "reject_once" };
-}
-
-function answerOption(optionId: string, name: string): PermissionOption {
-  return { optionId, name, kind: "allow_once" };
+  return { optionId, name, kind: optionId === "reply-next" ? "reject_once" : "allow_once" };
 }
 
 function toolCall(id: string, name: string, input: Record<string, unknown>, cwd: string): ToolCallUpdate {
