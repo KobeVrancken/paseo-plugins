@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import type { AgentSideConnection, ContentBlock, PromptResponse } from "@agentclientprotocol/sdk";
 import * as nodePty from "node-pty";
+import { type ContextWindow, contextWindow, formatTokens } from "./context-window.ts";
 import { createDeferred, type Deferred } from "./deferred.ts";
 import { type HookPayload, type HookRegistration, type HookResponse, HookServer } from "./hook-server.ts";
 import { InteractionBridge } from "./interactions.ts";
@@ -67,11 +68,6 @@ export type RuntimeDependencies = {
   onClaudeSessionChange?: (claudeSessionId: string) => Promise<void>;
 };
 
-type ContextWindow = {
-  tokens: number;
-  percent: number;
-};
-
 type TurnResult = {
   response: PromptResponse;
   assistantMessage?: string;
@@ -115,6 +111,7 @@ export class ClaudeRuntime {
   private closed = false;
   private contextFilePath: string | null = null;
   private contextMtimeAtTurnEnd = 0;
+  private contextWaitCancelled = false;
   private intentionalExit: Deferred<void> | null = null;
 
   constructor(
@@ -201,6 +198,8 @@ export class ClaudeRuntime {
   }
 
   cancel(): void {
+    // The wait for Claude's last context reading outlives the turn, so this is set before the turn check or a stop during it is dropped.
+    this.contextWaitCancelled = true;
     const turn = this.turn;
     if (!turn) return;
     this.cancelRequested = true;
@@ -401,13 +400,12 @@ export class ClaudeRuntime {
   // A cancelled turn is left alone, because Paseo only allows 2s for the prompt it is replacing to answer.
   private async emitContextUsage(stopReason: string): Promise<void> {
     if (stopReason === "cancelled" || this.closed || !this.contextFilePath) return;
-    // Claude rewrites the file after the Stop hook, so this turn's reading is the one written after the mtime the hook saw.
-    // That mtime is taken when the hook arrives, not here: draining the transcript and delivering the turn's last message both run in between and can outlast Claude's refresh.
-    // Comparing the file's clock against itself rather than against Date.now() also sidesteps the coarse clock Linux stamps files from, which can date a write milliseconds before the wall clock that observed it.
-    // The timestamp rather than the contents is what marks the reading, because two turns that land on the same numbers write identical files.
+    // The mtime rather than the contents marks this turn's reading, because two turns that land on the same numbers write identical files.
+    // See the README on why it is taken at the Stop hook and compared against itself rather than against Date.now().
+    this.contextWaitCancelled = false;
     const before = this.contextMtimeAtTurnEnd;
     const deadline = Date.now() + this.contextRefreshTimeoutMs;
-    while (Date.now() < deadline && !this.closed) {
+    while (Date.now() < deadline && !this.closed && !this.contextWaitCancelled) {
       await delay(CONTEXT_REFRESH_POLL_MS);
       const window = await this.readContextWindow(before);
       if (!window || this.closed) continue;
@@ -636,30 +634,6 @@ if (status < 200 || status > 299) process.exitCode = 1;
 `;
 }
 
-// Both numbers are Claude's own: it sums the last message's input, cache creation and cache read tokens, and rounds that against the window it resolved.
-function contextWindow(contents: string): ContextWindow | null {
-  let payload: unknown;
-  try {
-    payload = JSON.parse(contents);
-  } catch {
-    return null;
-  }
-  const record = payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as Record<string, unknown>) : null;
-  const window = record?.context_window;
-  if (!window || typeof window !== "object" || Array.isArray(window)) return null;
-  const tokens = (window as Record<string, unknown>).total_input_tokens;
-  const percent = (window as Record<string, unknown>).used_percentage;
-  if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens <= 0) return null;
-  if (typeof percent !== "number" || !Number.isFinite(percent)) return null;
-  return { tokens, percent };
-}
-
-function formatTokens(tokens: number): string {
-  if (tokens < 1000) return String(tokens);
-  const scaled = tokens < 1_000_000 ? { value: tokens / 1000, suffix: "k" } : { value: tokens / 1_000_000, suffix: "M" };
-  return `${scaled.value.toFixed(1).replace(/\.0$/, "")}${scaled.suffix}`;
-}
-
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
@@ -685,6 +659,8 @@ function inputBoxHolds(screen: string, echo: string): boolean {
   return false;
 }
 
+// Registering a status line makes Claude drop most footer hints, `? for shortcuts` among them, so that alternative cannot match in an adapter-launched session.
+// The mode indicator carries readiness in its place and is present in every mode, `manual mode on` in the default one; the token badge is absent until a session has context, and the bare prompt marker does not match while the input box still holds its placeholder.
 function isReadyScreen(screen: string): boolean {
   return /\?\s+for shortcuts|\d+(?:\.\d+)?[km]?\/\d+(?:\.\d+)?[km]? tokens|(?:auto|plan|accept edits|manual) mode on|(^|\n)\s*❯\s*($|\n)/i.test(screen);
 }
