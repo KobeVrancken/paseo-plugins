@@ -844,7 +844,7 @@ test("does not let stopped waits count towards giving up on a session's readings
     const turn = agent.prompt({ sessionId, prompt: [{ type: "text", text: "turn 3" }] });
     await waitFor(() => spawns[0]!.pty.writes.length === 8);
     const stop = agent.hooks.dispatch({ hook_event_name: "Stop", session_id: sessionId, last_assistant_message: "done" });
-    setTimeout(() => void writeFile(contextPath(), contextPayload(42_000, 21)), 800);
+    setTimeout(() => void writeFile(contextPath(), contextPayload(42_000, 21)), AFTER_THE_LOOK_MS);
     await stop;
     assert.deepEqual(await turn, { stopReason: "end_turn" });
     assert.deepEqual(contextLines(updates), ["Context: 42k tokens (21%)"]);
@@ -877,7 +877,7 @@ test("picks a session back up when its readings resume after it stopped waiting"
       const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: `turn ${index}` }] });
       await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === (index + 1) * 2);
       const stop = agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
-      if (index === 4) setTimeout(() => void writeFile(contextPath(), contextPayload(42_000, 21)), 800);
+      if (index === 4) setTimeout(() => void writeFile(contextPath(), contextPayload(42_000, 21)), AFTER_THE_LOOK_MS);
       await stop;
       assert.deepEqual(await turn, { stopReason: "end_turn" });
     }
@@ -887,6 +887,11 @@ test("picks a session back up when its readings resume after it stopped waiting"
     await rm(runtimeRoot, { force: true, recursive: true });
   }
 });
+
+// The adapter looks for a reading only once the transcript drain finishes, which is a fixed 15 x 20ms in a test with no transcript file.
+// A reading written this long after the Stop hook therefore lands after that look, which is the only thing separating a turn that waits from a turn that merely looks.
+// Two of these tests pass whatever the code does if this drops below the drain, so it is named once rather than spelled at each call site.
+const AFTER_THE_LOOK_MS = 800;
 
 function contextPayload(tokens: number, percent: number): string {
   return JSON.stringify({
