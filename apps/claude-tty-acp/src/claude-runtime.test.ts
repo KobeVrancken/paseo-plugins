@@ -636,6 +636,99 @@ test("says nothing about the context when Claude's status line does not refresh"
   }
 });
 
+test("drops the context wait when the turn is cancelled", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-context-cancel-test-"));
+  const updates: SessionNotification[] = [];
+  const spawns: SpawnRecord[] = [];
+  let agent!: ClaudeTtyAgent;
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    const pty = new FakePty(3700 + spawns.length);
+    spawns.push({ file, args, options, pty });
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, cancelTimeoutMs: 5, contextRefreshTimeoutMs: 5_000 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/cancel", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
+    const contextPath = path.join(path.dirname(spawns[0]!.args.at(-1)!), "context.json");
+
+    // A cancelled turn reports nothing about the context, and must not hold the response for the refresh budget while it decides that.
+    const started = Date.now();
+    await agent.cancel({ sessionId: session.sessionId });
+    await writeFile(contextPath, contextPayload(137_400, 69));
+    assert.deepEqual(await turn, { stopReason: "cancelled" });
+    assert.ok(Date.now() - started < 2_000);
+    assert.deepEqual(contextLines(updates), []);
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+test("stops waiting for a context reading when the turn is cancelled mid-wait", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-context-stop-test-"));
+  const updates: SessionNotification[] = [];
+  const spawns: SpawnRecord[] = [];
+  let agent!: ClaudeTtyAgent;
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    const pty = new FakePty(3800 + spawns.length);
+    spawns.push({ file, args, options, pty });
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, cancelTimeoutMs: 5, contextRefreshTimeoutMs: 10_000 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/stop", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
+
+    // Claude has already stopped, so the turn is over, but the wait for its last reading is still running and the stop button has to reach it.
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    const started = Date.now();
+    await agent.cancel({ sessionId: session.sessionId });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+    assert.ok(Date.now() - started < 5_000, "the cancel has to end the wait well inside the refresh budget");
+    assert.deepEqual(contextLines(updates), []);
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+test("stays ready once a status line has taken Claude's shortcut hint away", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-ready-test-"));
+  let agent!: ClaudeTtyAgent;
+  let pty!: FakePty;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    pty = new FakePty(3900);
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    // A fresh session in the default mode, as Claude draws it once the adapter has registered a status line:
+    // no `? for shortcuts`, no token badge until there is context, and the input box still holding its placeholder.
+    setImmediate(() => pty.emitData('\u001b[2J\u001b[H\u276f Try "refactor index.ts"\r\n  \u23f8 manual mode on\r\n'));
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 1_000, submitDelayMs: 0 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/ready", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => pty !== undefined && pty.writes.length === 2);
+    assert.equal(pty.writes[0], "\u001b[200~hello \u001b[201~");
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
 function contextPayload(tokens: number, percent: number): string {
   return JSON.stringify({
     context_window: { total_input_tokens: tokens, total_output_tokens: 4, context_window_size: 200_000, used_percentage: percent, remaining_percentage: 100 - percent },
