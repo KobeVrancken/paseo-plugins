@@ -77,7 +77,7 @@ test("loads history lazily, resumes Claude, and follows clear session rotation",
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: resumedId, source: "resume", transcript_path: transcriptPath }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(connection, { claudeConfigDir: configDirectory, runtimeRoot, stateDirectory, spawnPty, startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0 });
+  agent = new ClaudeTtyAgent(connection, { claudeConfigDir: configDirectory, runtimeRoot, stateDirectory, spawnPty, startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
 
   try {
     await agent.loadSession({ sessionId: acpSessionId, cwd, mcpServers: [] });

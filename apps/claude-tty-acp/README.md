@@ -144,7 +144,7 @@ Every session of that connection lives in that one process, and each session own
 A session starts empty: `session/new` returns an ID immediately and launches nothing, so a provider probe or an untouched draft never spawns Claude.
 The first prompt launches `claude --session-id <id>` and later launches reuse `claude --resume <id>`, with the model and mode selectors translated into `--model` and `--permission-mode`.
 
-Every launch gets a private runtime directory holding a generated `settings.json` and hook client, passed with `--settings`, so the adapter registers its hooks without touching the user's Claude configuration.
+Every launch gets a private runtime directory holding a generated `settings.json` and hook client, passed with `--settings`, so the adapter registers its hooks and its status line without touching the user's Claude configuration.
 No global hooks are required; remove any legacy hooks left in `~/.claude/settings.json` after uninstalling the old panel plugin.
 Startup is complete once the `SessionStart` hook has arrived and Claude's interactive prompt appears on a headless xterm screen that mirrors the PTY; that screen is used only for readiness, workspace-trust detection, confirming a prompt left the input box, and the terminal snapshot in startup errors.
 If Claude stops first at its workspace-trust screen, the adapter surfaces the exact cwd as an ACP permission card in Paseo.
@@ -231,17 +231,38 @@ Cancel the turn from Paseo to recover, which sends Escape into the PTY and dismi
 Default mode avoids the limit entirely, because there every decision reaches the adapter through the `PermissionRequest` hook.
 Claude does report the wait over its `Notification` hook, which the adapter does not register yet, so a future release can surface the dialog or end the turn with an explicit error instead of hanging.
 
-### The token usage meter stays empty
+### The token usage meter stays empty, so the reading goes in the conversation
 
 Paseo's token usage meter renders only once it knows both a context window size and the tokens currently in it, and it fills those in for its own providers alone.
 ACP carries the pair as a `usage_update` session notification, which Paseo's generic ACP provider validates and then discards, so nothing an external provider reports can reach the meter.
 
-The adapter cannot supply the numbers from the transcript either.
-Claude records per-message `usage` counts there, enough to total the tokens in context, but never the size of the window holding them, and a model ID alone does not imply one because the 1M variants are not distinguishable in the transcript.
+The adapter reports a `Context: 137.4k tokens (69%)` line at the end of a turn instead, and stays silent until Claude has reported one.
 
-Supporting this looks possible from both ends.
-Claude's status line receives a `context_window` payload carrying `context_window_size` alongside the current totals, refreshed whenever token usage changes, which the adapter could forward over the hook channel it already runs.
-That leaves Paseo's generic ACP provider needing to honour `usage_update` the way its direct providers report usage.
+Both numbers are Claude's own, because neither can be reconstructed.
+The transcript records per-message `usage` counts but nothing about the window holding them: no record type in it carries a context window at all, and its `message.model` drops the `[1m]` marker that separates a 200k session from a 1M one, so a model ID read from there implies nothing.
+Nor is the size a table the adapter could keep, because Claude resolves it per session from `CLAUDE_CODE_MAX_CONTEXT_TOKENS`, a `native_1m` flag in its model catalog, the deployment behind the model, a 1M beta header and a clamp back to 200k.
+Hooks do not carry it either; their shared payload stops at `session_id`, `transcript_path`, `cwd`, `prompt_id`, `permission_mode`, `agent_id`, `agent_type` and `effort`.
+
+The status line is where Claude does report it, so the generated `settings.json` registers one.
+Claude runs a status line command through a shell and renders its stdout, so the command is `cat > <runtime directory>/context.json`: one `cat`, and no output to land on the terminal screen.
+It runs when the reading changes rather than on a timer, which is at least once per assistant response: usage moves on every tool result too, so a tool-heavy turn costs several `cat`s rather than one.
+
+Registering one is not free of the screen, though: Claude drops most of its footer hints once a status line exists, `? for shortcuts` among them, and that was the first signal `isReadyScreen` looked for.
+Readiness now rests on the mode indicator, which Claude shows in every mode and writes as `manual mode on` in the default one, because the token badge is absent until a session has context and the bare prompt marker does not match while the input box still holds its placeholder.
+
+Claude renders that line *after* the `Stop` hook, measured at about 320ms, so reading the file when the turn ends yields the turn before it.
+The adapter notes the file's mtime as the hook arrives and then waits, for up to a second, for a rewrite that moves it, staying silent when none does.
+The mtime is taken at the hook rather than at the read because draining the transcript and delivering the turn's last message both run in between and can outlast Claude's refresh, and it is compared against itself rather than against `Date.now()` because Linux stamps files from a coarse clock that can date a write milliseconds before the wall clock that observed it.
+The timestamp rather than the contents is what marks a reading as this turn's, because two turns that land on the same numbers write identical files.
+Claude truncates the file before each rewrite, so a torn read is waited out rather than reported, and a cancelled turn skips the wait entirely because Paseo allows only 2s for the prompt it is replacing to answer.
+
+That wait is what the turn's own completion is held on, so a session that never reports would otherwise pay it forever: after three turns without a reading it stops waiting and only looks, which costs a `stat`, and says so once in the log.
+Looking alone cannot find a reading written after the Stop hook, which is the whole reason the wait exists, so one turn in four keeps waiting properly and a session that starts reporting again is picked up rather than written off.
+A wait a stop ended counts towards none of this, because a cancelled wait says nothing about whether Claude reports at all.
+
+The line is a turn-boundary sample rather than a live meter, and it is not part of the session's history: the adapter generates it, so it never enters Claude's transcript and a reloaded session replays without any of the readings it showed while you worked.
+The session title is not an alternative either: Paseo keeps an ACP `session_info_update` title in `runtimeInfo().extra`, which its own clients never read and which does not emit state when it changes.
+Filling the real meter needs Paseo's generic ACP provider to honour `usage_update` the way its direct providers do, mapping it onto the `contextWindowMaxTokens` and `contextWindowUsedTokens` its `AgentUsage` already carries.
 
 ## Troubleshooting
 
