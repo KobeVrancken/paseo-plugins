@@ -3,3 +3,7 @@ packages:
   - "plugins/*"
 allowBuilds:
   node-pty: true
+minimumReleaseAgeExclude:
+  - '@getpaseo/client@0.7.0'
+  - '@getpaseo/protocol@0.7.0'
+  - '@getpaseo/relay@0.7.0'

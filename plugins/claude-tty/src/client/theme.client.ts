@@ -2,7 +2,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 
 /**
  * Paseo's own design scale, mirrored so the panel measures the same as the settings screens it sits
- * beside. The host hands plugins six flat colors and no metrics, so both have to be restated here.
+ * beside. The host hands plugins colors but no metrics, so the scale has to be restated here.
  */
 export const spacing = { 1: 4, 2: 8, 3: 12, 4: 16, 6: 24, 8: 32 } as const;
 export const fontSize = { sm: 12, base: 14, lg: 16 } as const;
@@ -42,17 +42,22 @@ export type Palette = {
   foregroundExtraMuted: string;
   accent: string;
   accentForeground: string;
+  statusSuccess: string;
+  statusWarning: string;
   statusDanger: string;
 };
 
 type Rgb = { r: number; g: number; b: number };
 
 /**
- * The surface ramp paseo's own themes are built on, measured off them as a fraction of the way from
- * surface0 to white on a dark theme and to black on a light one.
+ * The shades paseo keeps above the ramp it exposes, measured off its own themes. surface3 is a
+ * fraction of the way from surface2 to white on a dark theme and to black on a light one, and
+ * surface4 is that step again from surface3.
+ * borderAccent is measured from surface0 instead, because on a light theme it sits lighter than
+ * border rather than darker, so it cannot be a step in the same direction.
  */
-const DARK_RAMP = { surface1: 0.03, surface2: 0.065, surface3: 0.17, surface4: 0.25, border: 0.065, borderAccent: 0.1 };
-const LIGHT_RAMP = { surface1: 0.02, surface2: 0.043, surface3: 0.11, surface4: 0.16, border: 0.11, borderAccent: 0.075 };
+const DARK_RAMP = { surface3: 0.12, surface4: 0.11, borderAccent: 0.1 };
+const LIGHT_RAMP = { surface3: 0.065, surface4: 0.07, borderAccent: 0.075 };
 
 export function parseColor(value: string): Rgb | null {
   const text = value.trim();
@@ -107,52 +112,51 @@ export function alpha(value: string, amount: number): string {
 }
 
 /**
- * Expands the six exposed tokens into the ramp paseo's components are written against, so a plugin
- * theme and a built-in theme land on the same shades instead of on stacked translucent overlays.
+ * Adds the shades paseo's components are written against but does not expose, so a plugin surface
+ * and a built-in screen land on the same colors instead of on stacked translucent overlays.
  */
 export function derivePalette(theme: PluginTheme): Palette {
   const colors = theme.colors;
   const base = parseColor(colors.surface0);
+  const raised = parseColor(colors.surface2);
   const muted = parseColor(colors.foregroundMuted);
 
-  if (base === null) {
+  const host = {
+    surface0: colors.surface0,
+    surface1: colors.surface1,
+    surface2: colors.surface2,
+    border: colors.border,
+    foreground: colors.foreground,
+    foregroundMuted: colors.foregroundMuted,
+    accent: colors.accent,
+    accentForeground: colors.accentForeground,
+    statusSuccess: colors.statusSuccess,
+    statusWarning: colors.statusWarning,
+    statusDanger: colors.statusDanger,
+  };
+
+  if (base === null || raised === null) {
     return {
+      ...host,
       isDark: true,
-      surface0: colors.surface0,
-      surface1: colors.surface0,
-      surface2: colors.surface0,
-      surface3: colors.surface0,
-      surface4: colors.surface0,
-      border: colors.foregroundMuted,
-      borderAccent: colors.foregroundMuted,
-      foreground: colors.foreground,
-      foregroundMuted: colors.foregroundMuted,
+      surface3: colors.surface2,
+      surface4: colors.surface2,
+      borderAccent: colors.border,
       foregroundExtraMuted: colors.foregroundMuted,
-      accent: colors.accent,
-      accentForeground: colors.accentForeground,
-      statusDanger: colors.statusDanger,
     };
   }
 
   const isDark = isDarkColor(base);
   const ramp = isDark ? DARK_RAMP : LIGHT_RAMP;
   const target: Rgb = isDark ? { r: 255, g: 255, b: 255 } : { r: 0, g: 0, b: 0 };
-  const lift = (amount: number) => toHex(mix(base, target, amount));
+  const surface3 = mix(raised, target, ramp.surface3);
 
   return {
+    ...host,
     isDark,
-    surface0: colors.surface0,
-    surface1: lift(ramp.surface1),
-    surface2: lift(ramp.surface2),
-    surface3: lift(ramp.surface3),
-    surface4: lift(ramp.surface4),
-    border: lift(ramp.border),
-    borderAccent: lift(ramp.borderAccent),
-    foreground: colors.foreground,
-    foregroundMuted: colors.foregroundMuted,
+    surface3: toHex(surface3),
+    surface4: toHex(mix(surface3, target, ramp.surface4)),
+    borderAccent: toHex(mix(base, target, ramp.borderAccent)),
     foregroundExtraMuted: muted === null ? colors.foregroundMuted : toHex(mix(muted, base, 0.35)),
-    accent: colors.accent,
-    accentForeground: colors.accentForeground,
-    statusDanger: colors.statusDanger,
   };
 }
