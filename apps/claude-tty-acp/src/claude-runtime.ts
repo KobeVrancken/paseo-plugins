@@ -436,7 +436,7 @@ export class ClaudeRuntime {
     if (this.contextWaitMisses === CONTEXT_WAIT_MISS_LIMIT) {
       writeLog({
         level: "debug",
-        message: `Claude reported no context reading for ${CONTEXT_WAIT_MISS_LIMIT} turns; the adapter will stop waiting for one`,
+        message: `Claude reported no context reading for ${CONTEXT_WAIT_MISS_LIMIT} turns; the adapter will wait on only one turn in ${CONTEXT_WAIT_RETRY_TURNS} from here`,
         sessionId: this.sessionId,
         contextFile: this.contextFilePath,
       });
