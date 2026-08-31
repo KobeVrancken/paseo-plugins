@@ -32,6 +32,8 @@ test("stays absent for every reading Claude has not actually made", () => {
 
 test("scales token counts the way Claude's own reading reads", () => {
   assert.equal(formatTokens(812), "812");
+  // The count just below the scale is the one that reads as "1k" if the threshold slips, the same way 999,950 reads as "1000k".
+  assert.equal(formatTokens(999), "999");
   assert.equal(formatTokens(1000), "1k");
   assert.equal(formatTokens(33_656), "33.7k");
   assert.equal(formatTokens(137_000), "137k");
