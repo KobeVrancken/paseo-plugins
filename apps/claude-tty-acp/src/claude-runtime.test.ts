@@ -707,6 +707,7 @@ test("says nothing about the context when the session closes while the wait is r
   const spawns: SpawnRecord[] = [];
   let agent!: ClaudeTtyAgent;
   let contextPath = "";
+  let closing: Promise<void> | undefined;
   const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
     const pty = new FakePty(4100 + spawns.length);
     spawns.push({ file, args, options, pty });
@@ -722,7 +723,9 @@ test("says nothing about the context when the session closes while the wait is r
       if (update.sessionUpdate !== "agent_message_chunk" || update.content?.text !== "done") return;
       await writeFile(contextPath, contextPayload(42_000, 21));
       // setImmediate rather than a timer, because the check phase is what reliably falls between the wait's stat and its read of the file.
-      setImmediate(() => void agent.close());
+      setImmediate(() => {
+        closing = agent.close();
+      });
     },
   } as AgentSideConnection;
   agent = new ClaudeTtyAgent(connection, { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 500 });
@@ -737,6 +740,7 @@ test("says nothing about the context when the session closes while the wait is r
     assert.deepEqual(await turn, { stopReason: "end_turn" }, "a turn that has already completed cannot be failed by the session closing under its context wait");
     assert.deepEqual(contextLines(updates), []);
   } finally {
+    await closing;
     await agent.close();
     await rm(runtimeRoot, { force: true, recursive: true });
   }
