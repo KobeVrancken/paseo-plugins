@@ -529,7 +529,9 @@ export class ClaudeRuntime {
 
 function createHookSettings(command: string): Record<string, unknown> {
   const lifecycleHook = { type: "command", command, timeout: 30 };
-  const interactionHook = { type: "command", command, timeout: 600 };
+  // These two hooks render a card and wait for the person to answer it, which the default 600 seconds does not allow for.
+  // At the timeout Claude kills the hook and treats the call as undecided, then asks its own permission pipeline instead, which reaches the user as a second card for a tool they are already looking at.
+  const interactionHook = { type: "command", command, timeout: 86_400 };
   return {
     hooks: {
       PreToolUse: [{ hooks: [interactionHook] }],
@@ -542,13 +544,27 @@ function createHookSettings(command: string): Record<string, unknown> {
   };
 }
 
+// A hook that renders a card waits for as long as the person does, so this posts over node:http rather than fetch.
+// Node's fetch is undici, whose headersTimeout gives up on the response after 300 seconds; node:http imposes no such deadline.
 function hookClientSource(endpoint: string): string {
-  return `const chunks = [];
+  return `import http from "node:http";
+const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
-const response = await fetch(${JSON.stringify(endpoint)}, { method: "POST", headers: { "content-type": "application/json" }, body: Buffer.concat(chunks) });
-const body = await response.text();
-if (body) process.stdout.write(body);
-if (!response.ok) process.exitCode = 1;
+const payload = Buffer.concat(chunks);
+const status = await new Promise((resolve, reject) => {
+  const request = http.request(${JSON.stringify(endpoint)}, { method: "POST", headers: { "content-type": "application/json", "content-length": payload.length } }, (response) => {
+    const parts = [];
+    response.on("data", (part) => parts.push(part));
+    response.on("end", () => {
+      const body = Buffer.concat(parts).toString();
+      if (body) process.stdout.write(body);
+      resolve(response.statusCode ?? 0);
+    });
+  });
+  request.on("error", reject);
+  request.end(payload);
+});
+if (status < 200 || status > 299) process.exitCode = 1;
 `;
 }
 

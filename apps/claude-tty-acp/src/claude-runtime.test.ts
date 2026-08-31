@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -126,6 +127,45 @@ test("keeps three parallel PTYs, hooks, cancellation, and attachments isolated",
     await agent.close();
     assert.ok(spawns.every((spawn) => spawn.pty.killed));
     assert.equal((await readdir(runtimeRoot)).some((name) => name.startsWith("claude-tty-acp-")), false);
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+test("lets the hooks that wait on a person wait a day, over a transport with no deadline of its own", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-test-"));
+  const spawns: SpawnRecord[] = [];
+  let agent!: ClaudeTtyAgent;
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    const pty = new FakePty(1000 + spawns.length);
+    spawns.push({ file, args, options, pty });
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: args[args.indexOf("--session-id") + 1] }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/repo", mcpServers: [] });
+    void agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => spawns.length === 1);
+    const settingsPath = spawns[0]!.args[spawns[0]!.args.indexOf("--settings") + 1]!;
+    const hooks = (JSON.parse(await readFile(settingsPath, "utf8")) as { hooks: Record<string, Array<{ hooks: Array<{ timeout: number }> }>> }).hooks;
+    const client = await readFile(path.join(path.dirname(settingsPath), "hook-client.mjs"), "utf8");
+
+    // A card that waits on a person must outlive any reading of it, and the timeout only means what the transport allows.
+    // Claude kills the hook at its timeout and resolves the call without the answer the user is still typing; fetch would do the same at undici's 300 second headersTimeout.
+    assert.equal(hooks.PreToolUse?.[0]?.hooks[0]?.timeout, 86_400);
+    assert.equal(hooks.PermissionRequest?.[0]?.hooks[0]?.timeout, 86_400);
+    assert.equal(hooks.SessionStart?.[0]?.hooks[0]?.timeout, 30);
+    assert.match(client, /import http from "node:http"/);
+    assert.doesNotMatch(client, /fetch\(/);
+    assert.deepEqual(await runHookClient(path.join(path.dirname(settingsPath), "hook-client.mjs"), {
+      hook_event_name: "PreToolUse",
+      session_id: spawns[0]!.args[1]!,
+      tool_name: "Bash",
+      tool_input: { command: "pwd" },
+    }), { code: 0, stdout: "{}" });
+  } finally {
+    await agent.close();
     await rm(runtimeRoot, { force: true, recursive: true });
   }
 });
@@ -436,6 +476,16 @@ function workspaceTrustScreen(cwd: string): string {
     "  Yes, I trust this folder",
     "Enter to confirm · Esc to cancel",
   ].join("\r\n");
+}
+
+async function runHookClient(clientPath: string, payload: Record<string, unknown>): Promise<{ code: number; stdout: string }> {
+  const child = spawn(process.execPath, [clientPath], { stdio: ["pipe", "pipe", "inherit"] });
+  let stdout = "";
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => (stdout += chunk));
+  child.stdin.end(JSON.stringify(payload));
+  const code = await new Promise<number>((resolve) => child.on("close", (value) => resolve(value ?? 1)));
+  return { code, stdout: stdout.trim() };
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {

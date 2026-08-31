@@ -200,6 +200,71 @@ test("cancels outstanding hook waits when the turn ends", async () => {
   });
 });
 
+test("answers the permission pipeline from the question card the killed PreToolUse hook left on screen", async () => {
+  const requests: RequestPermissionRequest[] = [];
+  let answer: ((response: RequestPermissionResponse) => void) | null = null;
+  const bridge = new InteractionBridge(
+    "session",
+    "/work/repo",
+    connectionWith(async (request) => {
+      requests.push(request);
+      return new Promise<RequestPermissionResponse>((resolve) => {
+        answer = resolve;
+      });
+    }),
+  );
+  const questions = [{ question: "Choose runtime", options: [{ label: "Node" }, { label: "Bun" }], multiSelect: false }];
+  const preTool = bridge.handlePreToolUse({
+    tool_name: "AskUserQuestion",
+    tool_use_id: "question-tool",
+    tool_input: { questions },
+  });
+  await waitFor(() => requests.length > 0);
+
+  // Claude killed that hook at its timeout and fell through to its permission pipeline for the same call.
+  const permission = bridge.handlePermissionRequest({ tool_name: "AskUserQuestion", tool_input: { questions } });
+  await waitFor(() => answer !== null);
+  answer!(selected("answer-1"));
+
+  assert.deepEqual(await permission, {
+    hookSpecificOutput: {
+      hookEventName: "PermissionRequest",
+      decision: { behavior: "allow", updatedInput: { questions, answers: { "Choose runtime": "Bun" } } },
+    },
+  });
+  assert.deepEqual(await preTool, {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+      updatedInput: { questions, answers: { "Choose runtime": "Bun" } },
+    },
+  });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]?.toolCall.toolCallId, "question-tool-question-0-0");
+});
+
+test("renders a question the permission pipeline asks about on its own", async () => {
+  const requests: RequestPermissionRequest[] = [];
+  const bridge = new InteractionBridge(
+    "session",
+    "/work/repo",
+    connectionWith(async (request) => {
+      requests.push(request);
+      return selected("answer-0");
+    }),
+  );
+  const questions = [{ question: "Proceed?", options: [{ label: "Yes" }] }];
+  const response = await bridge.handlePermissionRequest({ tool_name: "AskUserQuestion", tool_input: { questions } });
+
+  assert.deepEqual(requests[0]?.toolCall.rawInput, questions[0]);
+  assert.deepEqual(response, {
+    hookSpecificOutput: {
+      hookEventName: "PermissionRequest",
+      decision: { behavior: "allow", updatedInput: { questions, answers: { "Proceed?": "Yes" } } },
+    },
+  });
+});
+
 async function waitFor(predicate: () => boolean): Promise<void> {
   while (!predicate()) await new Promise((resolve) => setImmediate(resolve));
 }

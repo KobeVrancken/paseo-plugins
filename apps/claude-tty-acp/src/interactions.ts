@@ -18,6 +18,10 @@ type PermissionChoice = {
   suggestion?: PermissionSuggestion;
 };
 
+type InteractionOutcome =
+  | { decision: "allow"; input: Record<string, unknown> }
+  | { decision: "deny"; reason: string };
+
 const TOOL_KINDS: Record<string, ToolKind> = {
   Bash: "execute",
   Edit: "edit",
@@ -37,6 +41,7 @@ export class InteractionBridge {
   private readonly connection: AgentSideConnection;
   private readonly pendingTools: PendingTool[] = [];
   private readonly pendingRequests = new Set<Deferred<RequestPermissionResponse>>();
+  private readonly liveInteractions = new Map<string, Promise<InteractionOutcome>>();
 
   constructor(sessionId: string, cwd: string, connection: AgentSideConnection) {
     this.sessionId = sessionId;
@@ -82,8 +87,8 @@ export class InteractionBridge {
     const input = objectValue(payload.tool_input) || {};
     const toolUseId = stringValue(payload.tool_use_id) || `tool-${randomUUID()}`;
     this.pendingTools.push({ id: toolUseId, name, input });
-    if (name === "AskUserQuestion") return this.handleQuestions(toolUseId, input);
-    if (name === "ExitPlanMode") return this.handlePlanApproval(toolUseId, input);
+    const interaction = this.interactionFor(name, input, toolUseId);
+    if (interaction) return preToolResponse(await interaction);
     return {};
   }
 
@@ -92,6 +97,8 @@ export class InteractionBridge {
     const input = objectValue(payload.tool_input) || {};
     const pending = this.takePendingTool(name, input);
     const toolCallId = pending?.id || `permission-${randomUUID()}`;
+    const interaction = this.interactionFor(name, input, toolCallId);
+    if (interaction) return permissionResponse(await interaction);
     const suggestions = Array.isArray(payload.permission_suggestions)
       ? payload.permission_suggestions.filter((value): value is PermissionSuggestion => objectValue(value) !== null)
       : [];
@@ -114,7 +121,25 @@ export class InteractionBridge {
     return permissionHookResponse(choice);
   }
 
-  private async handleQuestions(toolUseId: string, input: Record<string, unknown>): Promise<HookResponse> {
+  // Claude skips its permission pipeline only while the PreToolUse hook that renders these answers in time.
+  // A hook that died leaves the pipeline to ask instead, so the same interaction serves both events: it reuses the card already on screen, or renders one here.
+  // Rendering the tool again would show it as raw JSON, and that card's Allow leaves Claude waiting at its own dialog inside the PTY.
+  private interactionFor(name: string, input: Record<string, unknown>, toolUseId: string): Promise<InteractionOutcome> | null {
+    if (name === "AskUserQuestion") return this.interaction(name, input, () => this.handleQuestions(toolUseId, input));
+    if (name === "ExitPlanMode") return this.interaction(name, input, () => this.handlePlanApproval(toolUseId, input));
+    return null;
+  }
+
+  private interaction(name: string, input: Record<string, unknown>, start: () => Promise<InteractionOutcome>): Promise<InteractionOutcome> {
+    const key = `${name}:${JSON.stringify(input)}`;
+    const live = this.liveInteractions.get(key);
+    if (live) return live;
+    const pending = start().finally(() => this.liveInteractions.delete(key));
+    this.liveInteractions.set(key, pending);
+    return pending;
+  }
+
+  private async handleQuestions(toolUseId: string, input: Record<string, unknown>): Promise<InteractionOutcome> {
     const questions = Array.isArray(input.questions) ? input.questions : [];
     const answers: Record<string, string> = {};
     const deferredQuestions: string[] = [];
@@ -175,10 +200,10 @@ export class InteractionBridge {
       }
     }
     if (deferredQuestions.length > 0) return conversationalQuestionFallback(answers, deferredQuestions);
-    return preToolAllow({ ...input, answers });
+    return { decision: "allow", input: { ...input, answers } };
   }
 
-  private async handlePlanApproval(toolUseId: string, input: Record<string, unknown>): Promise<HookResponse> {
+  private async handlePlanApproval(toolUseId: string, input: Record<string, unknown>): Promise<InteractionOutcome> {
     const plan = stringValue(input.plan) || stringValue(input.planContent) || stringValue(input.plan_file_path);
     const response = await this.request({
       toolCall: {
@@ -194,8 +219,8 @@ export class InteractionBridge {
         { optionId: "deny-plan", name: "Keep planning", kind: "reject_once" },
       ],
     });
-    if (response.outcome.outcome === "selected" && response.outcome.optionId === "approve-plan") return preToolAllow(input);
-    return preToolDeny("The user did not approve leaving plan mode.");
+    if (response.outcome.outcome === "selected" && response.outcome.optionId === "approve-plan") return { decision: "allow", input };
+    return { decision: "deny", reason: "The user did not approve leaving plan mode." };
   }
 
   private request(params: { toolCall: ToolCallUpdate; options: PermissionOption[] }): Promise<RequestPermissionResponse> {
@@ -233,20 +258,38 @@ function permissionHookResponse(choice: PermissionChoice): HookResponse {
   };
 }
 
-function preToolAllow(updatedInput: Record<string, unknown>): HookResponse {
-  return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput } };
+function preToolResponse(outcome: InteractionOutcome): HookResponse {
+  if (outcome.decision === "deny") {
+    return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: outcome.reason } };
+  }
+  return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: outcome.input } };
 }
 
-function preToolDeny(reason: string): HookResponse {
-  return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } };
+// The answers have to ride in as updatedInput here too, because Claude reads a bare allow for a tool that asks the user something as permission to run its own dialog, which in this PTY nobody can answer.
+function permissionResponse(outcome: InteractionOutcome): HookResponse {
+  if (outcome.decision === "deny") {
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        decision: { behavior: "deny", message: outcome.reason, interrupt: false },
+      },
+    };
+  }
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PermissionRequest",
+      decision: { behavior: "allow", updatedInput: outcome.input },
+    },
+  };
 }
 
-function conversationalQuestionFallback(answers: Record<string, string> = {}, deferredQuestions: string[] = []): HookResponse {
+function conversationalQuestionFallback(answers: Record<string, string> = {}, deferredQuestions: string[] = []): InteractionOutcome {
   const completed = Object.keys(answers).length > 0 ? ` Keep these completed answers: ${JSON.stringify(answers)}.` : "";
   const deferred = deferredQuestions.length > 0 ? ` Ask only these deferred questions: ${JSON.stringify(deferredQuestions)}.` : "";
-  return preToolDeny(
-    `The user chose to answer some questions in chat.${completed}${deferred} Restate the deferred questions conversationally in one message, then end this turn and wait for the user's response.`,
-  );
+  return {
+    decision: "deny",
+    reason: `The user chose to answer some questions in chat.${completed}${deferred} Restate the deferred questions conversationally in one message, then end this turn and wait for the user's response.`,
+  };
 }
 
 function questionOption(optionId: string, name: string): PermissionOption {
