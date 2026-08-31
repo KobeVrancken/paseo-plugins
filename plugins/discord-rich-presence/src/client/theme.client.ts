@@ -8,6 +8,7 @@ export const spacing = { 1: 4, 2: 8, 3: 12, 4: 16, 6: 24, 8: 32 } as const;
 export const fontSize = { sm: 12, base: 14, lg: 16 } as const;
 export const radius = { sm: 2, base: 4, md: 6, lg: 8, xl: 12, full: 9999 } as const;
 export const controlHeight = { tight: 28, compact: 32, field: 44 } as const;
+export const iconSize = { xs: 12, sm: 14, md: 16, lg: 20 } as const;
 
 /** Paseo centres its settings screens at this width rather than letting rows span the window. */
 export const MAX_CONTENT_WIDTH = 720;

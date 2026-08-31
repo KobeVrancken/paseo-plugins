@@ -1,4 +1,5 @@
 import type { PluginTheme } from "@getpaseo/plugin";
+import { Icon } from "@getpaseo/plugin/react-native";
 import type { StyleProp, TextStyle, ViewStyle } from "react-native";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Dimensions, Modal, Platform, Pressable, Text, View } from "react-native";
@@ -6,6 +7,7 @@ import {
   controlHeight,
   derivePalette,
   fontSize,
+  iconSize,
   leading,
   radius,
   spacing,
@@ -17,7 +19,19 @@ export function usePalette(theme: PluginTheme): Palette {
   const colors = theme.colors;
   return useMemo(
     () => derivePalette(theme),
-    [colors.surface0, colors.foreground, colors.foregroundMuted, colors.accent, colors.accentForeground, colors.statusDanger],
+    [
+      colors.surface0,
+      colors.surface1,
+      colors.surface2,
+      colors.border,
+      colors.foreground,
+      colors.foregroundMuted,
+      colors.accent,
+      colors.accentForeground,
+      colors.statusSuccess,
+      colors.statusWarning,
+      colors.statusDanger,
+    ],
   );
 }
 
@@ -185,7 +199,7 @@ export function Select<Value extends string>({
         <Text numberOfLines={1} style={{ color: palette.foreground, fontSize: fontSize.base }}>
           {label ?? selected?.label ?? ""}
         </Text>
-        <Caret color={palette.foregroundMuted} open />
+        <Icon name="ChevronDown" size={iconSize.sm} color={palette.foregroundMuted} />
       </Pressable>
 
       <Modal visible={anchor !== null} transparent animationType="none" onRequestClose={close}>
@@ -430,27 +444,6 @@ export function Row({
   );
 }
 
-/** Paseo marks a disclosure with a chevron; a plugin has no icon set, so the caret is drawn. */
-function Caret({ color, open }: { color: string; open: boolean }) {
-  return (
-    <View style={{ width: 10, height: 10, alignItems: "center", justifyContent: "center" }}>
-      <View
-        style={{
-          width: 0,
-          height: 0,
-          borderTopWidth: 4,
-          borderBottomWidth: 4,
-          borderLeftWidth: 6,
-          borderTopColor: "transparent",
-          borderBottomColor: "transparent",
-          borderLeftColor: color,
-          transform: [{ rotate: open ? "90deg" : "0deg" }],
-        }}
-      />
-    </View>
-  );
-}
-
 /** A card that opens on its header row, for settings that most installs never touch. */
 export function Disclosure({
   palette,
@@ -481,7 +474,11 @@ export function Disclosure({
           backgroundColor: hovered || pressed ? palette.surface2 : "transparent",
         }))}
       >
-        <Caret color={palette.foregroundMuted} open={open} />
+        <Icon
+          name={open ? "ChevronDown" : "ChevronRight"}
+          size={iconSize.sm}
+          color={palette.foregroundMuted}
+        />
         <Text style={{ flex: 1, color: palette.foreground, fontSize: fontSize.base }}>{title}</Text>
         {summary ? (
           <Text numberOfLines={1} style={{ color: palette.foregroundMuted, fontSize: fontSize.sm }}>
