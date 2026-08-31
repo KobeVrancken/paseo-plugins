@@ -6,7 +6,9 @@ Each package is a plugin directory in its own right: paseo is installed against 
 Dependencies belong to the package that uses them, not the root, because the daemon's esbuild resolves from the plugin directory.
 `pnpm typecheck` and `pnpm test` at the root fan out to every package; the package-level scripts are the ones to run while working on a single plugin.
 
-Each package carries its own CLAUDE.md with the constraints that apply to it.
+Paseo documents the plugin contract at `public-docs/plugins/reference.md` in `getpaseo/paseo`: which modules each runtime may import, the theme tokens, the host UI components, and the CLI.
+Read it before inferring a rule from a failed build.
+Each package carries its own CLAUDE.md, which records only what that reference does not.
 
 ## Plugin READMEs
 
