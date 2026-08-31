@@ -621,7 +621,7 @@ function createSettings(command: string, contextFilePath: string): Record<string
   return {
     // Claude's status line is the only place it reports the tokens in the context window as a share of the window holding them.
     // Claude runs the command through a shell and renders its stdout, so this writes the payload to a file and prints nothing.
-    // It runs when the reading changes rather than on a timer, which is roughly once per assistant response.
+    // It runs when the reading changes rather than on a timer, which is at least once per assistant response.
     statusLine: { type: "command", command: `cat > ${shellQuote(contextFilePath)}` },
     hooks: {
       PreToolUse: [{ hooks: [interactionHook] }],

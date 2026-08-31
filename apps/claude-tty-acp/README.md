@@ -245,7 +245,7 @@ Hooks do not carry it either; their shared payload stops at `session_id`, `trans
 
 The status line is where Claude does report it, so the generated `settings.json` registers one.
 Claude runs a status line command through a shell and renders its stdout, so the command is `cat > <runtime directory>/context.json`: one `cat`, and no output to land on the terminal screen.
-It runs when the reading changes rather than on a timer, measured as one invocation for a session's startup and one for a whole turn, so the cost is a `cat` per assistant response.
+It runs when the reading changes rather than on a timer, which is at least once per assistant response: usage moves on every tool result too, so a tool-heavy turn costs several `cat`s rather than one.
 
 Registering one is not free of the screen, though: Claude drops most of its footer hints once a status line exists, `? for shortcuts` among them, and that was the first signal `isReadyScreen` looked for.
 Readiness now rests on the mode indicator, which Claude shows in every mode and writes as `manual mode on` in the default one, because the token badge is absent until a session has context and the bare prompt marker does not match while the input box still holds its placeholder.
