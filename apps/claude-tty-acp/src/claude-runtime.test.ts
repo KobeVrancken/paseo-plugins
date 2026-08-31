@@ -607,6 +607,43 @@ test("takes a context reading Claude writes while the transcript is still draini
   }
 });
 
+test("does not repeat the last reading when a turn ends in failure", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-context-refusal-test-"));
+  const updates: SessionNotification[] = [];
+  const spawns: SpawnRecord[] = [];
+  let agent!: ClaudeTtyAgent;
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    const pty = new FakePty(4400 + spawns.length);
+    spawns.push({ file, args, options, pty });
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 200 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/refusal", mcpServers: [] });
+    const contextPath = () => path.join(path.dirname(spawns[0]!.args.at(-1)!), "context.json");
+
+    const first = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
+    const stop = agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    await writeFile(contextPath(), contextPayload(42_000, 21));
+    await stop;
+    assert.deepEqual(await first, { stopReason: "end_turn" });
+
+    // A failed turn reports like any other, so it needs its own baseline: on the previous turn's it would find that turn's reading unmoved and report it a second time.
+    const second = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "again" }] });
+    await waitFor(() => spawns[0]!.pty.writes.length === 4);
+    await agent.hooks.dispatch({ hook_event_name: "StopFailure", session_id: session.sessionId, error: "Claude ran out of context" });
+    assert.deepEqual(await second, { stopReason: "refusal" });
+    assert.deepEqual(contextLines(updates), ["Context: 42k tokens (21%)"]);
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
 test("says nothing about the context when Claude's status line does not refresh", async () => {
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-context-quiet-test-"));
   const updates: SessionNotification[] = [];
