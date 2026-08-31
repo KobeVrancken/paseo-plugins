@@ -721,6 +721,8 @@ test("says nothing about the context when the session closes while the wait is r
       updates.push(notification);
       const update = notification.update as { sessionUpdate?: string; content?: { type?: string; text?: string } };
       if (update.sessionUpdate !== "agent_message_chunk" || update.content?.text !== "done") return;
+      // Nothing writes context.json before the Stop hook here, so the baseline mtime is 0 and this reading is newer whatever the clock does.
+      // The test therefore turns on the close alone; pre-writing a stale reading, as the happy-path test does, would let a coarse mtime pass it with the guard reverted.
       await writeFile(contextPath, contextPayload(42_000, 21));
       // setImmediate rather than a timer, because the check phase is what reliably falls between the wait's stat and its read of the file.
       setImmediate(() => {
