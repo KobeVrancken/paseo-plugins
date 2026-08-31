@@ -445,7 +445,8 @@ export class ClaudeRuntime {
     }
   }
 
-  // Claude truncates the file before it rewrites it, so a torn read is waited out rather than reported.
+  // Claude truncates the file before it rewrites it, so a torn read comes back as no reading and is waited out.
+  // The catch is for the file going rather than for its contents: a close removes the runtime directory under a wait that has already stat'd it, and throwing here would reject a turn that has completed.
   private async readContextWindow(rewrittenAfter: number): Promise<ContextWindow | null> {
     if (!this.contextFilePath) return null;
     const mtime = await this.contextMtime();
