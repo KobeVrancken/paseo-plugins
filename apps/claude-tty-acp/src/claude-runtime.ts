@@ -165,6 +165,7 @@ export class ClaudeRuntime {
     const turn = createDeferred<TurnResult>();
     this.turn = turn;
     this.cancelRequested = false;
+    this.contextWaitCancelled = false;
     this.interactions.beginTurn();
     this.assistantBaseline = this.translator.assistantChunks;
     await this.submit(prompt.text);
@@ -402,7 +403,6 @@ export class ClaudeRuntime {
     if (stopReason === "cancelled" || this.closed || !this.contextFilePath) return;
     // The mtime rather than the contents marks this turn's reading, because two turns that land on the same numbers write identical files.
     // See the README on why it is taken at the Stop hook and compared against itself rather than against Date.now().
-    this.contextWaitCancelled = false;
     const before = this.contextMtimeAtTurnEnd;
     const deadline = Date.now() + this.contextRefreshTimeoutMs;
     while (Date.now() < deadline && !this.closed && !this.contextWaitCancelled) {

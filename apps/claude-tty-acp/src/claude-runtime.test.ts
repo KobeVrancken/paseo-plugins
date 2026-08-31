@@ -729,6 +729,46 @@ test("stays ready once a status line has taken Claude's shortcut hint away", asy
   }
 });
 
+test("keeps a stop that lands while the turn's last message is still in flight", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-context-race-test-"));
+  const updates: SessionNotification[] = [];
+  const spawns: SpawnRecord[] = [];
+  let agent!: ClaudeTtyAgent;
+  let sessionId = "";
+  // `finishTurn` clears the turn before `prompt()` delivers the last assistant message, so a stop arriving during that
+  // round trip finds no turn to attach to and only has the flag to land on.
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      updates.push(notification);
+      const update = notification.update as { sessionUpdate?: string; content?: { text?: string } };
+      if (update.sessionUpdate === "agent_message_chunk" && update.content?.text === "done") await agent.cancel({ sessionId });
+    },
+  } as unknown as AgentSideConnection;
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    const pty = new FakePty(4000 + spawns.length);
+    spawns.push({ file, args, options, pty });
+    const claudeSessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: claudeSessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(connection, { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, cancelTimeoutMs: 5, contextRefreshTimeoutMs: 10_000 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/race", mcpServers: [] });
+    sessionId = session.sessionId;
+    const turn = agent.prompt({ sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
+    const started = Date.now();
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+    assert.ok(Date.now() - started < 5_000, "the stop has to end the wait rather than be reset by it");
+    assert.deepEqual(contextLines(updates), []);
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
 function contextPayload(tokens: number, percent: number): string {
   return JSON.stringify({
     context_window: { total_input_tokens: tokens, total_output_tokens: 4, context_window_size: 200_000, used_percentage: percent, remaining_percentage: 100 - percent },
