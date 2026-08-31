@@ -9,10 +9,12 @@ Adds all [Catppuccin](https://catppuccin.com/palette/) flavours — Latte, Frapp
 ## Installation
 
 ```sh
-paseo plugin install "/absolute/path/to/paseo-plugins/plugins/catppuccin-theme"
+paseo plugin add sleeyax/paseo-plugins --path plugins/catppuccin-theme
 ```
 
 Then pick your favorite theme in **Settings -> Appearance**.
+
+Paseo tracks the default branch from there, so `paseo plugin update catppuccin-theme` picks up new releases without a clone. `paseo plugin status` says what is installed against what is available.
 
 ## Settings
 

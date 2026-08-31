@@ -21,7 +21,7 @@ Every plugin's README follows the same template, so a new plugin starts from thi
 
 ## Installation
 
-<paseo plugin install "/absolute/path/to/paseo-plugins/plugins/<name>"; the samples assume the repo is the CWD>
+<paseo plugin add sleeyax/paseo-plugins --path plugins/<name>, plus the update/status note; a plugin that needs a built artefact from this repo documents the absolute-path form instead>
 
 <optional extra instructions>
 

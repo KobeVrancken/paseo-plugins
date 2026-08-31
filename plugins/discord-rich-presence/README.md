@@ -13,8 +13,10 @@ Show your current Paseo activity on Discord. The Paseo daemon and Discord app mu
 ## Installation
 
 ```sh
-paseo plugin install "/absolute/path/to/paseo-plugins/plugins/discord-rich-presence"
+paseo plugin add sleeyax/paseo-plugins --path plugins/discord-rich-presence
 ```
+
+Paseo tracks the default branch from there, so `paseo plugin update discord-rich-presence` picks up new releases without a clone. `paseo plugin status` says what is installed against what is available.
 
 The plugin uses a shared Paseo Discord application by default. Open **Discord Rich Presence** in the Paseo sidebar to see the connection status and change its settings.
 
@@ -93,4 +95,4 @@ scripts/render-assets.sh /path/to/paseo
 
 ## Attribution
 
-The files in `assets/` are derived from the AGPLv3-licensed artwork in [getpaseo/paseo](https://github.com/getpaseo/paseo/tree/main/packages/app/assets/images).
+The files in `assets/` are derived from the Apache-2.0-licensed artwork in [getpaseo/paseo](https://github.com/getpaseo/paseo/tree/main/packages/app/assets/images). Paseo relicensed from AGPLv3 to Apache-2.0; note that the licence's trademark clause does not grant any right to Paseo's name or marks.

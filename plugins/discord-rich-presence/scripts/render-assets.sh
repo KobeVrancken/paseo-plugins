@@ -7,7 +7,7 @@
 # workspace rows, in Paseo's colours, as bare circles: Discord renders the small image at about 20px, where
 # a whole icon with a dot on it is unreadable.
 #
-# Source: https://github.com/getpaseo/paseo, AGPLv3, packages/app/assets/images.
+# Source: https://github.com/getpaseo/paseo, Apache-2.0, packages/app/assets/images.
 set -euo pipefail
 
 PASEO_DIR="${1:-$HOME/Programming/misc/paseo}"

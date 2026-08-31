@@ -14,7 +14,7 @@ _None yet._
 paseo plugin install "/absolute/path/to/paseo-plugins/plugins/claude-tty"
 ```
 
-The plugin manages the checkout it was itself installed from, so install it from the same clone that holds `apps/claude-tty-acp`. Build the adapter there first:
+Unlike the other plugins here, this one is installed from a clone rather than from Git. A Git installation runs no package manager, and this plugin manages an adapter that has to be built, so install it from the same clone that holds `apps/claude-tty-acp` and build the adapter there first:
 
 ```sh
 pnpm install --frozen-lockfile
