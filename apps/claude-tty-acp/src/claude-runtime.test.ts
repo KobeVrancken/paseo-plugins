@@ -701,6 +701,47 @@ test("stops waiting for a context reading when the turn is cancelled mid-wait", 
   }
 });
 
+test("says nothing about the context when the session closes while the wait is reading", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-context-close-test-"));
+  const updates: SessionNotification[] = [];
+  const spawns: SpawnRecord[] = [];
+  let agent!: ClaudeTtyAgent;
+  let contextPath = "";
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    const pty = new FakePty(4100 + spawns.length);
+    spawns.push({ file, args, options, pty });
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  // The turn's last message is delivered between the Stop hook and the wait, so a close deferred from inside its send lands once the wait is already reading.
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      updates.push(notification);
+      const update = notification.update as { sessionUpdate?: string; content?: { type?: string; text?: string } };
+      if (update.sessionUpdate !== "agent_message_chunk" || update.content?.text !== "done") return;
+      await writeFile(contextPath, contextPayload(42_000, 21));
+      // setImmediate rather than a timer, because the check phase is what reliably falls between the wait's stat and its read of the file.
+      setImmediate(() => void agent.close());
+    },
+  } as AgentSideConnection;
+  agent = new ClaudeTtyAgent(connection, { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 500 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/close", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
+    contextPath = path.join(path.dirname(spawns[0]!.args.at(-1)!), "context.json");
+
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" }, "a turn that has already completed cannot be failed by the session closing under its context wait");
+    assert.deepEqual(contextLines(updates), []);
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
 test("stays ready once a status line has taken Claude's shortcut hint away", async () => {
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-ready-test-"));
   let agent!: ClaudeTtyAgent;

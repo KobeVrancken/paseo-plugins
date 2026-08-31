@@ -415,6 +415,9 @@ export class ClaudeRuntime {
     const deadline = Date.now() + (waits ? this.contextRefreshTimeoutMs : 0);
     do {
       const window = await this.readContextWindow(before);
+      // Neither of these returns counts towards the latch, because neither a session closing nor a stop says anything about whether Claude writes readings.
+      // The close is checked ahead of the send because the wait outlives the turn: a throw against a connection being torn down rejects a prompt that has already completed.
+      if (this.closed) return;
       if (window) {
         this.contextWaitMisses = 0;
         await this.connection.sessionUpdate({
@@ -427,8 +430,7 @@ export class ClaudeRuntime {
         });
         return;
       }
-      // A stop, or a session closing, says nothing about whether Claude writes readings, so neither counts towards the latch.
-      if (this.closed || this.contextWaitCancelled) return;
+      if (this.contextWaitCancelled) return;
       if (!waits || Date.now() >= deadline) break;
       await delay(CONTEXT_REFRESH_POLL_MS);
     } while (true);
