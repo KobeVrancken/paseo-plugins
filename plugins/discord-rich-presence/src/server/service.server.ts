@@ -36,7 +36,7 @@ export class PresenceService {
   private readonly daemon: DaemonConnection;
   private readonly discord: DiscordConnection;
   private settings: PresenceSettings | null = null;
-  private snapshot: PresenceSnapshot = { workspaces: [], agents: [] };
+  private snapshot: PresenceSnapshot = { workspaces: [], agents: [], projects: [] };
   private activity: PresenceActivity | null = null;
   private lastPayload: string | null = null;
   private lastSentAt: number | null = null;
@@ -76,23 +76,29 @@ export class PresenceService {
     return this.status();
   }
 
-  /** A project given a level of its own stays listed with no workspace open, so the choice can be undone. */
+  /**
+   * Every project the daemon has registered, so a level can be set on one that is not running.
+   * The saved settings only contribute a name for a project the daemon has since forgotten, which
+   * is what keeps a level assigned to it undoable.
+   */
   private knownProjects(settings: PresenceSettings): KnownProject[] {
-    const projects = new Map<string, KnownProject>();
-    for (const project of settings.projectDetailLevels) {
-      projects.set(project.rootPath, project);
-    }
+    const names = new Map<string, string>();
+    for (const project of settings.projectDetailLevels) names.set(project.rootPath, project.displayName);
     for (const workspace of this.snapshot.workspaces) {
-      if (projects.has(workspace.projectRootPath)) continue;
-      projects.set(workspace.projectRootPath, {
-        rootPath: workspace.projectRootPath,
-        displayName: workspace.projectDisplayName,
-        level: null,
-      });
+      names.set(workspace.projectRootPath, workspace.projectDisplayName);
     }
-    return [...projects.values()].sort((left, right) =>
-      left.displayName.localeCompare(right.displayName),
+    for (const project of this.snapshot.projects) names.set(project.rootPath, project.displayName);
+
+    const levels = new Map(
+      settings.projectDetailLevels.map((project) => [project.rootPath, project.level] as const),
     );
+    return [...names]
+      .map(([rootPath, displayName]) => ({
+        rootPath,
+        displayName,
+        level: levels.get(rootPath) ?? null,
+      }))
+      .sort((left, right) => left.displayName.localeCompare(right.displayName));
   }
 
   private applyConnection(): void {

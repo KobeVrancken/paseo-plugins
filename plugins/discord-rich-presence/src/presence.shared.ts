@@ -45,6 +45,8 @@ export type PresenceSettings = {
 export type PresenceSnapshot = {
   workspaces: WorkspaceActivity[];
   agents: AgentActivity[];
+  /** Every project the daemon has registered. The presence itself is computed from activity, so this only feeds the settings listing. */
+  projects: Project[];
 };
 
 /**

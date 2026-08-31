@@ -31,6 +31,7 @@ function snapshot(overrides: Partial<PresenceSnapshot> = {}): PresenceSnapshot {
   return {
     workspaces: [workspace()],
     agents: [],
+    projects: [],
     ...overrides,
   };
 }

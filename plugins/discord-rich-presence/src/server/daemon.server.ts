@@ -111,18 +111,21 @@ export class DaemonConnection {
   /**
    * Lists rather than accumulating the update stream: the presence only needs a handful of fields,
    * and a list call keeps a missed or replayed event from drifting the counts.
+   * The project list is the settings surface's, not the presence's: a project with no workspace
+   * open still has to be listed so a detail level can be set on it.
    */
   async snapshot(): Promise<PresenceSnapshot | null> {
     if (!this.client) return null;
     try {
       const subscribe = this.subscribed ? undefined : {};
-      const [workspaces, agents] = await Promise.all([
+      const [workspaces, agents, projects] = await Promise.all([
         this.client.workspaces.list({ page: { limit: WORKSPACE_PAGE_LIMIT }, subscribe }),
         this.client.agents.list({ scope: "active", page: { limit: AGENT_PAGE_LIMIT }, subscribe }),
+        this.client.projects.list(),
       ]);
       this.subscribed = true;
       this.state = { status: "connected" };
-      return toPresenceSnapshot(workspaces.entries, agents.entries);
+      return toPresenceSnapshot(workspaces.entries, agents.entries, projects.projects);
     } catch (error) {
       this.state = { status: "failed", error: error instanceof Error ? error.message : String(error) };
       this.subscribed = false;

@@ -321,7 +321,7 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
             }
           />
           {status.projects.length === 0 ? (
-            <Row palette={palette} title="No projects open." dimmed divided />
+            <Row palette={palette} title="Paseo has no projects." dimmed divided />
           ) : (
             status.projects.map((project) => (
               <ProjectLevelRow

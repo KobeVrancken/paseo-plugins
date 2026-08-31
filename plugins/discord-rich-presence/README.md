@@ -32,7 +32,7 @@ Native, Snap, and Flatpak Discord installations are supported. The plugin reconn
 
 The second line counts only the project named on the first, so work in your other projects never shows through.
 
-**All projects** sets the level every project follows. Each project beneath it starts on **Default** and can be given a level of its own instead, saved by project path until you set it back to **Default** — a project you hid stays listed after you close it, so you can put it back. Workspace titles can contain task details, so review them before leaving a project on **Detailed**.
+**All projects** sets the level every project follows. Every project Paseo knows is listed beneath it, whether or not it has a workspace open, and each starts on **Default**. Giving one a level of its own saves it by project path until you set it back to **Default**. Workspace titles can contain task details, so review them before leaving a project on **Detailed**.
 
 A project set to **Hidden** is never named: Paseo names another project with active work when possible, and otherwise falls back to `Using Paseo`.
 
