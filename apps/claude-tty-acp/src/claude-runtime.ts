@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { AgentSideConnection, ContentBlock, PromptResponse } from "@agentclientprotocol/sdk";
@@ -37,6 +37,9 @@ const CONTROL_D = "\u0004";
 const CURSOR_DOWN = "\u001b[B";
 const ENTER = "\r";
 const STARTUP_POLL_INTERVAL_MS = 25;
+// Claude re-renders its status line after the Stop hook rather than before it, measured at ~320ms, so the reading for the turn that just ended only lands once the file changes again.
+const CONTEXT_REFRESH_TIMEOUT_MS = 1_000;
+const CONTEXT_REFRESH_POLL_MS = 25;
 const WORKSPACE_TRUST_KEY_DELAY_MS = 500;
 const WORKSPACE_TRUST_SELECTION_TIMEOUT_MS = 3_000;
 
@@ -48,6 +51,7 @@ export type RuntimeDependencies = {
   startupTimeoutMs?: number;
   readinessTimeoutMs?: number;
   cancelTimeoutMs?: number;
+  contextRefreshTimeoutMs?: number;
   submitDelayMs?: number;
   transcriptPollIntervalMs?: number;
   workspaceTrustKeyDelayMs?: number;
@@ -63,6 +67,11 @@ export type RuntimeDependencies = {
   onClaudeSessionChange?: (claudeSessionId: string) => Promise<void>;
 };
 
+type ContextWindow = {
+  tokens: number;
+  percent: number;
+};
+
 type TurnResult = {
   response: PromptResponse;
   assistantMessage?: string;
@@ -76,6 +85,7 @@ export class ClaudeRuntime {
   private readonly startupTimeoutMs: number;
   private readonly readinessTimeoutMs: number;
   private readonly cancelTimeoutMs: number;
+  private readonly contextRefreshTimeoutMs: number;
   private readonly submitDelayMs: number;
   private readonly transcriptPollIntervalMs: number | undefined;
   private readonly workspaceTrustKeyDelayMs: number;
@@ -103,6 +113,8 @@ export class ClaudeRuntime {
   private cancelRequested = false;
   private assistantBaseline = 0;
   private closed = false;
+  private contextFilePath: string | null = null;
+  private contextMtimeAtTurnEnd = 0;
   private intentionalExit: Deferred<void> | null = null;
 
   constructor(
@@ -129,6 +141,7 @@ export class ClaudeRuntime {
     this.startupTimeoutMs = dependencies.startupTimeoutMs ?? STARTUP_TIMEOUT_MS;
     this.readinessTimeoutMs = dependencies.readinessTimeoutMs ?? STARTUP_TIMEOUT_MS;
     this.cancelTimeoutMs = dependencies.cancelTimeoutMs ?? CANCEL_TIMEOUT_MS;
+    this.contextRefreshTimeoutMs = dependencies.contextRefreshTimeoutMs ?? CONTEXT_REFRESH_TIMEOUT_MS;
     this.submitDelayMs = dependencies.submitDelayMs ?? SUBMIT_DELAY_MS;
     this.transcriptPollIntervalMs = dependencies.transcriptPollIntervalMs;
     this.workspaceTrustKeyDelayMs = dependencies.workspaceTrustKeyDelayMs ?? WORKSPACE_TRUST_KEY_DELAY_MS;
@@ -171,6 +184,7 @@ export class ClaudeRuntime {
           },
         });
       }
+      await this.emitContextUsage(result.response.stopReason);
       return result.response;
     } finally {
       await cleanupPromptFiles(prompt.files);
@@ -238,9 +252,10 @@ export class ClaudeRuntime {
     this.hookRegistration = this.hooks.register(this.currentClaudeSessionId, (payload) => this.handleHook(payload));
     const hookClientPath = path.join(this.runtimeDirectory, "hook-client.mjs");
     await writeFile(hookClientPath, hookClientSource(this.hookRegistration.endpoint), { mode: 0o600 });
+    this.contextFilePath = path.join(this.runtimeDirectory, "context.json");
     const settingsPath = path.join(this.runtimeDirectory, "settings.json");
     const hookCommand = `${shellQuote(process.execPath)} ${shellQuote(hookClientPath)}`;
-    await writeFile(settingsPath, `${JSON.stringify(createHookSettings(hookCommand))}\n`, { mode: 0o600 });
+    await writeFile(settingsPath, `${JSON.stringify(createSettings(hookCommand, this.contextFilePath))}\n`, { mode: 0o600 });
     this.ready = createDeferred<void>();
     this.trustPrompt = createDeferred<void>();
     const claudeBin = process.env.CLAUDE_BIN || "claude";
@@ -310,6 +325,7 @@ export class ClaudeRuntime {
         this.ready?.resolve();
         break;
       case "Stop":
+        this.contextMtimeAtTurnEnd = await this.contextMtime();
         await this.transcript.flushUntilStable();
         this.finishTurn(
           this.cancelRequested
@@ -321,6 +337,7 @@ export class ClaudeRuntime {
         );
         break;
       case "StopFailure":
+        this.contextMtimeAtTurnEnd = await this.contextMtime();
         await this.transcript.flushUntilStable();
         this.finishTurn(
           this.cancelRequested
@@ -378,6 +395,53 @@ export class ClaudeRuntime {
     const turn = this.turn;
     this.turn = null;
     turn.resolve(result);
+  }
+
+  // Paseo's own usage meter is unreachable from an external ACP provider, so the reading goes in the timeline as text.
+  // A cancelled turn is left alone, because Paseo only allows 2s for the prompt it is replacing to answer.
+  private async emitContextUsage(stopReason: string): Promise<void> {
+    if (stopReason === "cancelled" || this.closed || !this.contextFilePath) return;
+    // Claude rewrites the file after the Stop hook, so this turn's reading is the one written after the mtime the hook saw.
+    // That mtime is taken when the hook arrives, not here: draining the transcript and delivering the turn's last message both run in between and can outlast Claude's refresh.
+    // Comparing the file's clock against itself rather than against Date.now() also sidesteps the coarse clock Linux stamps files from, which can date a write milliseconds before the wall clock that observed it.
+    // The timestamp rather than the contents is what marks the reading, because two turns that land on the same numbers write identical files.
+    const before = this.contextMtimeAtTurnEnd;
+    const deadline = Date.now() + this.contextRefreshTimeoutMs;
+    while (Date.now() < deadline && !this.closed) {
+      await delay(CONTEXT_REFRESH_POLL_MS);
+      const window = await this.readContextWindow(before);
+      if (!window || this.closed) continue;
+      await this.connection.sessionUpdate({
+        sessionId: this.sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          messageId: randomUUID(),
+          content: { type: "text", text: `Context: ${formatTokens(window.tokens)} tokens (${window.percent}%)` },
+        },
+      });
+      return;
+    }
+  }
+
+  // Claude truncates the file before it rewrites it, so a torn read is waited out rather than reported.
+  private async readContextWindow(rewrittenAfter: number): Promise<ContextWindow | null> {
+    if (!this.contextFilePath) return null;
+    const mtime = await this.contextMtime();
+    if (mtime <= rewrittenAfter) return null;
+    try {
+      return contextWindow(await readFile(this.contextFilePath, "utf8"));
+    } catch {
+      return null;
+    }
+  }
+
+  private async contextMtime(): Promise<number> {
+    if (!this.contextFilePath) return 0;
+    try {
+      return (await stat(this.contextFilePath)).mtimeMs;
+    } catch {
+      return 0;
+    }
   }
 
   private async finishCancelled(): Promise<void> {
@@ -527,12 +591,16 @@ export class ClaudeRuntime {
   }
 }
 
-function createHookSettings(command: string): Record<string, unknown> {
+function createSettings(command: string, contextFilePath: string): Record<string, unknown> {
   const lifecycleHook = { type: "command", command, timeout: 30 };
   // These two hooks render a card and wait for the person to answer it, which the default 600 seconds does not allow for.
   // At the timeout Claude kills the hook and treats the call as undecided, then asks its own permission pipeline instead, which reaches the user as a second card for a tool they are already looking at.
   const interactionHook = { type: "command", command, timeout: 86_400 };
   return {
+    // Claude's status line is the only place it reports the tokens in the context window as a share of the window holding them.
+    // Claude runs the command through a shell and renders its stdout, so this writes the payload to a file and prints nothing.
+    // It runs when the reading changes rather than on a timer, which is roughly once per assistant response.
+    statusLine: { type: "command", command: `cat > ${shellQuote(contextFilePath)}` },
     hooks: {
       PreToolUse: [{ hooks: [interactionHook] }],
       PermissionRequest: [{ hooks: [interactionHook] }],
@@ -566,6 +634,30 @@ const status = await new Promise((resolve, reject) => {
 });
 if (status < 200 || status > 299) process.exitCode = 1;
 `;
+}
+
+// Both numbers are Claude's own: it sums the last message's input, cache creation and cache read tokens, and rounds that against the window it resolved.
+function contextWindow(contents: string): ContextWindow | null {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(contents);
+  } catch {
+    return null;
+  }
+  const record = payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as Record<string, unknown>) : null;
+  const window = record?.context_window;
+  if (!window || typeof window !== "object" || Array.isArray(window)) return null;
+  const tokens = (window as Record<string, unknown>).total_input_tokens;
+  const percent = (window as Record<string, unknown>).used_percentage;
+  if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens <= 0) return null;
+  if (typeof percent !== "number" || !Number.isFinite(percent)) return null;
+  return { tokens, percent };
+}
+
+function formatTokens(tokens: number): string {
+  if (tokens < 1000) return String(tokens);
+  const scaled = tokens < 1_000_000 ? { value: tokens / 1000, suffix: "k" } : { value: tokens / 1_000_000, suffix: "M" };
+  return `${scaled.value.toFixed(1).replace(/\.0$/, "")}${scaled.suffix}`;
 }
 
 function shellQuote(value: string): string {

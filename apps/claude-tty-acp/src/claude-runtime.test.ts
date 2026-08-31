@@ -527,3 +527,125 @@ test("resubmits a prompt Claude leaves sitting in its input box", async () => {
     await rm(runtimeRoot, { force: true, recursive: true });
   }
 });
+
+test("reports the context reading Claude's status line writes after the turn", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-context-test-"));
+  const updates: SessionNotification[] = [];
+  const spawns: SpawnRecord[] = [];
+  let agent!: ClaudeTtyAgent;
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    const pty = new FakePty(3400 + spawns.length);
+    spawns.push({ file, args, options, pty });
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 500 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/context", mcpServers: [] });
+    const first = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
+
+    const settingsPath = spawns[0]!.args.at(-1)!;
+    const contextPath = path.join(path.dirname(settingsPath), "context.json");
+    const settings = JSON.parse(await readFile(settingsPath, "utf8")) as { statusLine?: { type?: string; command?: string } };
+    assert.equal(settings.statusLine?.type, "command");
+    assert.equal(settings.statusLine?.command, `cat > '${contextPath}'`);
+
+    // Claude renders the status line during the turn too, and that reading is the stale one.
+    await writeFile(contextPath, contextPayload(20_000, 10));
+    // It keeps rendering after the Stop hook, truncating the file before each rewrite, so the torn state has to be waited out rather than reported.
+    let render = 0;
+    const renders = setInterval(
+      () => void writeFile(contextPath, render++ === 0 ? '{"context_window":{"total_input_tok' : contextPayload(137_400, 69)),
+      25,
+    );
+    try {
+      await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+      assert.deepEqual(await first, { stopReason: "end_turn" });
+    } finally {
+      clearInterval(renders);
+    }
+    assert.deepEqual(contextLines(updates), ["Context: 137.4k tokens (69%)"]);
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+test("takes a context reading Claude writes while the transcript is still draining", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-context-drain-test-"));
+  const updates: SessionNotification[] = [];
+  const spawns: SpawnRecord[] = [];
+  let agent!: ClaudeTtyAgent;
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    const pty = new FakePty(3600 + spawns.length);
+    spawns.push({ file, args, options, pty });
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 500 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/drain", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
+    const contextPath = path.join(path.dirname(spawns[0]!.args.at(-1)!), "context.json");
+
+    // Draining the transcript and delivering the turn's last message both sit between the Stop hook and the read,
+    // so a reading written in that window is this turn's and has to be taken rather than judged stale.
+    const stop = agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    await writeFile(contextPath, contextPayload(42_000, 21));
+    await stop;
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+    assert.deepEqual(contextLines(updates), ["Context: 42k tokens (21%)"]);
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+test("says nothing about the context when Claude's status line does not refresh", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-context-quiet-test-"));
+  const updates: SessionNotification[] = [];
+  const spawns: SpawnRecord[] = [];
+  let agent!: ClaudeTtyAgent;
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    const pty = new FakePty(3500 + spawns.length);
+    spawns.push({ file, args, options, pty });
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 100 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/quiet", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
+    // A reading that never moves is the one from before the turn, so it is not this turn's.
+    await writeFile(path.join(path.dirname(spawns[0]!.args.at(-1)!), "context.json"), contextPayload(20_000, 10));
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+    assert.deepEqual(contextLines(updates), []);
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+function contextPayload(tokens: number, percent: number): string {
+  return JSON.stringify({
+    context_window: { total_input_tokens: tokens, total_output_tokens: 4, context_window_size: 200_000, used_percentage: percent, remaining_percentage: 100 - percent },
+  });
+}
+
+function contextLines(updates: SessionNotification[]): string[] {
+  return updates.flatMap((notification) => {
+    const update = notification.update as { sessionUpdate?: string; content?: { type?: string; text?: string } };
+    const text = update.sessionUpdate === "agent_message_chunk" && update.content?.type === "text" ? update.content.text : undefined;
+    return text?.startsWith("Context: ") ? [text] : [];
+  });
+}
