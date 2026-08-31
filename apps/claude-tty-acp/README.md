@@ -260,7 +260,8 @@ That wait is what the turn's own completion is held on, so a session that never 
 Looking alone cannot find a reading written after the Stop hook, which is the whole reason the wait exists, so one turn in four keeps waiting properly and a session that starts reporting again is picked up rather than written off.
 A wait a stop ended counts towards none of this, because a cancelled wait says nothing about whether Claude reports at all.
 
-The line is a turn-boundary sample rather than a live meter, and the session title is not an alternative: Paseo keeps an ACP `session_info_update` title in `runtimeInfo().extra`, which its own clients never read and which does not emit state when it changes.
+The line is a turn-boundary sample rather than a live meter, and it is not part of the session's history: the adapter generates it, so it never enters Claude's transcript and a reloaded session replays without any of the readings it showed while you worked.
+The session title is not an alternative either: Paseo keeps an ACP `session_info_update` title in `runtimeInfo().extra`, which its own clients never read and which does not emit state when it changes.
 Filling the real meter needs Paseo's generic ACP provider to honour `usage_update` the way its direct providers do, mapping it onto the `contextWindowMaxTokens` and `contextWindowUsedTokens` its `AgentUsage` already carries.
 
 ## Troubleshooting
