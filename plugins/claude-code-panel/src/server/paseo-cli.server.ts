@@ -81,6 +81,14 @@ async function paseo(args: string[]): Promise<string> {
         args,
       );
     }
+    // The CLI reports a refused password as though the daemon were not running at all, and its
+    // advice ("Start the daemon with: paseo daemon start") sends you looking in the wrong place.
+    if (message.includes("Password required")) {
+      throw new PaseoCliError(
+        `\`paseo ${args.join(" ")}\` was refused: the daemon has a password set, so PASEO_PASSWORD must be in the environment it spawns plugins with`,
+        args,
+      );
+    }
     throw new PaseoCliError(`\`paseo ${args.join(" ")}\` failed: ${message}`, args);
   }
 }
