@@ -41,6 +41,12 @@ const STARTUP_POLL_INTERVAL_MS = 25;
 // Claude re-renders its status line after the Stop hook rather than before it, measured at ~320ms, so the reading for the turn that just ended only lands once the file changes again.
 const CONTEXT_REFRESH_TIMEOUT_MS = 1_000;
 const CONTEXT_REFRESH_POLL_MS = 25;
+// A session whose status line never writes would otherwise wait the whole budget on every turn for a reading that is not coming.
+// After this many turns without one it stops waiting and only looks, which costs a stat.
+const CONTEXT_WAIT_MISS_LIMIT = 3;
+// Looking alone cannot find a reading Claude writes after the Stop hook, so one turn in this many waits properly.
+// Without that a session which starts reporting again would never be noticed, because every look lands before the write it is looking for.
+const CONTEXT_WAIT_RETRY_TURNS = 4;
 const WORKSPACE_TRUST_KEY_DELAY_MS = 500;
 const WORKSPACE_TRUST_SELECTION_TIMEOUT_MS = 3_000;
 
@@ -112,6 +118,7 @@ export class ClaudeRuntime {
   private contextFilePath: string | null = null;
   private contextMtimeAtTurnEnd = 0;
   private contextWaitCancelled = false;
+  private contextWaitMisses = 0;
   private intentionalExit: Deferred<void> | null = null;
 
   constructor(
@@ -404,20 +411,35 @@ export class ClaudeRuntime {
     // The mtime rather than the contents marks this turn's reading, because two turns that land on the same numbers write identical files.
     // See the README on why it is taken at the Stop hook and compared against itself rather than against Date.now().
     const before = this.contextMtimeAtTurnEnd;
-    const deadline = Date.now() + this.contextRefreshTimeoutMs;
-    while (Date.now() < deadline && !this.closed && !this.contextWaitCancelled) {
-      await delay(CONTEXT_REFRESH_POLL_MS);
+    const waits = this.contextWaitMisses < CONTEXT_WAIT_MISS_LIMIT || this.contextWaitMisses % CONTEXT_WAIT_RETRY_TURNS === 0;
+    const deadline = Date.now() + (waits ? this.contextRefreshTimeoutMs : 0);
+    do {
       const window = await this.readContextWindow(before);
-      if (!window || this.closed) continue;
-      await this.connection.sessionUpdate({
+      if (window) {
+        this.contextWaitMisses = 0;
+        await this.connection.sessionUpdate({
+          sessionId: this.sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            messageId: randomUUID(),
+            content: { type: "text", text: `Context: ${formatTokens(window.tokens)} tokens (${window.percent}%)` },
+          },
+        });
+        return;
+      }
+      // A stop, or a session closing, says nothing about whether Claude writes readings, so neither counts towards the latch.
+      if (this.closed || this.contextWaitCancelled) return;
+      if (!waits || Date.now() >= deadline) break;
+      await delay(CONTEXT_REFRESH_POLL_MS);
+    } while (true);
+    this.contextWaitMisses += 1;
+    if (this.contextWaitMisses === CONTEXT_WAIT_MISS_LIMIT) {
+      writeLog({
+        level: "debug",
+        message: `Claude reported no context reading for ${CONTEXT_WAIT_MISS_LIMIT} turns; the adapter will stop waiting for one`,
         sessionId: this.sessionId,
-        update: {
-          sessionUpdate: "agent_message_chunk",
-          messageId: randomUUID(),
-          content: { type: "text", text: `Context: ${formatTokens(window.tokens)} tokens (${window.percent}%)` },
-        },
+        contextFile: this.contextFilePath,
       });
-      return;
     }
   }
 

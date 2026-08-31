@@ -256,6 +256,10 @@ The mtime is taken at the hook rather than at the read because draining the tran
 The timestamp rather than the contents is what marks a reading as this turn's, because two turns that land on the same numbers write identical files.
 Claude truncates the file before each rewrite, so a torn read is waited out rather than reported, and a cancelled turn skips the wait entirely because Paseo allows only 2s for the prompt it is replacing to answer.
 
+That wait is what the turn's own completion is held on, so a session that never reports would otherwise pay it forever: after three turns without a reading it stops waiting and only looks, which costs a `stat`, and says so once in the log.
+Looking alone cannot find a reading written after the Stop hook, which is the whole reason the wait exists, so one turn in four keeps waiting properly and a session that starts reporting again is picked up rather than written off.
+A wait a stop ended counts towards none of this, because a cancelled wait says nothing about whether Claude reports at all.
+
 The line is a turn-boundary sample rather than a live meter, and the session title is not an alternative: Paseo keeps an ACP `session_info_update` title in `runtimeInfo().extra`, which its own clients never read and which does not emit state when it changes.
 Filling the real meter needs Paseo's generic ACP provider to honour `usage_update` the way its direct providers do, mapping it onto the `contextWindowMaxTokens` and `contextWindowUsedTokens` its `AgentUsage` already carries.
 
