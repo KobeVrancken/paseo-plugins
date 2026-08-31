@@ -412,7 +412,7 @@ export class ClaudeRuntime {
     // See the README on why it is taken at the Stop hook and compared against itself rather than against Date.now().
     const before = this.contextMtimeAtTurnEnd;
     const waits = this.contextWaitMisses < CONTEXT_WAIT_MISS_LIMIT || this.contextWaitMisses % CONTEXT_WAIT_RETRY_TURNS === 0;
-    const deadline = Date.now() + (waits ? this.contextRefreshTimeoutMs : 0);
+    const deadline = Date.now() + this.contextRefreshTimeoutMs;
     do {
       const window = await this.readContextWindow(before);
       // Neither of these returns counts towards the latch, because neither a session closing nor a stop says anything about whether Claude writes readings.
