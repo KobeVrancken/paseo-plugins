@@ -23,7 +23,9 @@ export function contextWindow(contents: string): ContextWindow | null {
 
 export function formatTokens(tokens: number): string {
   if (tokens < 1000) return String(tokens);
-  const scaled = tokens < 1_000_000 ? { value: tokens / 1000, suffix: "k" } : { value: tokens / 1_000_000, suffix: "M" };
+  // A count that rounds up to a thousand thousands reads as 1M rather than 1000k.
+  const thousands = tokens / 1000;
+  const scaled = thousands < 999.95 ? { value: thousands, suffix: "k" } : { value: tokens / 1_000_000, suffix: "M" };
   return `${scaled.value.toFixed(1).replace(/\.0$/, "")}${scaled.suffix}`;
 }
 

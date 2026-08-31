@@ -35,6 +35,9 @@ test("scales token counts the way Claude's own reading reads", () => {
   assert.equal(formatTokens(1000), "1k");
   assert.equal(formatTokens(33_656), "33.7k");
   assert.equal(formatTokens(137_000), "137k");
+  assert.equal(formatTokens(999_949), "999.9k");
+  // 999,950 rounds up to a thousand thousands, which must not read as "1000k".
+  assert.equal(formatTokens(999_950), "1M");
   assert.equal(formatTokens(1_000_000), "1M");
   assert.equal(formatTokens(1_240_000), "1.2M");
 });
