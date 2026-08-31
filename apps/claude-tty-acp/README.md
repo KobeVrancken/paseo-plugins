@@ -236,7 +236,7 @@ Claude does report the wait over its `Notification` hook, which the adapter does
 Paseo's token usage meter renders only once it knows both a context window size and the tokens currently in it, and it fills those in for its own providers alone.
 ACP carries the pair as a `usage_update` session notification, which Paseo's generic ACP provider validates and then discards, so nothing an external provider reports can reach the meter.
 
-The adapter ends each turn with a `Context: 137.4k tokens (69%)` line instead, and stays silent until Claude has reported one.
+The adapter reports a `Context: 137.4k tokens (69%)` line at the end of a turn instead, and stays silent until Claude has reported one.
 
 Both numbers are Claude's own, because neither can be reconstructed.
 The transcript records per-message `usage` counts but nothing about the window holding them: no record type in it carries a context window at all, and its `message.model` drops the `[1m]` marker that separates a 200k session from a 1M one, so a model ID read from there implies nothing.
