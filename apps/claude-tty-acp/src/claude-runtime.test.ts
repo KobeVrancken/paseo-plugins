@@ -920,15 +920,25 @@ test("picks a session back up when its readings resume after it stopped waiting"
     const contextPath = () => path.join(path.dirname(spawns[0]!.args.at(-1)!), "context.json");
     // Claude writes its reading after the Stop hook, so a turn that only looks can never find one: three of these miss and the session stops waiting.
     // The fifth is the one that waits again, and Claude reports on exactly that turn, late enough that only waiting can see it.
-    for (let index = 0; index < 5; index += 1) {
+    // The sixth misses and the seventh reports again, which holds only because a reading clears the misses: left uncleared, a single miss after recovery drops the session straight back to looking and loses what the seventh turn does write.
+    const readings = new Map([
+      [4, contextPayload(42_000, 21)],
+      [6, contextPayload(55_000, 28)],
+    ]);
+    for (let index = 0; index < 7; index += 1) {
       const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: `turn ${index}` }] });
       await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === (index + 1) * 2);
       const stop = agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
-      if (index === 4) setTimeout(() => void writeFile(contextPath(), contextPayload(42_000, 21)), AFTER_THE_LOOK_MS);
+      const reading = readings.get(index);
+      if (reading) setTimeout(() => void writeFile(contextPath(), reading), AFTER_THE_LOOK_MS);
       await stop;
       assert.deepEqual(await turn, { stopReason: "end_turn" });
     }
-    assert.deepEqual(contextLines(updates), ["Context: 42k tokens (21%)"], "a session whose readings come back has to be picked up again");
+    assert.deepEqual(
+      contextLines(updates),
+      ["Context: 42k tokens (21%)", "Context: 55k tokens (28%)"],
+      "a session whose readings come back has to be picked up again, and stay picked up",
+    );
   } finally {
     await agent.close();
     await rm(runtimeRoot, { force: true, recursive: true });
