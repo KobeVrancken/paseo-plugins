@@ -18,17 +18,16 @@ import {
 import { APP_NAME, APP_TITLE, APP_VERSION } from "./constants.ts";
 import { HookServer } from "./hook-server.ts";
 import { writeLog } from "./log.ts";
-import { type ClaudeSession, SessionRegistry } from "./session-registry.ts";
-import type { RuntimeDependencies } from "./claude-runtime.ts";
+import { type ClaudeSession, SessionRegistry, type SessionRegistryDependencies } from "./session-registry.ts";
 
 export class ClaudeTtyAgent implements Agent {
   readonly hooks = new HookServer();
   readonly sessions: SessionRegistry;
   readonly connection: AgentSideConnection;
 
-  constructor(connection: AgentSideConnection, runtimeDependencies: RuntimeDependencies = {}) {
+  constructor(connection: AgentSideConnection, dependencies: SessionRegistryDependencies = {}) {
     this.connection = connection;
-    this.sessions = new SessionRegistry(connection, this.hooks, runtimeDependencies);
+    this.sessions = new SessionRegistry(connection, this.hooks, dependencies);
   }
 
   async initialize(_params: InitializeRequest): Promise<InitializeResponse> {

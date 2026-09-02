@@ -390,6 +390,52 @@ test("applies native model and mode controls and restarts an idle session", asyn
   }
 });
 
+test("suspends an idle native process and resumes it on the next prompt", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-idle-test-"));
+  const spawns: SpawnRecord[] = [];
+  let agent!: ClaudeTtyAgent;
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    let pty!: FakePty;
+    pty = new FakePty(4500 + spawns.length, (data) => {
+      if (data === "\u0004") setImmediate(() => pty.emitExit());
+    });
+    spawns.push({ file, args, options, pty });
+    const idFlag = args.includes("--resume") ? "--resume" : "--session-id";
+    const sessionId = args[args.indexOf(idFlag) + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    idleTimeoutMs: 20,
+  });
+
+  try {
+    const created = await agent.newSession({ cwd: "/work/idle-resume", mcpServers: [] });
+    const first = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "first" }] });
+    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: created.sessionId, last_assistant_message: "first done" });
+    await first;
+    await waitFor(() => agent.sessions.get(created.sessionId)?.started === false);
+    assert.equal(spawns[0]!.pty.writes.at(-1), "\u0004");
+
+    const second = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "second" }] });
+    await waitFor(() => spawns.length === 2 && spawns[1]!.pty.writes.length === 2);
+    assert.deepEqual(spawns[1]!.args.slice(0, 2), ["--resume", created.sessionId]);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: created.sessionId, last_assistant_message: "second done" });
+    await second;
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
 test("delivers the assistant text before an interactive hook prompts", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-flush-test-"));
   const configDirectory = path.join(root, "claude");

@@ -11,9 +11,14 @@ import { currentInstall, startInstall } from "./install.server.ts";
 import { listSessions, quarantineSession, releaseLock, releaseStaleLocks } from "./sessions.server.ts";
 import { runUninstall } from "./uninstall.server.ts";
 import { readStatus } from "./status.server.ts";
+import { updateSettings } from "./settings.server.ts";
 
 export function statusHandler(paseo: PaseoApi): Promise<StatusPayload> {
   return readStatus(paseo);
+}
+
+export function settingsHandler(paseo: PaseoApi, input: { idleTimeoutMs: number }): Promise<StatusPayload> {
+  return updateSettings(paseo, input.idleTimeoutMs);
 }
 
 export function startInstallHandler(paseo: PaseoApi, input: { repair: boolean }): InstallJobPayload {

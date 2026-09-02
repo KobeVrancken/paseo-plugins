@@ -1,7 +1,8 @@
 import type { PaseoApi } from "@getpaseo/client";
 import type { StatusPayload } from "../contracts.shared.ts";
 import { adapterBinaryPath, adapterEntryPath, claudeCandidates, defaultStateDirectory } from "../paths.shared.ts";
-import { PROVIDER_ID, classifyProviderEntry, commandOf, providerEntryFor } from "../provider.shared.ts";
+import { PROVIDER_ID, classifyProviderEntry, commandOf, idleTimeoutOf, providerEntryFor } from "../provider.shared.ts";
+import { DEFAULT_IDLE_TIMEOUT_MS } from "../settings.shared.ts";
 import { fileExists, firstExecutable, resolveRepoRoot } from "./paths.server.ts";
 
 export async function readStatus(paseo: PaseoApi): Promise<StatusPayload> {
@@ -17,11 +18,13 @@ export async function readStatus(paseo: PaseoApi): Promise<StatusPayload> {
       provider: { id: PROVIDER_ID, state: "absent", label: null, command: null, expectedCommand: null },
       host,
       stateDirectory,
+      settings: { idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS },
     };
   }
 
-  const expected = providerEntryFor(repo.root);
   const [built, existing] = await Promise.all([fileExists(adapterEntryPath(repo.root)), readProviderEntry(paseo)]);
+  const idleTimeoutMs = idleTimeoutOf(existing) ?? DEFAULT_IDLE_TIMEOUT_MS;
+  const expected = providerEntryFor(repo.root, idleTimeoutMs);
 
   return {
     repoRoot: repo.root,
@@ -36,6 +39,7 @@ export async function readStatus(paseo: PaseoApi): Promise<StatusPayload> {
     },
     host,
     stateDirectory,
+    settings: { idleTimeoutMs },
   };
 }
 

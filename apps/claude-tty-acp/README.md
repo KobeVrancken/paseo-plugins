@@ -60,6 +60,9 @@ Add the provider to that host's Paseo configuration:
         "command": [
           "/opt/paseo-plugins/apps/claude-tty-acp/bin/claude-tty-acp"
         ],
+        "env": {
+          "CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS": "3600000"
+        },
         "params": {
           "supportsMcpServers": false
         }
@@ -97,6 +100,7 @@ The adapter inherits the Paseo daemon's environment.
 | `CLAUDE_BIN` | Absolute path to Claude when the daemon's `PATH` cannot find `claude`. |
 | `CLAUDE_CONFIG_DIR` | Existing Claude configuration, credentials, plugins, commands, skills, and transcript root. |
 | `CLAUDE_TTY_ACP_STATE_DIR` | Adapter session mappings and locks; defaults to the host's XDG state directory. |
+| `CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS` | Stop an idle session's native Claude process after this many milliseconds; defaults to `3600000` (one hour). Set to `0` to disable suspension. |
 | `XDG_STATE_HOME` | Base for adapter state when `CLAUDE_TTY_ACP_STATE_DIR` is unset. |
 
 For a systemd service, set `CLAUDE_BIN` to the output of `command -v claude` in the daemon user's login shell rather than relying on a shell-specific `PATH`.
@@ -110,6 +114,12 @@ Loading a session replays its transcript and launches `claude --resume` lazily o
 Each active session owns an isolated PTY, hook route, transcript reader, permission bridge, lock, and attachment directory.
 Sessions run concurrently, work inside a single session stays serialized, and a second adapter process cannot open a session that is already active on the host.
 Locks left behind by dead processes are recovered automatically.
+
+After a foreground turn finishes, the adapter gives the native Claude process one hour of idle time by default.
+When that timeout expires it sends Ctrl-D, kills the PTY if it does not exit promptly, and thereby stops any background tasks still owned by that Claude process.
+The logical ACP session, transcript mapping, selected model and mode, and session lock remain intact.
+The next prompt launches `claude --resume <id>` automatically, so the conversation continues without keeping its process alive indefinitely.
+Only foreground ACP prompts reset the timeout; task-completion notifications inside an otherwise idle Claude process do not extend it.
 
 ## Models and modes
 

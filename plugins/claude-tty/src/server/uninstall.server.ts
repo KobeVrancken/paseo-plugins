@@ -2,7 +2,8 @@ import { rm } from "node:fs/promises";
 import type { PaseoApi } from "@getpaseo/client";
 import type { UninstallPayload } from "../contracts.shared.ts";
 import { defaultStateDirectory } from "../paths.shared.ts";
-import { PROVIDER_ID, classifyProviderEntry, providerEntryFor } from "../provider.shared.ts";
+import { PROVIDER_ID, classifyProviderEntry, idleTimeoutOf, providerEntryFor } from "../provider.shared.ts";
+import { DEFAULT_IDLE_TIMEOUT_MS } from "../settings.shared.ts";
 import { messageOf, resolveRepoRoot } from "./paths.server.ts";
 import { listSessions } from "./sessions.server.ts";
 import { readProviderEntry } from "./status.server.ts";
@@ -47,7 +48,7 @@ async function removeProvider(paseo: PaseoApi, notes: string[]): Promise<boolean
     notes.push(`Left "${PROVIDER_ID}" alone: ${repo.problem}`);
     return false;
   }
-  const state = classifyProviderEntry(existing, providerEntryFor(repo.root));
+  const state = classifyProviderEntry(existing, providerEntryFor(repo.root, idleTimeoutOf(existing) ?? DEFAULT_IDLE_TIMEOUT_MS));
   if (state === "absent") {
     notes.push(`"${PROVIDER_ID}" was not registered.`);
     return false;

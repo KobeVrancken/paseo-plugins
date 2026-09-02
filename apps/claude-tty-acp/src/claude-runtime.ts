@@ -205,6 +205,14 @@ export class ClaudeRuntime {
     await this.ensureStarted();
   }
 
+  /** Stop the native process without closing the logical ACP session or its persisted lock. */
+  async suspend(): Promise<void> {
+    if (this.closed || !this.pty) return;
+    if (this.turn) throw new Error("Cannot suspend Claude during an active turn");
+    this.interactions.cancelPending();
+    await this.stopForRestart();
+  }
+
   cancel(): void {
     // The wait for Claude's last context reading outlives the turn, so this is set before the turn check or a stop during it is dropped.
     this.contextWaitCancelled = true;

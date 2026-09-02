@@ -1,6 +1,7 @@
 import { defineRpc } from "@getpaseo/plugin/server";
 import { z } from "zod";
 import { INSTALL_STEP_IDS } from "./install.shared.ts";
+import { MAX_IDLE_TIMEOUT_MS } from "./settings.shared.ts";
 
 export const ProviderStateSchema = z.enum(["absent", "matching", "mismatched", "foreign"]);
 
@@ -25,6 +26,9 @@ export const StatusSchema = z.object({
     claude: z.string().nullable(),
   }),
   stateDirectory: z.string(),
+  settings: z.object({
+    idleTimeoutMs: z.number().int().nonnegative(),
+  }),
 });
 
 export type StatusPayload = z.output<typeof StatusSchema>;
@@ -32,6 +36,12 @@ export type StatusPayload = z.output<typeof StatusSchema>;
 export const getStatus = defineRpc({
   name: "claude-tty.status",
   input: z.object({}),
+  output: StatusSchema,
+});
+
+export const setSettings = defineRpc({
+  name: "claude-tty.settings.set",
+  input: z.object({ idleTimeoutMs: z.number().int().nonnegative().max(MAX_IDLE_TIMEOUT_MS) }),
   output: StatusSchema,
 });
 

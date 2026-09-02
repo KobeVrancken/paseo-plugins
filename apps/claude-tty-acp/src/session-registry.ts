@@ -9,6 +9,13 @@ import { SessionLock } from "./session-lock.ts";
 import { type PersistedSession, StateStore } from "./state-store.ts";
 import { TranscriptReader } from "./transcript-reader.ts";
 import { TranscriptTranslator } from "./transcript-translator.ts";
+import { DEFAULT_IDLE_TIMEOUT_MS } from "./idle-timeout.ts";
+import { writeLog } from "./log.ts";
+
+export type SessionRegistryDependencies = RuntimeDependencies & {
+  /** Zero keeps the native Claude process alive until the logical session closes. */
+  idleTimeoutMs?: number;
+};
 
 type SessionOptions = {
   id: string;
@@ -30,17 +37,20 @@ export class ClaudeSession {
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
   private readonly runtimeDependencies: RuntimeDependencies;
+  private readonly idleTimeoutMs: number;
   private readonly stateStore: StateStore;
   private readonly lock: SessionLock;
   private readonly translator: TranscriptTranslator;
   private runtime: ClaudeRuntime | null = null;
   private queue: Promise<void> = Promise.resolve();
+  private idleTimer: NodeJS.Timeout | null = null;
+  private activityVersion = 0;
 
   constructor(
     options: SessionOptions,
     connection: AgentSideConnection,
     hooks: HookServer,
-    runtimeDependencies: RuntimeDependencies,
+    dependencies: SessionRegistryDependencies,
     stateStore: StateStore,
   ) {
     this.id = options.id;
@@ -51,7 +61,9 @@ export class ClaudeSession {
     this.persisted = options.persisted;
     this.connection = connection;
     this.hooks = hooks;
+    const { idleTimeoutMs, ...runtimeDependencies } = dependencies;
     this.runtimeDependencies = runtimeDependencies;
+    this.idleTimeoutMs = idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
     this.stateStore = stateStore;
     this.lock = new SessionLock(this.id, stateStore.locksDirectory);
     this.translator = new TranscriptTranslator(this.id, this.cwd, connection);
@@ -70,7 +82,8 @@ export class ClaudeSession {
   }
 
   prompt(content: ContentBlock[]): Promise<PromptResponse> {
-    return this.exclusive(async () => {
+    const activityVersion = this.beginActivity();
+    const result = this.exclusive(async () => {
       await this.lock.acquire();
       const resume = this.persisted;
       await this.save();
@@ -87,6 +100,8 @@ export class ClaudeSession {
       });
       return this.runtime.prompt(content);
     });
+    void result.finally(() => this.scheduleSuspension(activityVersion)).catch(() => undefined);
+    return result;
   }
 
   async replayHistory(): Promise<void> {
@@ -134,6 +149,7 @@ export class ClaudeSession {
   }
 
   async close(): Promise<void> {
+    this.beginActivity();
     await this.runtime?.close();
     this.runtime = null;
     await this.lock.release();
@@ -153,6 +169,40 @@ export class ClaudeSession {
     this.persisted = true;
   }
 
+  private beginActivity(): number {
+    this.activityVersion += 1;
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+    return this.activityVersion;
+  }
+
+  private scheduleSuspension(activityVersion: number): void {
+    if (this.idleTimeoutMs === 0 || activityVersion !== this.activityVersion || !this.runtime?.started) return;
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      void this.exclusive(async () => {
+        if (activityVersion !== this.activityVersion || !this.runtime?.started) return;
+        try {
+          await this.runtime.suspend();
+          writeLog({
+            level: "info",
+            message: "Suspended idle Claude session",
+            sessionId: this.id,
+            idleTimeoutMs: this.idleTimeoutMs,
+          });
+        } catch (error) {
+          writeLog({
+            level: "warn",
+            message: "Failed to suspend idle Claude session",
+            sessionId: this.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      });
+    }, this.idleTimeoutMs);
+    this.idleTimer.unref();
+  }
+
   private exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.queue.then(operation, operation);
     this.queue = result.then(
@@ -167,18 +217,18 @@ export class SessionRegistry {
   private readonly sessions = new Map<string, ClaudeSession>();
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
-  private readonly runtimeDependencies: RuntimeDependencies;
+  private readonly dependencies: SessionRegistryDependencies;
   private readonly stateStore: StateStore;
 
   constructor(
     connection: AgentSideConnection,
     hooks: HookServer,
-    runtimeDependencies: RuntimeDependencies = {},
-    stateStore = new StateStore(runtimeDependencies.stateDirectory),
+    dependencies: SessionRegistryDependencies = {},
+    stateStore = new StateStore(dependencies.stateDirectory),
   ) {
     this.connection = connection;
     this.hooks = hooks;
-    this.runtimeDependencies = runtimeDependencies;
+    this.dependencies = dependencies;
     this.stateStore = stateStore;
   }
 
@@ -242,7 +292,7 @@ export class SessionRegistry {
   }
 
   private createSession(options: SessionOptions): ClaudeSession {
-    const session = new ClaudeSession(options, this.connection, this.hooks, this.runtimeDependencies, this.stateStore);
+    const session = new ClaudeSession(options, this.connection, this.hooks, this.dependencies, this.stateStore);
     this.sessions.set(session.id, session);
     return session;
   }

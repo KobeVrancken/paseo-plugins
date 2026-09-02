@@ -9,7 +9,8 @@ import {
 } from "../install.shared.ts";
 import { failedChecks, parseDiagnosticsReport } from "../diagnostics.shared.ts";
 import { ADAPTER_PACKAGE, adapterBinaryPath, adapterEntryPath } from "../paths.shared.ts";
-import { PROVIDER_ID, classifyProviderEntry, providerEntryFor } from "../provider.shared.ts";
+import { PROVIDER_ID, classifyProviderEntry, idleTimeoutOf, providerEntryFor } from "../provider.shared.ts";
+import { DEFAULT_IDLE_TIMEOUT_MS } from "../settings.shared.ts";
 import { runCommand } from "./exec.server.ts";
 import { fileExists, firstExecutable, messageOf, resolveRepoRoot } from "./paths.server.ts";
 import { readProviderEntry } from "./status.server.ts";
@@ -82,8 +83,8 @@ async function runInstall(paseo: PaseoApi, options: { repair: boolean }): Promis
   if (diagnosed === null) return;
 
   const registered = await step("register", async () => {
-    const expected = providerEntryFor(repo);
     const existing = await readProviderEntry(paseo);
+    const expected = providerEntryFor(repo, idleTimeoutOf(existing) ?? DEFAULT_IDLE_TIMEOUT_MS);
     const state = classifyProviderEntry(existing, expected);
     if (state === "matching") return { ok: true, detail: `"${PROVIDER_ID}" already points at this checkout`, value: state };
     if (state === "foreign") {
@@ -147,4 +148,3 @@ function outcomeOf(
     exitCode: result.exitCode,
   };
 }
-

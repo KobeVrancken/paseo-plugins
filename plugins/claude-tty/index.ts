@@ -8,6 +8,7 @@ import {
   releaseLockHandler,
   releaseStaleLocksHandler,
   sessionsHandler,
+  settingsHandler,
   startInstallHandler,
   statusHandler,
   uninstallHandler,
@@ -18,6 +19,7 @@ export const SURFACE_ID = "claude-tty";
 
 export default function contribute(plugin: PluginContext) {
   plugin.handle(contracts.getStatus, (_input, { paseo }) => statusHandler(paseo));
+  plugin.handle(contracts.setSettings, (input, { paseo }) => settingsHandler(paseo, input));
   plugin.handle(contracts.startInstall, (input, { paseo }) => startInstallHandler(paseo, input));
   plugin.handle(contracts.getInstall, () => installStatusHandler());
   plugin.handle(contracts.runDoctor, (_input, { paseo }) => doctorHandler(paseo));
