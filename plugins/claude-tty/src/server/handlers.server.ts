@@ -8,7 +8,7 @@ import type {
 } from "../contracts.shared.ts";
 import { lastDoctorReport, runDoctor } from "./doctor.server.ts";
 import { currentInstall, startInstall } from "./install.server.ts";
-import { listSessions, quarantineSession, releaseLock, releaseStaleLocks } from "./sessions.server.ts";
+import { listSessions, quarantineSession, releaseLock, releaseStaleLocks, stopSession } from "./sessions.server.ts";
 import { runUninstall } from "./uninstall.server.ts";
 import { readStatus } from "./status.server.ts";
 
@@ -28,24 +28,28 @@ export function doctorHandler(paseo: PaseoApi): Promise<DoctorPayload> {
   return runDoctor(paseo);
 }
 
-export function sessionsHandler(): Promise<SessionsPayload> {
-  return listSessions();
+export function sessionsHandler(paseo: PaseoApi): Promise<SessionsPayload> {
+  return listSessions(paseo);
 }
 
-export function releaseLockHandler(input: { id: string }): Promise<SessionsPayload> {
-  return releaseLock(input.id);
+export function releaseLockHandler(paseo: PaseoApi, input: { id: string }): Promise<SessionsPayload> {
+  return releaseLock(paseo, input.id);
 }
 
-export function quarantineSessionHandler(input: { id: string }): Promise<SessionsPayload> {
-  return quarantineSession(input.id);
+export function quarantineSessionHandler(paseo: PaseoApi, input: { id: string }): Promise<SessionsPayload> {
+  return quarantineSession(paseo, input.id);
+}
+
+export function stopSessionHandler(paseo: PaseoApi, input: { id: string }): Promise<SessionsPayload> {
+  return stopSession(paseo, input.id);
 }
 
 export function lastDoctorHandler(): DoctorPayload | null {
   return lastDoctorReport();
 }
 
-export function releaseStaleLocksHandler(): Promise<SessionsPayload> {
-  return releaseStaleLocks();
+export function releaseStaleLocksHandler(paseo: PaseoApi): Promise<SessionsPayload> {
+  return releaseStaleLocks(paseo);
 }
 
 export function uninstallHandler(paseo: PaseoApi, input: { removeState: boolean }): Promise<UninstallPayload> {

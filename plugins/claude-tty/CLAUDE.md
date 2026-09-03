@@ -42,6 +42,42 @@ Module scope is the only state a plugin process has between RPC calls.
 
 Session and lock liveness is decided with signal 0 exactly the way the adapter decides it, so the two never disagree about which lock is stale.
 
+Stopping a session signals the process the lock names, which is one adapter process per ACP session, spawned by the daemon.
+`SIGTERM` is enough: the adapter's own handler closes the session, which stops the Claude PTY and releases the lock, so the persisted session and the Paseo agent both survive and the next prompt resumes them.
+Never signal a process group: the daemon spawns the adapter undetached, so `-pid` is the daemon's own group.
+
+## Identifying the process a lock names
+
+Signal 0 proves only that a PID is taken, and a PID outlives the process that earned it, so `ownsLock` has to establish who is actually behind it.
+
+The command line alone cannot do it.
+Matching the adapter's name and its entry file as free-floating substrings passes for the `claude` child — it is handed a `--settings` path carrying the adapter's name, and is itself `node <...>/cli.js` wherever Claude Code is installed as a bundle rather than as a binary — and for any bystander whose arguments merely mention the checkout.
+So the command has to match as one path, `<...>/claude-tty-acp/<...>/cli.js`, and even then it says only what kind of process this is, never *which*: a second adapter that inherited the PID looks exactly like the first.
+
+The start time is the half that settles it.
+Two live processes cannot share a PID, so a process that was already running when the lock was written and still holds that PID is the process that wrote it.
+`/proc/<pid>/stat` field 22 against `/proc/uptime` gives it, `ps -o lstart=` gives it elsewhere, and both need slack — `ps` truncates to the second and a boot-time reading drifts against the wall clock, while PIDs take far longer than seconds to come round again.
+`/proc` also reports the zombie state, which is worth its own sentence to the user: a process waiting to be reaped cannot be stopped and has not been left running.
+
+Identity is proved again before the `SIGKILL` escalation, because the adapter may have exited during the wait and something else may hold the PID by then.
+Concurrent stops of one session are coalesced onto a single promise: the adapter registers its handler with `process.once`, so a second `SIGTERM` arriving mid-shutdown takes the default action and kills it before it can release its lock.
+
+## Agent titles are a courtesy and are budgeted like one
+
+A session row is named after the Paseo agent holding it, joined on the ACP session ID: the daemon stores it as an agent's `runtimeInfo.sessionId` and `persistence.sessionId`, and it is this plugin's file stem.
+`paseo.agents.list()` is typed as returning agents but answers with the daemon's `{ agent, project }` entries, so both shapes are read.
+
+The lookup never gates a decision.
+Mutations read the state directory through `readState`, which does not touch the daemon; only the payload handed back is decorated.
+It is also raced against a budget and paged explicitly, because the SDK waits a minute by default while the daemon kills a plugin RPC at 30 seconds, and one page is capped at 200 agents.
+A daemon that stalls or pages forever costs the titles and nothing else, which is the whole claim.
+
+## There is no way to open an agent from here
+
+`openSurface` and `openPanel` live on command contexts and on the client-side entry point, never on a surface's props, and the only `openPanel` target is a panel this plugin contributes.
+Paseo has a `{ kind: "agent" }` navigation target of its own but does not expose it, so nothing a plugin can call reveals an agent's terminal.
+An "open" button built on `addClientSide` and an agent panel was tried and removed: the closest the API reaches is opening a tab that shows the same row the sidebar already shows, which is worse than sending someone to the agent list.
+
 ## index.ts is AST-filtered
 
 The daemon builds both bundles from the entry, deleting `plugin.handle(...)` and `*.server` imports for the client, and `plugin.add*` and `*.client` imports for the server.

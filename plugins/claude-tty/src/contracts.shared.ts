@@ -113,11 +113,15 @@ export const SessionSchema = z.object({
   corrupt: z.boolean(),
   orphanLock: z.boolean(),
   lock: z.object({ pid: z.number(), createdAt: z.number(), live: z.boolean() }).nullable(),
+  /** The Paseo agent holding this session, when the daemon still lists one. */
+  agent: z.object({ id: z.string(), title: z.string().nullable() }).nullable(),
 });
 
 export const SessionsSchema = z.object({
   stateDirectory: z.string(),
   problem: z.string().nullable(),
+  /** The daemon's clock when it read the sessions; the panel may be on a machine with another. */
+  now: z.number(),
   sessions: z.array(SessionSchema),
 });
 
@@ -137,6 +141,12 @@ export const releaseLock = defineRpc({
 
 export const quarantineSession = defineRpc({
   name: "claude-tty.sessions.quarantine",
+  input: z.object({ id: z.string() }),
+  output: SessionsSchema,
+});
+
+export const stopSession = defineRpc({
+  name: "claude-tty.sessions.stop",
   input: z.object({ id: z.string() }),
   output: SessionsSchema,
 });

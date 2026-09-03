@@ -4,6 +4,7 @@ import React from "react";
 import { Text, View } from "react-native";
 import * as contracts from "../contracts.shared.ts";
 import type { SessionsPayload } from "../contracts.shared.ts";
+import { lastActiveLabel } from "../sessions.shared.ts";
 import { fontSize, leading, spacing, type Palette } from "./theme.client.ts";
 import { ConfirmButton } from "./confirm.client.tsx";
 import { Monospace, ReadingRow, type Reading } from "./status.client.tsx";
@@ -19,6 +20,7 @@ export function SessionsSection({ palette }: { palette: Palette }) {
   const getSessions = useRpc(contracts.getSessions);
   const releaseLock = useRpc(contracts.releaseLock);
   const quarantineSession = useRpc(contracts.quarantineSession);
+  const stopSession = useRpc(contracts.stopSession);
 
   const query = useQuery({
     queryKey: SESSIONS_QUERY_KEY,
@@ -28,10 +30,13 @@ export function SessionsSection({ palette }: { palette: Palette }) {
   const onSuccess = (next: SessionsPayload) => queryClient.setQueryData(SESSIONS_QUERY_KEY, next);
   const release = useMutation({ mutationFn: (id: string) => releaseLock({ id }), onSuccess });
   const quarantine = useMutation({ mutationFn: (id: string) => quarantineSession({ id }), onSuccess });
+  const stop = useMutation({ mutationFn: (id: string) => stopSession({ id }), onSuccess });
 
   const payload = query.data ?? null;
-  const busy = release.isPending || quarantine.isPending;
-  const failure = release.error ?? quarantine.error ?? null;
+  const busy = release.isPending || quarantine.isPending || stop.isPending;
+  const failure = release.error ?? quarantine.error ?? stop.error ?? null;
+  // A stop waits on a process, so the row it is waiting on says so rather than just going flat.
+  const stopping = stop.isPending ? stop.variables : null;
 
   return (
     <Section palette={palette} title="Sessions">
@@ -46,15 +51,17 @@ export function SessionsSection({ palette }: { palette: Palette }) {
               key={session.id}
               palette={palette}
               title={title(session)}
-              reading={reading(session)}
+              reading={reading(session, payload.now)}
               divided={index > 0}
               trailing={
                 <SessionAction
                   palette={palette}
                   session={session}
                   busy={busy}
+                  stopping={session.id === stopping}
                   onRelease={() => release.mutate(session.id)}
                   onQuarantine={() => quarantine.mutate(session.id)}
+                  onStop={() => stop.mutate(session.id)}
                 />
               }
             />
@@ -73,9 +80,10 @@ export function SessionsSection({ palette }: { palette: Palette }) {
           marginLeft: spacing[1],
         }}
       >
-        A lock names the process holding a session. The adapter clears its own on exit and recovers
-        one left by a process that has died, so releasing by hand is only for a lock that outlived
-        its process and is still in the way.
+        Stopping ends the adapter process holding a session, which closes its Claude terminal without
+        closing or archiving the Paseo agent: the next prompt resumes it. A lock names that process.
+        The adapter clears its own on exit and recovers one left by a process that has died, so
+        releasing by hand is only for a lock that outlived its process and is still in the way.
       </Text>
     </Section>
   );
@@ -85,15 +93,22 @@ function SessionAction({
   palette,
   session,
   busy,
+  stopping,
   onRelease,
   onQuarantine,
+  onStop,
 }: {
   palette: Palette;
   session: Session;
   busy: boolean;
+  stopping: boolean;
   onRelease: () => void;
   onQuarantine: () => void;
+  onStop: () => void;
 }) {
+  if (stopping) {
+    return <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.base }}>Stopping…</Text>;
+  }
   if (session.corrupt) {
     return (
       <ConfirmButton
@@ -105,25 +120,29 @@ function SessionAction({
       />
     );
   }
-  if (session.lock !== null && !session.lock.live) {
+  if (session.lock === null) return null;
+  if (session.lock.live) {
     return (
-      <ConfirmButton
-        palette={palette}
-        label="Release lock"
-        confirmLabel="Release it"
-        disabled={busy}
-        onConfirm={onRelease}
-      />
+      <ConfirmButton palette={palette} label="Stop" confirmLabel="Stop it" disabled={busy} onConfirm={onStop} />
     );
   }
-  return null;
+  return (
+    <ConfirmButton
+      palette={palette}
+      label="Release lock"
+      confirmLabel="Release it"
+      disabled={busy}
+      onConfirm={onRelease}
+    />
+  );
 }
 
+/** The agent's own title where Paseo still has one, because a cwd names a checkout and not a session. */
 function title(session: Session): string {
-  return session.cwd ?? session.id;
+  return session.agent?.title ?? session.cwd ?? session.id;
 }
 
-function reading(session: Session): Reading {
+function reading(session: Session, now: number): Reading {
   if (session.corrupt) return { hint: `${session.id} — unreadable`, tone: "danger" };
   if (session.orphanLock) return { hint: `${session.id} — a lock with no session beside it`, tone: "danger" };
   const held =
@@ -132,8 +151,17 @@ function reading(session: Session): Reading {
       : session.lock.live
         ? `open in process ${session.lock.pid}`
         : `stale lock from process ${session.lock.pid}`;
+  // Ordered by what decides whether to stop a session, because a narrow row loses the tail.
+  const parts = [
+    held,
+    lastActiveLabel(session.lastActivity, now),
+    session.model,
+    session.mode,
+    // Already the title unless the agent named the row.
+    typeof session.agent?.title === "string" ? session.cwd : null,
+  ];
   return {
-    hint: [session.model, session.mode, held].filter((part) => part !== null && part !== "").join(" · "),
+    hint: parts.filter((part) => part !== null && part !== "").join(" · "),
     tone: session.lock?.live ? "ok" : session.lock === null ? "muted" : "danger",
   };
 }
