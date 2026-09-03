@@ -68,6 +68,8 @@ type SubagentCard = {
   toolCallId: string | null;
   log: SubagentLog;
   status: "in_progress" | "completed" | "failed";
+  /** Launched to run on its own and not yet reported, which is what keeps the session's turn open. */
+  outstanding: boolean;
 };
 
 export class TranscriptTranslator {
@@ -80,6 +82,8 @@ export class TranscriptTranslator {
   private readonly agentCalls = new Set<string>();
   private readonly subagents = new Map<string, SubagentCard>();
   private readonly subagentsByToolCall = new Map<string, string>();
+  private lastSubagentActivity = 0;
+  private trackingSubagents = false;
   private lastPlan = "";
   private lastUsage = "";
   private assistantChunkCount = 0;
@@ -93,6 +97,28 @@ export class TranscriptTranslator {
 
   get assistantChunks(): number {
     return this.assistantChunkCount;
+  }
+
+  /**
+   * Subagents that were launched to run on their own and have not reported. Nested subagents share
+   * their spawner's card, so they are counted once, as the one piece of work the session launched.
+   */
+  get runningSubagents(): number {
+    return new Set([...this.subagents.values()].filter((card) => card.outstanding)).size;
+  }
+
+  /** When any subagent last did anything, which is all there is to say whether one is still alive. */
+  get subagentActivityAt(): number {
+    return this.lastSubagentActivity;
+  }
+
+  /**
+   * Called as a prompt starts. Loading a persisted session replays its whole transcript first, and
+   * an agent launched in a session that has since been closed left its launch behind without the
+   * notification that would have ended it: history says it is running when nothing is.
+   */
+  trackRunningSubagents(): void {
+    this.trackingSubagents = true;
   }
 
   suppressNextAssistantText(text: string): void {
@@ -223,7 +249,7 @@ export class TranscriptTranslator {
     if (!toolCallId || !this.emittedTools.has(toolCallId)) return;
     const launch = this.agentCalls.has(toolCallId) ? launchedAgent(record.toolUseResult) : null;
     if (launch !== null) {
-      await this.linkSubagent(launch.agentId, toolCallId);
+      await this.linkSubagent(launch.agentId, toolCallId, launch.running);
       // An asynchronous agent answers the moment it starts, so closing the card here would report a
       // minutes-long agent as finished before it had done anything. It is closed by its notification.
       if (launch.running) return;
@@ -272,6 +298,8 @@ export class TranscriptTranslator {
     if (this.emitted.has(key)) return;
     this.emitted.add(key);
     card.status = notificationFailed(notification.status) ? "failed" : "completed";
+    card.outstanding = false;
+    this.lastSubagentActivity = Date.now();
     card.log.append(notification.summary ?? `Agent ${notification.status ?? "finished"}`);
     await this.publishSubagent(card);
   }
@@ -287,7 +315,9 @@ export class TranscriptTranslator {
     const prefix = card.agentId === agentId ? "" : "\u21b3 ";
     let appended = false;
     for (const record of records) appended = this.logSubagentRecord(card, record, prefix) || appended;
-    if (appended) await this.publishSubagent(card);
+    if (!appended) return;
+    this.lastSubagentActivity = Date.now();
+    await this.publishSubagent(card);
   }
 
   private logSubagentRecord(card: SubagentCard, record: TranscriptRecord, prefix: string): boolean {
@@ -328,8 +358,10 @@ export class TranscriptTranslator {
     this.subagents.set(agentId, card);
   }
 
-  private async linkSubagent(agentId: string, toolCallId: string): Promise<void> {
+  private async linkSubagent(agentId: string, toolCallId: string, running: boolean): Promise<void> {
     const card = this.subagentCard(agentId);
+    card.outstanding = running && this.trackingSubagents;
+    this.lastSubagentActivity = Date.now();
     if (card.toolCallId === toolCallId) return;
     card.toolCallId = toolCallId;
     this.subagentsByToolCall.set(toolCallId, agentId);
@@ -339,7 +371,7 @@ export class TranscriptTranslator {
   private subagentCard(agentId: string): SubagentCard {
     const existing = this.subagents.get(agentId);
     if (existing) return existing;
-    const card: SubagentCard = { agentId, toolCallId: null, log: new SubagentLog(), status: "in_progress" };
+    const card: SubagentCard = { agentId, toolCallId: null, log: new SubagentLog(), status: "in_progress", outstanding: false };
     this.subagents.set(agentId, card);
     return card;
   }

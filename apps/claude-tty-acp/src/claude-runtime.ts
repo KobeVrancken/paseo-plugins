@@ -23,6 +23,15 @@ const STARTUP_TIMEOUT_MS = 15_000;
 // This fallback plus the transcript flush behind it has to settle well inside that budget.
 const CANCEL_TIMEOUT_MS = 600;
 const SUBMIT_DELAY_MS = 150;
+/**
+ * How long every subagent a turn launched may go without writing anything before the turn stops
+ * waiting for them. Paseo reads a session as busy from the turn it has open, so an agent that never
+ * reports would otherwise leave the session busy — and unsuspendable — for the rest of its life.
+ */
+const SUBAGENT_SILENCE_MS = 15 * 60_000;
+/** How long the last agent to report is given to wake Claude for the turn that answers for it. */
+const SUBAGENT_WAKE_MS = 60_000;
+const SUBAGENT_POLL_MS = 5_000;
 // Claude drops the submit key while it is still settling a paste, so the prompt is re-submitted until its input box lets go of it.
 const SUBMIT_ATTEMPTS = 6;
 const SUBMIT_CONFIRM_MS = 400;
@@ -85,6 +94,9 @@ export type RuntimeDependencies = {
   staleResumeKeyDelayMs?: number;
   staleResumeSelectionTimeoutMs?: number;
   readyQuietMs?: number;
+  subagentPollMs?: number;
+  subagentSilenceMs?: number;
+  subagentWakeMs?: number;
   runtimeRoot?: string;
   claudeConfigDir?: string;
   transcriptFilePath?: string;
@@ -117,6 +129,9 @@ export class ClaudeRuntime {
   private readonly staleResumeKeyDelayMs: number;
   private readonly staleResumeSelectionTimeoutMs: number;
   private readonly readyQuietMs: number;
+  private readonly subagentPollMs: number;
+  private readonly subagentSilenceMs: number;
+  private readonly subagentWakeMs: number;
   private readonly runtimeRoot: string;
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
@@ -145,6 +160,8 @@ export class ClaudeRuntime {
   private contextWaitCancelled = false;
   private contextWaitMisses = 0;
   private staleResumeAnswered = false;
+  private subagentHold: NodeJS.Timeout | null = null;
+  private heldAssistantMessage: string | undefined;
   private intentionalExit: Deferred<void> | null = null;
 
   constructor(
@@ -179,6 +196,9 @@ export class ClaudeRuntime {
     this.staleResumeKeyDelayMs = dependencies.staleResumeKeyDelayMs ?? STALE_RESUME_KEY_DELAY_MS;
     this.staleResumeSelectionTimeoutMs = dependencies.staleResumeSelectionTimeoutMs ?? STALE_RESUME_SELECTION_TIMEOUT_MS;
     this.readyQuietMs = dependencies.readyQuietMs ?? READY_QUIET_MS;
+    this.subagentPollMs = dependencies.subagentPollMs ?? SUBAGENT_POLL_MS;
+    this.subagentSilenceMs = dependencies.subagentSilenceMs ?? SUBAGENT_SILENCE_MS;
+    this.subagentWakeMs = dependencies.subagentWakeMs ?? SUBAGENT_WAKE_MS;
     this.runtimeRoot = dependencies.runtimeRoot ?? os.tmpdir();
     this.translator = dependencies.translator ?? new TranscriptTranslator(sessionId, cwd, connection);
     this.transcript = this.createTranscriptWatcher(claudeSessionId, dependencies.transcriptFilePath);
@@ -209,6 +229,7 @@ export class ClaudeRuntime {
     this.contextWaitCancelled = false;
     this.interactions.beginTurn();
     this.assistantBaseline = this.translator.assistantChunks;
+    this.translator.trackRunningSubagents();
     await this.submit(prompt.text);
     try {
       const result = await turn.promise;
@@ -380,14 +401,23 @@ export class ClaudeRuntime {
       case "Stop":
         this.contextMtimeAtTurnEnd = await this.contextMtime();
         await this.transcript.flushUntilStable();
-        this.finishTurn(
-          this.cancelRequested
-            ? { response: { stopReason: "cancelled" } }
-            : {
-                response: { stopReason: "end_turn" },
-                assistantMessage: this.translator.assistantChunks === this.assistantBaseline ? asString(payload.last_assistant_message) : undefined,
-              },
-        );
+        if (this.cancelRequested) {
+          this.finishTurn({ response: { stopReason: "cancelled" } });
+          break;
+        }
+        // Claude goes idle the moment it launches a background agent, but the work it launched has
+        // not happened yet. The turn is the only thing that tells Paseo a session is busy, so it is
+        // held open until every agent has reported — and Claude has answered for them, since the
+        // notification that closes one wakes Claude for a turn of its own that ends in another Stop.
+        this.heldAssistantMessage = asString(payload.last_assistant_message);
+        if (this.turn && this.translator.runningSubagents > 0) {
+          this.holdForSubagents();
+          break;
+        }
+        this.finishTurn({
+          response: { stopReason: "end_turn" },
+          assistantMessage: this.translator.assistantChunks === this.assistantBaseline ? this.heldAssistantMessage : undefined,
+        });
         break;
       case "StopFailure":
         this.contextMtimeAtTurnEnd = await this.contextMtime();
@@ -447,6 +477,7 @@ export class ClaudeRuntime {
     if (!this.turn) return;
     if (this.cancelTimer) clearTimeout(this.cancelTimer);
     this.cancelTimer = null;
+    this.releaseSubagentHold();
     this.cancelRequested = false;
     this.interactions.cancelPending();
     const turn = this.turn;
@@ -515,6 +546,43 @@ export class ClaudeRuntime {
     } catch {
       return 0;
     }
+  }
+
+  /** Watches from outside the hook channel, because a stuck agent produces no hook to answer. */
+  private holdForSubagents(): void {
+    if (this.subagentHold) return;
+    writeLog({ level: "info", message: "Holding the turn open for a background agent", sessionId: this.sessionId, agents: this.translator.runningSubagents });
+    this.subagentHold = setInterval(() => this.reviewSubagentHold(), this.subagentPollMs);
+    this.subagentHold.unref();
+  }
+
+  private reviewSubagentHold(): void {
+    if (!this.turn) {
+      this.releaseSubagentHold();
+      return;
+    }
+    // A hold that is simply over ends at the Stop hook. This is only the way out of one that is not:
+    // agents that have stopped writing, or a last agent whose report never woke Claude to answer it.
+    const agents = this.translator.runningSubagents;
+    const silent = Date.now() - this.translator.subagentActivityAt;
+    if (silent < (agents > 0 ? this.subagentSilenceMs : this.subagentWakeMs)) return;
+    writeLog({
+      level: "warn",
+      message: agents > 0 ? "Ending a turn whose background agents have gone quiet" : "Ending a turn Claude never answered its agents in",
+      sessionId: this.sessionId,
+      agents,
+      silentMs: silent,
+    });
+    this.finishTurn({
+      response: { stopReason: "end_turn" },
+      assistantMessage: this.translator.assistantChunks === this.assistantBaseline ? this.heldAssistantMessage : undefined,
+    });
+  }
+
+  private releaseSubagentHold(): void {
+    if (this.subagentHold) clearInterval(this.subagentHold);
+    this.subagentHold = null;
+    this.heldAssistantMessage = undefined;
   }
 
   private async finishCancelled(): Promise<void> {

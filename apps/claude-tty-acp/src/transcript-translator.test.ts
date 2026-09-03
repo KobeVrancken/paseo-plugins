@@ -314,3 +314,47 @@ test("carries a nested subagent's earlier steps onto the card of the agent that 
     { type: "content", content: { type: "text", text: "↳ Nested first step\nSpawner step\n↳ Nested later step" } },
   ]);
 });
+
+test("counts the agents a turn is still waiting on, and ignores the ones history only remembers", async () => {
+  const connection = { sessionUpdate: async () => undefined } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const launch = (toolCallId: string, agentId: string, running: boolean) => [
+    {
+      type: "assistant",
+      uuid: `launcher-${agentId}`,
+      message: { content: [{ type: "tool_use", id: toolCallId, name: "Agent", input: { description: agentId } }] },
+    },
+    {
+      type: "user",
+      uuid: `launched-${agentId}`,
+      toolUseResult: running ? { isAsync: true, status: "async_launched", agentId } : { status: "completed", agentId },
+      message: { content: [{ type: "tool_result", tool_use_id: toolCallId, content: [] }] },
+    },
+  ];
+
+  // A session being loaded replays a transcript whose agents died with the process that ran them.
+  await translator.translate(launch("history-tool", "history", true));
+  assert.equal(translator.runningSubagents, 0);
+
+  translator.trackRunningSubagents();
+  await translator.translate([...launch("async-tool", "async", true), ...launch("sync-tool", "sync", false)]);
+  assert.equal(translator.runningSubagents, 1);
+
+  // A nested agent is part of the one piece of work the session launched, not a second one.
+  await translator.translateSubagent("async", [
+    { type: "user", uuid: "nested", toolUseResult: { isAsync: true, status: "async_launched", agentId: "nested" }, message: { content: [] } },
+  ]);
+  assert.equal(translator.runningSubagents, 1);
+
+  const activityBefore = translator.subagentActivityAt;
+  assert.ok(activityBefore > 0);
+  await translator.translate([
+    {
+      type: "user",
+      uuid: "notified",
+      message: { content: "<task-notification> <task-id>async</task-id> <status>completed</status> <summary>done</summary> </task-notification>" },
+    },
+  ]);
+  assert.equal(translator.runningSubagents, 0);
+  assert.ok(translator.subagentActivityAt >= activityBefore);
+});
