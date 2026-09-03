@@ -202,8 +202,24 @@ export const getSubagents = defineRpc({
   output: SubagentsSchema,
 });
 
+export const SubagentStepSchema = z.object({
+  kind: z.enum(["text", "tool"]),
+  /** When it happened, against the daemon's clock, like every other time in this payload. */
+  at: z.number().nullable(),
+  /** What the subagent said, or the name of the tool it called. */
+  title: z.string(),
+  /** What the tool was asked to do, in the subagent's own words. */
+  detail: z.string().nullable(),
+  /** The argument worth reading as it was written: a command, a path, a pattern. */
+  body: z.string().nullable(),
+  failed: z.boolean(),
+  error: z.string().nullable(),
+});
+
 export const SubagentTranscriptSchema = z.object({
-  steps: z.array(z.string()),
+  /** The first thing in the transcript, so a step can say how far into the run it happened. */
+  startedAt: z.number().nullable(),
+  steps: z.array(SubagentStepSchema),
   /** Steps older than the ones returned, which are on disk but not worth sending. */
   earlier: z.number(),
 });

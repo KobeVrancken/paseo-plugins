@@ -13,7 +13,7 @@ import {
   readOutcomes,
   subagentFileName,
   subagentMetaFileName,
-  subagentSteps,
+  subagentTranscript,
   type SubagentFile,
   type SubagentLaunch,
   type SubagentMeta,
@@ -75,8 +75,8 @@ export async function readSubagentTranscript(sessionId: string, agentId: string)
   if (file === null) throw new Error(`Session ${sessionId} is not open, so its subagents cannot be read.`);
   const handle = await open(file, "r");
   try {
-    const steps = subagentSteps(parseRecords(await handle.readFile("utf8")));
-    return { steps: steps.slice(-STEP_LIMIT), earlier: Math.max(0, steps.length - STEP_LIMIT) };
+    const { startedAt, steps } = subagentTranscript(parseRecords(await handle.readFile("utf8")));
+    return { startedAt, steps: steps.slice(-STEP_LIMIT), earlier: Math.max(0, steps.length - STEP_LIMIT) };
   } finally {
     await handle.close().catch(() => undefined);
   }

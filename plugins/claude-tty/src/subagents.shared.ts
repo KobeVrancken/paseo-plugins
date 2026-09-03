@@ -175,21 +175,105 @@ function byRunningThenRecency(a: Subagent, b: Subagent): number {
 }
 
 /**
- * The steps a subagent took, in the shape the session's own tool call shows them, so the panel and
- * the conversation do not describe the same work in two different ways.
+ * One thing a subagent did: something it said, or a tool it called. Kept apart rather than rendered
+ * into a line, because a panel with room for two lines can say what a tool call was handed and how
+ * it came back, and a step nobody can read is not worth listing.
  */
-export function subagentSteps(records: readonly Record<string, unknown>[]): string[] {
-  const steps: string[] = [];
+export type SubagentStep = {
+  kind: "text" | "tool";
+  /** When it happened, so a run that took minutes reads as one. */
+  at: number | null;
+  /** What the subagent said, or the name of the tool it called. */
+  title: string;
+  /** What the tool was asked to do, in the subagent's own words. */
+  detail: string | null;
+  /** The argument worth reading as it was written: a command, a path, a pattern. */
+  body: string | null;
+  failed: boolean;
+  /** What came back, when what came back was a failure. */
+  error: string | null;
+};
+
+export type SubagentTranscript = { startedAt: number | null; steps: SubagentStep[] };
+
+const TEXT_CHARS = 1_200;
+const BODY_CHARS = 400;
+const ERROR_CHARS = 200;
+
+/** The verbatim argument, in the order that says most about what the call was for. */
+const BODY_KEYS = ["command", "file_path", "notebook_path", "path", "pattern", "query", "url"] as const;
+
+/**
+ * What a subagent did, read out of its own transcript. Its results are read too: a tool that failed
+ * is most of what is worth knowing about a run that went wrong, and the transcript is the only
+ * place it is written down.
+ */
+export function subagentTranscript(records: readonly Record<string, unknown>[]): SubagentTranscript {
+  const steps: SubagentStep[] = [];
+  const byToolUse = new Map<string, SubagentStep>();
+  let startedAt: number | null = null;
   for (const record of records) {
+    const at = timestampOf(record);
+    if (startedAt === null) startedAt = at;
     const content = asRecord(record.message)?.content;
-    if (record.type !== "assistant" || !Array.isArray(content)) continue;
+    if (!Array.isArray(content)) continue;
     for (const value of content) {
       const block = asRecord(value);
-      if (block?.type === "text" && typeof block.text === "string") steps.push(oneLine(block.text));
-      if (block?.type === "tool_use") steps.push(`• ${toolTitle(block)}`);
+      if (!block) continue;
+      if (record.type === "assistant" && block.type === "text" && typeof block.text === "string") {
+        const text = truncate(block.text.trim(), TEXT_CHARS);
+        if (text !== "") steps.push({ kind: "text", at, title: text, detail: null, body: null, failed: false, error: null });
+      }
+      if (record.type === "assistant" && block.type === "tool_use") {
+        const step = toolStep(block, at);
+        steps.push(step);
+        const id = typeof block.id === "string" ? block.id : null;
+        if (id !== null) byToolUse.set(id, step);
+      }
+      if (block.type === "tool_result" && block.is_error === true) {
+        const step = typeof block.tool_use_id === "string" ? byToolUse.get(block.tool_use_id) : undefined;
+        if (step) {
+          step.failed = true;
+          step.error = firstLine(block.content);
+        }
+      }
     }
   }
-  return steps.filter((step) => step !== "");
+  return { startedAt, steps };
+}
+
+function toolStep(block: Record<string, unknown>, at: number | null): SubagentStep {
+  const input = asRecord(block.input) ?? {};
+  const body = BODY_KEYS.map((key) => input[key]).find((value): value is string => typeof value === "string" && value !== "");
+  return {
+    kind: "tool",
+    at,
+    title: typeof block.name === "string" && block.name !== "" ? block.name : "Tool",
+    detail: typeof input.description === "string" && input.description !== "" ? oneLine(input.description) : null,
+    body: body === undefined ? null : truncate(body.trim(), BODY_CHARS),
+    failed: false,
+    error: null,
+  };
+}
+
+/** Claude puts the reason a tool failed at the top of what it hands back. */
+function firstLine(content: unknown): string | null {
+  const blocks = typeof content === "string" ? [content] : Array.isArray(content) ? content : [];
+  for (const value of blocks) {
+    const text = typeof value === "string" ? value : asRecord(value)?.type === "text" ? asRecord(value)?.text : null;
+    const line = typeof text === "string" ? text.split("\n").find((candidate) => candidate.trim() !== "") : undefined;
+    if (line !== undefined) return truncate(line.trim(), ERROR_CHARS);
+  }
+  return null;
+}
+
+function timestampOf(record: Record<string, unknown>): number | null {
+  const parsed = typeof record.timestamp === "string" ? Date.parse(record.timestamp) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function truncate(text: string, limit: number): string {
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
 }
 
 /** The prompt a subagent was given, which names it when nothing else does. */
@@ -202,15 +286,6 @@ export function promptOf(records: readonly Record<string, unknown>[]): string | 
     }
   }
   return null;
-}
-
-function toolTitle(block: Record<string, unknown>): string {
-  const name = typeof block.name === "string" ? block.name : "Tool";
-  const input = asRecord(block.input) ?? {};
-  const detail = [input.description, input.file_path, input.query, input.pattern, input.command].find(
-    (value): value is string => typeof value === "string" && value !== "",
-  );
-  return detail === undefined ? name : oneLine(`${name}: ${detail}`);
 }
 
 function messageTexts(record: Record<string, unknown>): string[] {

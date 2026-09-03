@@ -10,7 +10,7 @@ import {
   readLaunches,
   readOutcomes,
   subagentFileName,
-  subagentSteps,
+  subagentTranscript,
   type SubagentFile,
   type SubagentLaunch,
   type SubagentOutcome,
@@ -89,31 +89,67 @@ test("reads the sidecar Claude writes beside a subagent transcript", () => {
   assert.equal(parseMeta(null), null);
 });
 
-test("renders a subagent's steps the way its tool call shows them", () => {
+test("reads what a subagent said, ran, and got back", () => {
   const records = parseRecords(
     [
-      JSON.stringify({ type: "user", message: { content: "You are auditing\nthe backend" } }),
+      JSON.stringify({ type: "user", timestamp: "2026-09-01T15:43:30.000Z", message: { content: "You are auditing\nthe backend" } }),
       JSON.stringify({
         type: "assistant",
+        timestamp: "2026-09-01T15:43:37.000Z",
         message: {
           content: [
             { type: "thinking", thinking: "hidden" },
             { type: "text", text: "Reading   the controllers" },
-            { type: "tool_use", name: "Read", input: { file_path: "src/app.ts" } },
-            { type: "tool_use", name: "Bash", input: { command: "pnpm test" } },
-            { type: "tool_use", name: "Unknown", input: {} },
+            { type: "tool_use", id: "read-1", name: "Read", input: { file_path: "src/app.ts" } },
+            { type: "tool_use", id: "bash-1", name: "Bash", input: { command: "pnpm test", description: "Run the suite" } },
+            { type: "tool_use", id: "odd-1", name: "Unknown", input: {} },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        timestamp: "2026-09-01T15:45:07.000Z",
+        message: {
+          content: [
+            { type: "tool_result", tool_use_id: "read-1", content: [{ type: "text", text: "contents" }] },
+            { type: "tool_result", tool_use_id: "bash-1", is_error: true, content: [{ type: "text", text: "\nExit code 1\n17 tests failed" }] },
           ],
         },
       }),
     ].join("\n"),
   );
-  assert.deepEqual(subagentSteps(records), [
-    "Reading the controllers",
-    "• Read: src/app.ts",
-    "• Bash: pnpm test",
-    "• Unknown",
+
+  const transcript = subagentTranscript(records);
+  assert.equal(transcript.startedAt, Date.parse("2026-09-01T15:43:30.000Z"));
+  assert.deepEqual(transcript.steps, [
+    { kind: "text", at: Date.parse("2026-09-01T15:43:37.000Z"), title: "Reading   the controllers", detail: null, body: null, failed: false, error: null },
+    { kind: "tool", at: Date.parse("2026-09-01T15:43:37.000Z"), title: "Read", detail: null, body: "src/app.ts", failed: false, error: null },
+    // The reason a tool failed is the whole of what is worth knowing about a run that went wrong.
+    { kind: "tool", at: Date.parse("2026-09-01T15:43:37.000Z"), title: "Bash", detail: "Run the suite", body: "pnpm test", failed: true, error: "Exit code 1" },
+    { kind: "tool", at: Date.parse("2026-09-01T15:43:37.000Z"), title: "Unknown", detail: null, body: null, failed: false, error: null },
   ]);
   assert.equal(promptOf(records), "You are auditing the backend");
+});
+
+test("keeps a step readable when what it was handed is not", () => {
+  const records = parseRecords(
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [
+          { type: "text", text: `A ${"very ".repeat(400)}long answer` },
+          { type: "tool_use", id: "bash-1", name: "Bash", input: { command: "x".repeat(900), description: `run\n  ${"y".repeat(400)}` } },
+        ],
+      },
+    }),
+  );
+
+  const [text, tool] = subagentTranscript(records).steps;
+  assert.equal(text?.title.length, 1_200);
+  assert.equal(text?.title.endsWith("…"), true);
+  assert.equal(tool?.body?.length, 400);
+  assert.equal(tool?.detail?.includes("\n"), false);
+  assert.equal(tool?.at, null);
 });
 
 test("says how long ago a subagent last wrote anything", () => {
