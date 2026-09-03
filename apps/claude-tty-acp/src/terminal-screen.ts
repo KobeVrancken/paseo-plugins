@@ -6,9 +6,16 @@ const { Terminal } = require("@xterm/headless") as { Terminal: typeof XtermTermi
 
 export class TerminalScreen {
   private readonly terminal: XtermTerminal = new Terminal({ allowProposedApi: true, cols: 120, rows: 40, scrollback: 500 });
+  private lastWriteAt = 0;
 
   write(data: string, callback?: () => void): void {
+    this.lastWriteAt = Date.now();
     this.terminal.write(data, callback);
+  }
+
+  /** Claude paints continuously while it restores a conversation, so a screen that has stopped changing is the signal that it has finished. */
+  quietFor(milliseconds: number): boolean {
+    return Date.now() - this.lastWriteAt >= milliseconds;
   }
 
   snapshot(): string {
@@ -23,6 +30,7 @@ export class TerminalScreen {
   }
 
   reset(): void {
+    this.lastWriteAt = Date.now();
     this.terminal.reset();
   }
 

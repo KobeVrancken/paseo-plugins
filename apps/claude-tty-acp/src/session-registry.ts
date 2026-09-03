@@ -9,13 +9,19 @@ import { SessionLock } from "./session-lock.ts";
 import { type PersistedSession, StateStore } from "./state-store.ts";
 import { TranscriptReader } from "./transcript-reader.ts";
 import { TranscriptTranslator } from "./transcript-translator.ts";
-import { DEFAULT_IDLE_TIMEOUT_MS } from "./idle-timeout.ts";
+import { readIdleTimeout } from "./idle-timeout.ts";
 import { writeLog } from "./log.ts";
 
 export type SessionRegistryDependencies = RuntimeDependencies & {
-  /** Zero keeps the native Claude process alive until the logical session closes. */
+  /**
+   * Zero keeps the native Claude process alive until the logical session closes.
+   * Left out in production, where the timeout is read per suspension so a change in Paseo reaches live sessions.
+   */
   idleTimeoutMs?: number;
 };
+
+/** How long a suspension stands aside when the session is busy or someone still has a card to answer. */
+const SUSPENSION_RETRY_MS = 60_000;
 
 type SessionOptions = {
   id: string;
@@ -37,7 +43,7 @@ export class ClaudeSession {
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
   private readonly runtimeDependencies: RuntimeDependencies;
-  private readonly idleTimeoutMs: number;
+  private readonly fixedIdleTimeoutMs: number | undefined;
   private readonly stateStore: StateStore;
   private readonly lock: SessionLock;
   private readonly translator: TranscriptTranslator;
@@ -45,6 +51,8 @@ export class ClaudeSession {
   private queue: Promise<void> = Promise.resolve();
   private idleTimer: NodeJS.Timeout | null = null;
   private activityVersion = 0;
+  /** When the session last went quiet, so a deferred or re-read suspension keeps the deadline it earned. */
+  private idleSince = 0;
 
   constructor(
     options: SessionOptions,
@@ -63,7 +71,7 @@ export class ClaudeSession {
     this.hooks = hooks;
     const { idleTimeoutMs, ...runtimeDependencies } = dependencies;
     this.runtimeDependencies = runtimeDependencies;
-    this.idleTimeoutMs = idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+    this.fixedIdleTimeoutMs = idleTimeoutMs;
     this.stateStore = stateStore;
     this.lock = new SessionLock(this.id, stateStore.locksDirectory);
     this.translator = new TranscriptTranslator(this.id, this.cwd, connection);
@@ -177,30 +185,71 @@ export class ClaudeSession {
   }
 
   private scheduleSuspension(activityVersion: number): void {
-    if (this.idleTimeoutMs === 0 || activityVersion !== this.activityVersion || !this.runtime?.started) return;
+    if (activityVersion !== this.activityVersion || !this.runtime?.started) return;
+    this.idleSince = Date.now();
+    void this.idleTimeout().then((idleTimeoutMs) => {
+      if (idleTimeoutMs === 0) return;
+      this.armSuspension(activityVersion, idleTimeoutMs);
+    });
+  }
+
+  private armSuspension(activityVersion: number, delayMs: number): void {
+    // A prompt that landed while this was being scheduled owns the timer now.
+    if (activityVersion !== this.activityVersion || !this.runtime?.started) return;
+    if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;
-      void this.exclusive(async () => {
-        if (activityVersion !== this.activityVersion || !this.runtime?.started) return;
-        try {
-          await this.runtime.suspend();
-          writeLog({
-            level: "info",
-            message: "Suspended idle Claude session",
-            sessionId: this.id,
-            idleTimeoutMs: this.idleTimeoutMs,
-          });
-        } catch (error) {
-          writeLog({
-            level: "warn",
-            message: "Failed to suspend idle Claude session",
-            sessionId: this.id,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      });
-    }, this.idleTimeoutMs);
+      void this.exclusive(() => this.suspendIfStillIdle(activityVersion));
+    }, Math.max(0, delayMs));
     this.idleTimer.unref();
+  }
+
+  private async suspendIfStillIdle(activityVersion: number): Promise<void> {
+    if (activityVersion !== this.activityVersion || !this.runtime?.started) return;
+    // Read again rather than trusted from when the timer was armed, so a change made in Paseo reaches a session that has been idle since before it.
+    const idleTimeoutMs = await this.idleTimeout();
+    if (idleTimeoutMs === 0) return;
+    // Somebody is looking at a permission or question card. Stopping Claude now cancels the request behind it and
+    // leaves that card on screen in Paseo, answering to nothing.
+    if (this.runtime.turnActive || this.runtime.interactionPending) {
+      this.armSuspension(activityVersion, SUSPENSION_RETRY_MS);
+      return;
+    }
+    const remaining = this.idleSince + idleTimeoutMs - Date.now();
+    if (remaining > 0) {
+      this.armSuspension(activityVersion, remaining);
+      return;
+    }
+    try {
+      await this.runtime.suspend();
+      writeLog({ level: "info", message: "Suspended idle Claude session", sessionId: this.id, idleTimeoutMs });
+    } catch (error) {
+      // Trying once and giving up would keep this session's process alive for the rest of its life, which is what the timeout exists to prevent.
+      writeLog({
+        level: "warn",
+        message: "Failed to suspend idle Claude session; will try again",
+        sessionId: this.id,
+        retryInMs: SUSPENSION_RETRY_MS,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      this.armSuspension(activityVersion, SUSPENSION_RETRY_MS);
+    }
+  }
+
+  /** Zero disables suspension, which is also how an unreadable setting is treated: never stop a session over it. */
+  private async idleTimeout(): Promise<number> {
+    if (this.fixedIdleTimeoutMs !== undefined) return this.fixedIdleTimeoutMs;
+    try {
+      return await readIdleTimeout();
+    } catch (error) {
+      writeLog({
+        level: "warn",
+        message: "Could not read the idle timeout; keeping this session alive",
+        sessionId: this.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return 0;
+    }
   }
 
   private exclusive<T>(operation: () => Promise<T>): Promise<T> {

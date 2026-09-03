@@ -60,9 +60,6 @@ Add the provider to that host's Paseo configuration:
         "command": [
           "/opt/paseo-plugins/apps/claude-tty-acp/bin/claude-tty-acp"
         ],
-        "env": {
-          "CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS": "3600000"
-        },
         "params": {
           "supportsMcpServers": false
         }
@@ -100,7 +97,7 @@ The adapter inherits the Paseo daemon's environment.
 | `CLAUDE_BIN` | Absolute path to Claude when the daemon's `PATH` cannot find `claude`. |
 | `CLAUDE_CONFIG_DIR` | Existing Claude configuration, credentials, plugins, commands, skills, and transcript root. |
 | `CLAUDE_TTY_ACP_STATE_DIR` | Adapter session mappings and locks; defaults to the host's XDG state directory. |
-| `CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS` | Stop an idle session's native Claude process after this many milliseconds; defaults to `3600000` (one hour). Set to `0` to disable suspension. |
+| `CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS` | Stop an idle session's native Claude process after this many milliseconds. Overrides the Claude TTY plugin's saved setting; without either, the default is `3600000` (one hour). Set to `0` to disable suspension. A value that is not a whole number of milliseconds in range is logged and ignored rather than fatal. |
 | `XDG_STATE_HOME` | Base for adapter state when `CLAUDE_TTY_ACP_STATE_DIR` is unset. |
 
 For a systemd service, set `CLAUDE_BIN` to the output of `command -v claude` in the daemon user's login shell rather than relying on a shell-specific `PATH`.
@@ -120,6 +117,11 @@ When that timeout expires it sends Ctrl-D, kills the PTY if it does not exit pro
 The logical ACP session, transcript mapping, selected model and mode, and session lock remain intact.
 The next prompt launches `claude --resume <id>` automatically, so the conversation continues without keeping its process alive indefinitely.
 Only foreground ACP prompts reset the timeout; task-completion notifications inside an otherwise idle Claude process do not extend it.
+
+The timeout is read at each suspension rather than once at startup: `CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS` if it is set, otherwise `idleTimeoutMs` in `${XDG_CACHE_HOME:-~/.cache}/paseo-plugins/claude-tty/settings.json`, which is what the Claude TTY plugin's panel writes.
+Reading it per suspension is what lets a change in that panel reach a session that is already connected, and it is also why an unreadable file or a malformed variable leaves the session running rather than taking the adapter down.
+
+A suspension waits for its session to be genuinely idle. It stands aside while a turn is running and while a permission or question card is still waiting for an answer — stopping Claude then would cancel the request behind that card and leave it on screen in Paseo answering to nothing — and a suspension that fails re-arms rather than giving up, because giving up once would keep that process alive for the rest of its life.
 
 ## Models and modes
 
@@ -153,9 +155,17 @@ The first prompt launches `claude --session-id <id>` and later launches reuse `c
 
 Every launch gets a private runtime directory holding a generated `settings.json` and hook client, passed with `--settings`, so the adapter registers its hooks and its status line without touching the user's Claude configuration.
 No global hooks are required; remove any legacy hooks left in `~/.claude/settings.json` after uninstalling the old panel plugin.
-Startup is complete once the `SessionStart` hook has arrived and Claude's interactive prompt appears on a headless xterm screen that mirrors the PTY; that screen is used only for readiness, workspace-trust detection, confirming a prompt left the input box, and the terminal snapshot in startup errors.
+Startup is complete once the `SessionStart` hook has arrived and Claude's interactive prompt appears on a headless xterm screen that mirrors the PTY; that screen is used only for readiness, dialog detection, confirming a prompt left the input box, and the terminal snapshot in startup errors.
 If Claude stops first at its workspace-trust screen, the adapter surfaces the exact cwd as an ACP permission card in Paseo.
 Approving the card selects **Yes, I trust this folder** in the PTY and gives Claude a fresh startup window; denying or cancelling it fails closed without changing Claude's trust state.
+
+Readiness also requires the screen to have stopped changing, and that is not a nicety.
+A resumed session paints its entire conversation before its input box exists, and text inside that conversation can satisfy every readiness signal on its own — a footer quoted in a message, a token count, the words `auto mode on`.
+A prompt pasted into that window is dropped, and because the paste never echoes there is nothing for the submit loop to notice: the adapter presses Enter once into whatever has focus and the turn then waits for a `Stop` hook that is never coming.
+
+The second thing a resume can stop at is Claude asking how to open a long or old conversation — **Resume from summary**, **Resume full session as-is**, **Don't ask me again** — and the idle timeout guarantees every long-lived session eventually meets it.
+The adapter answers it the same way it answers the trust screen, by moving the selection and pressing Enter, and it always keeps the full session: the conversation is the ACP session it was asked to restore, and a summary would silently replace the history Paseo has already replayed into its timeline.
+Left unanswered this dialog is what a lost first prompt after a suspension looks like from the outside: the readiness signal came from the restored conversation behind the dialog, and the Enter that followed the paste answered the dialog instead of sending the prompt.
 
 Slash commands are the one thing the adapter never asks Claude for: an interactive session has no way to list them, so the adapter walks the user's, the project's and every enabled plugin's command and skill directories itself and publishes the result as ACP available commands.
 

@@ -1046,3 +1046,140 @@ function contextLines(updates: SessionNotification[]): string[] {
     return text?.startsWith("Context: ") ? [text] : [];
   });
 }
+
+test("keeps the whole conversation when Claude asks how to resume a suspended session, and still delivers that prompt", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-resume-test-"));
+  const spawns: SpawnRecord[] = [];
+  let agent!: ClaudeTtyAgent;
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    let pty!: FakePty;
+    const resuming = args.includes("--resume");
+    pty = new FakePty(4700 + spawns.length, (data) => {
+      if (data === "\u0004") setImmediate(() => pty.emitExit());
+      // The dialog moves its marker onto the second option, and Enter takes it and paints the restored conversation.
+      if (resuming && data === "\u001b[B") setImmediate(() => pty.emitData(staleResumeScreen("full")));
+      if (resuming && data === "\r") setImmediate(() => pty.emitData("\u001b[2J\u001b[H  ⏵⏵ auto mode on\r\n"));
+    });
+    spawns.push({ file, args, options, pty });
+    const idFlag = resuming ? "--resume" : "--session-id";
+    const sessionId = args[args.indexOf(idFlag) + 1];
+    setImmediate(() => {
+      void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId });
+      // Claude paints the restored conversation and then asks; that conversation already satisfies every readiness signal on its own.
+      pty.emitData(resuming ? staleResumeScreen("summary") : "\u001b[2J\u001b[H  ⏵⏵ auto mode on\r\n");
+    });
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
+    startupTimeoutMs: 1_000,
+    readinessTimeoutMs: 1_000,
+    readyQuietMs: 5,
+    staleResumeKeyDelayMs: 0,
+    staleResumeSelectionTimeoutMs: 200,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    idleTimeoutMs: 20,
+  });
+
+  try {
+    const created = await agent.newSession({ cwd: "/work/idle-dialog", mcpServers: [] });
+    const first = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "first" }] });
+    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: created.sessionId, last_assistant_message: "first done" });
+    await first;
+    await waitFor(() => agent.sessions.get(created.sessionId)?.started === false);
+
+    const second = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "second" }] });
+    await waitFor(() => spawns.length === 2 && spawns[1]!.pty.writes.some((write) => write.startsWith("\u001b[200~")), 3_000);
+    const writes = spawns[1]!.pty.writes;
+    assert.deepEqual(spawns[1]!.args.slice(0, 2), ["--resume", created.sessionId]);
+    // Down then Enter answers with "Resume full session as-is", and the prompt is pasted only after that.
+    assert.deepEqual(writes.slice(0, 2), ["\u001b[B", "\r"]);
+    assert.equal(writes[2], "\u001b[200~second \u001b[201~");
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: created.sessionId, last_assistant_message: "second done" });
+    assert.deepEqual(await second, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+test("leaves a session running while a card is still waiting on the person who has to answer it", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-card-test-"));
+  const spawns: SpawnRecord[] = [];
+  let agent!: ClaudeTtyAgent;
+  let answer: ((response: RequestPermissionResponse) => void) | null = null;
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    let pty!: FakePty;
+    pty = new FakePty(4800 + spawns.length, (data) => {
+      if (data === "\u0004") setImmediate(() => pty.emitExit());
+    });
+    spawns.push({ file, args, options, pty });
+    const idFlag = args.includes("--resume") ? "--resume" : "--session-id";
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: args[args.indexOf(idFlag) + 1] }));
+    return pty;
+  };
+  const connection = {
+    sessionUpdate: async () => undefined,
+    requestPermission: () => new Promise<RequestPermissionResponse>((resolve) => (answer = resolve)),
+  } as unknown as AgentSideConnection;
+  agent = new ClaudeTtyAgent(connection, {
+    spawnPty,
+    runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    // Long enough that the card below is on screen well before the timeout expires.
+    idleTimeoutMs: 1_000,
+  });
+
+  try {
+    const created = await agent.newSession({ cwd: "/work/idle-card", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "ask me" }] });
+    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: created.sessionId, last_assistant_message: "asked" });
+    await turn;
+
+    // A card raised outside the turn, the way work Claude is still finishing in the background raises one.
+    const question = agent.hooks.dispatch({
+      hook_event_name: "PreToolUse",
+      session_id: created.sessionId,
+      tool_name: "AskUserQuestion",
+      tool_use_id: "toolu_1",
+      tool_input: { questions: [{ question: "Which one?", options: [{ label: "This one" }] }] },
+    });
+    await waitFor(() => answer !== null);
+
+    // Well past the timeout: the session is left alone rather than stopped out from under the open card.
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    assert.equal(agent.sessions.get(created.sessionId)?.started, true);
+
+    answer!({ outcome: { outcome: "selected", optionId: "answer-0" } });
+    const decision = (await question) as { hookSpecificOutput?: { permissionDecision?: string } };
+    assert.equal(decision.hookSpecificOutput?.permissionDecision, "allow");
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+function staleResumeScreen(selected: "summary" | "full"): string {
+  return [
+    "\u001b[2J\u001b[H",
+    "● CI green on the tip commit.",
+    "  ⏵⏵ auto mode on",
+    "─".repeat(120),
+    "  This session is 10h 51m old and 329.7k tokens.",
+    "  Resuming the full session will consume a substantial portion of your usage limits. We recommend resuming from a",
+    "  summary.",
+    selected === "summary" ? "  ❯ 1. Resume from summary (recommended)" : "    1. Resume from summary (recommended)",
+    selected === "summary" ? "    2. Resume full session as-is" : "  ❯ 2. Resume full session as-is",
+    "    3. Don't ask me again",
+    "  Enter to confirm · Esc to cancel",
+  ].join("\r\n");
+}
