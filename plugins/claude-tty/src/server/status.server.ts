@@ -1,14 +1,16 @@
 import type { PaseoApi } from "@getpaseo/client";
 import type { StatusPayload } from "../contracts.shared.ts";
-import { adapterBinaryPath, adapterEntryPath, claudeCandidates, defaultStateDirectory } from "../paths.shared.ts";
-import { PROVIDER_ID, classifyProviderEntry, commandOf, idleTimeoutOf, providerEntryFor } from "../provider.shared.ts";
-import { DEFAULT_IDLE_TIMEOUT_MS } from "../settings.shared.ts";
+import { adapterBinaryPath, adapterEntryPath, claudeCandidates, defaultStateDirectory, settingsFilePath } from "../paths.shared.ts";
+import { PROVIDER_ID, classifyProviderEntry, commandOf, envOf, providerEntryFor } from "../provider.shared.ts";
+import { IDLE_TIMEOUT_ENV, parseIdleTimeout } from "../settings.shared.ts";
 import { fileExists, firstExecutable, resolveRepoRoot } from "./paths.server.ts";
+import { readSettings } from "./settings-store.server.ts";
 
 export async function readStatus(paseo: PaseoApi): Promise<StatusPayload> {
-  const [repo, claudeBinary] = await Promise.all([resolveRepoRoot(paseo), firstExecutable(claudeCandidates())]);
+  const [repo, claudeBinary, saved] = await Promise.all([resolveRepoRoot(paseo), firstExecutable(claudeCandidates()), readSettings()]);
   const host = { node: process.version, claude: claudeBinary };
   const stateDirectory = defaultStateDirectory();
+  const file = settingsFilePath();
 
   if (repo.root === null) {
     return {
@@ -18,13 +20,12 @@ export async function readStatus(paseo: PaseoApi): Promise<StatusPayload> {
       provider: { id: PROVIDER_ID, state: "absent", label: null, command: null, expectedCommand: null },
       host,
       stateDirectory,
-      settings: { idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS },
+      settings: { idleTimeoutMs: saved.idleTimeoutMs, file, envOverrideMs: null },
     };
   }
 
   const [built, existing] = await Promise.all([fileExists(adapterEntryPath(repo.root)), readProviderEntry(paseo)]);
-  const idleTimeoutMs = idleTimeoutOf(existing) ?? DEFAULT_IDLE_TIMEOUT_MS;
-  const expected = providerEntryFor(repo.root, idleTimeoutMs);
+  const expected = providerEntryFor(repo.root);
 
   return {
     repoRoot: repo.root,
@@ -39,8 +40,17 @@ export async function readStatus(paseo: PaseoApi): Promise<StatusPayload> {
     },
     host,
     stateDirectory,
-    settings: { idleTimeoutMs },
+    settings: { idleTimeoutMs: saved.idleTimeoutMs, file, envOverrideMs: envOverrideOf(existing) },
   };
+}
+
+/**
+ * The adapter lets the environment variable win, so an entry that sets it makes the saved value moot.
+ * A variable set on the daemon's own process is invisible from here and is not reported.
+ */
+function envOverrideOf(entry: unknown): number | null {
+  const raw = envOf(entry)?.[IDLE_TIMEOUT_ENV];
+  return raw === undefined ? null : parseIdleTimeout(raw);
 }
 
 export async function readProviderEntry(paseo: PaseoApi): Promise<unknown> {

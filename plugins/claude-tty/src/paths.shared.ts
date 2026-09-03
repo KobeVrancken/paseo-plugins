@@ -15,6 +15,15 @@ export function defaultStateDirectory(env: Env = process.env): string {
   return path.join(stateHome, "claude-tty-acp");
 }
 
+/**
+ * Plugin-owned persistence, the convention the root README documents for every plugin here.
+ * Mirrored by `settingsFilePath` in `apps/claude-tty-acp/src/idle-timeout.ts`, which reads this file.
+ */
+export function settingsFilePath(env: Env = process.env): string {
+  const base = env.XDG_CACHE_HOME?.trim() || path.join(env.HOME || os.homedir(), ".cache");
+  return path.join(base, "paseo-plugins", PLUGIN_ID, "settings.json");
+}
+
 export function sessionsDirectory(stateDirectory: string): string {
   return path.join(stateDirectory, "sessions");
 }

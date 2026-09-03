@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyProviderEntry, idleTimeoutOf, providerEntryFor } from "./provider.shared.ts";
-import { DEFAULT_IDLE_TIMEOUT_MS, IDLE_TIMEOUT_ENV } from "./settings.shared.ts";
+import { classifyProviderEntry, envOf, providerEntryFor } from "./provider.shared.ts";
 
 const expected = providerEntryFor("/opt/paseo-plugins");
 
@@ -10,7 +9,6 @@ test("builds the entry the adapter README documents", () => {
     extends: "acp",
     label: "Claude TTY",
     command: ["/opt/paseo-plugins/apps/claude-tty-acp/bin/claude-tty-acp"],
-    env: { [IDLE_TIMEOUT_ENV]: String(DEFAULT_IDLE_TIMEOUT_MS) },
     params: { supportsMcpServers: false },
   });
 });
@@ -32,14 +30,12 @@ test("matches this checkout regardless of the label", () => {
   );
 });
 
-test("defaults old entries to one hour and reads configured timeouts", () => {
-  const { env: _env, ...oldEntry } = expected;
-  assert.equal(idleTimeoutOf(oldEntry), DEFAULT_IDLE_TIMEOUT_MS);
-  assert.equal(classifyProviderEntry(oldEntry, expected), "matching");
-  const custom = providerEntryFor("/opt/paseo-plugins", 7_200_000);
-  assert.equal(idleTimeoutOf(custom), 7_200_000);
-  assert.equal(classifyProviderEntry(custom, custom), "matching");
-  assert.equal(idleTimeoutOf({ ...expected, env: { [IDLE_TIMEOUT_ENV]: "bad" } }), null);
+test("leaves environment variables a host set on the entry alone", () => {
+  const withEnv = { ...expected, env: { CLAUDE_BIN: "/usr/local/bin/claude", CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS: "900000" } };
+  assert.equal(classifyProviderEntry(withEnv, expected), "matching");
+  assert.deepEqual(envOf(withEnv), { CLAUDE_BIN: "/usr/local/bin/claude", CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS: "900000" });
+  assert.equal(envOf(expected), null);
+  assert.equal(envOf({ ...expected, env: "CLAUDE_BIN=claude" }), null);
 });
 
 test("reports this adapter pointed elsewhere or configured differently as mismatched", () => {
@@ -50,7 +46,6 @@ test("reports this adapter pointed elsewhere or configured differently as mismat
   assert.equal(classifyProviderEntry({ ...expected, params: { supportsMcpServers: true } }, expected), "mismatched");
   assert.equal(classifyProviderEntry({ ...expected, params: undefined }, expected), "mismatched");
   assert.equal(classifyProviderEntry({ ...expected, extends: "claude" }, expected), "mismatched");
-  assert.equal(classifyProviderEntry({ ...expected, env: { ...expected.env, EXTRA: "1" } }, expected), "mismatched");
 });
 
 test("leaves an entry it does not recognise alone", () => {

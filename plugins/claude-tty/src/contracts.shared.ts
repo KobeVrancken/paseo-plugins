@@ -28,6 +28,10 @@ export const StatusSchema = z.object({
   stateDirectory: z.string(),
   settings: z.object({
     idleTimeoutMs: z.number().int().nonnegative(),
+    /** Where the value is stored, which is the plugin's own settings file rather than the daemon config. */
+    file: z.string(),
+    /** Set when the provider entry pins the timeout in `env`, which the adapter honours over this setting. */
+    envOverrideMs: z.number().int().nonnegative().nullable(),
   }),
 });
 

@@ -4,7 +4,7 @@ import React from "react";
 import { Text } from "react-native";
 import * as contracts from "../contracts.shared.ts";
 import type { StatusPayload } from "../contracts.shared.ts";
-import { IDLE_TIMEOUT_OPTIONS } from "../settings.shared.ts";
+import { IDLE_TIMEOUT_ENV, IDLE_TIMEOUT_OPTIONS } from "../settings.shared.ts";
 import { fontSize, leading, spacing, type Palette } from "./theme.client.ts";
 import { Card, Row, Section, Select } from "./ui.client.tsx";
 
@@ -25,12 +25,14 @@ export function SettingsSection({ palette, status }: { palette: Palette; status:
   const apply = useMutation({
     mutationFn: (idleTimeoutMs: number) => setSettings({ idleTimeoutMs }),
     onSuccess: (next) => queryClient.setQueryData(STATUS_QUERY_KEY, next),
+    // A save can fail after the file was written, so the shown value is re-read rather than left as it was.
+    onError: () => queryClient.invalidateQueries({ queryKey: STATUS_QUERY_KEY }),
   });
-  const disabled = status.provider.state !== "matching" || apply.isPending;
+  const override = status.settings.envOverrideMs;
   const selected = String(status.settings.idleTimeoutMs);
   const options = OPTIONS.some((option) => option.value === selected)
     ? OPTIONS
-    : [{ value: selected, label: formatTimeout(status.settings.idleTimeoutMs), description: "Custom provider value" }, ...OPTIONS];
+    : [{ value: selected, label: formatTimeout(status.settings.idleTimeoutMs), description: "Saved value" }, ...OPTIONS];
 
   return (
     <Section palette={palette} title="Settings">
@@ -38,13 +40,17 @@ export function SettingsSection({ palette, status }: { palette: Palette; status:
         <Row
           palette={palette}
           title="Suspend idle Claude"
-          hint={disabled ? "Install or repair this provider to change the timeout" : "Measured from the end of the last foreground turn"}
+          hint={
+            override === null
+              ? "Measured from the end of the last foreground turn"
+              : `Overridden: this provider entry sets ${IDLE_TIMEOUT_ENV} to ${formatTimeout(override)}`
+          }
           trailing={
             <Select
               palette={palette}
               value={selected}
               options={options}
-              disabled={disabled}
+              disabled={apply.isPending}
               accessibilityLabel={`Suspend idle Claude after ${formatTimeout(status.settings.idleTimeoutMs)}`}
               onValueChange={(value) => apply.mutate(Number(value))}
             />
@@ -63,7 +69,7 @@ export function SettingsSection({ palette, status }: { palette: Palette; status:
           ? apply.error instanceof Error
             ? apply.error.message
             : String(apply.error)
-          : "Suspension stops the PTY and its background tasks but keeps the logical session. Your next prompt resumes the same Claude conversation automatically. Open adapters keep the setting they started with."}
+          : "Suspension stops the PTY and its background tasks but keeps the logical session. Your next prompt resumes the same Claude conversation automatically. The change applies to open sessions too."}
       </Text>
     </Section>
   );
