@@ -5,8 +5,11 @@ import {
   launchedAgent,
   notificationFailed,
   parseTaskNotifications,
+  shortenPath,
   SubagentLog,
+  subagentProse,
   subagentsDirectory,
+  subagentToolLine,
 } from "./subagent-transcript.ts";
 
 test("finds the subagent transcripts beside the session's own", () => {
@@ -62,4 +65,37 @@ test("collapses a step onto one bounded line", () => {
   assert.equal(line.startsWith("kept across lines xxx"), true);
   assert.equal(line.length, 200);
   assert.equal(line.endsWith("…"), true);
+});
+
+test("says what a tool call was for in the words the subagent had for it", () => {
+  const cwd = "/work/repo";
+  assert.equal(subagentToolLine("Bash", { command: "pnpm test", description: "Run the suite" }, cwd), "Bash: Run the suite");
+  assert.equal(subagentToolLine("Bash", { command: "pnpm test" }, cwd), "Bash: pnpm test");
+  assert.equal(subagentToolLine("Read", { file_path: `${cwd}/src/app.ts` }, cwd), "Read: src/app.ts");
+  assert.equal(subagentToolLine("Grep", { pattern: "carriesList", path: "src" }, cwd), "Grep: carriesList");
+  assert.equal(subagentToolLine("ToolSearch", {}, cwd), "ToolSearch");
+});
+
+test("keeps the tail of a path, which is the half that says which file this is", () => {
+  const cwd = "/work/repo";
+  assert.equal(shortenPath(`${cwd}/src/app.ts`, cwd), "src/app.ts");
+  assert.equal(shortenPath("/tmp/short.py", cwd), "/tmp/short.py");
+  assert.equal(
+    shortenPath("/tmp/claude-1000/-home-kobe-projects-remi-plus/adf69443-83ac-4649-93e1-8f6b19ba32aa/scratchpad/fizzbuzz.py", cwd),
+    "…/scratchpad/fizzbuzz.py",
+  );
+  // Nothing to drop but the name itself.
+  assert.equal(shortenPath(`/${"long-".repeat(20)}name.py`, cwd), `/${"long-".repeat(20)}name.py`);
+});
+
+test("reads a subagent's report as text rather than as the markdown it was written in", () => {
+  const cwd = "/work/repo";
+  assert.equal(
+    subagentProse("Done.\n\n**File:** `/tmp/claude-1000/-home-kobe-projects-remi-plus/adf69443-83ac-4649/scratchpad/fizzbuzz.py`\n\n## Source\n```python\nprint(1)\n```", cwd),
+    "Done. File: …/scratchpad/fizzbuzz.py Source",
+  );
+  // A fence that has not been closed yet is the normal state of a report being written.
+  assert.equal(subagentProse("Here it is:\n```python\nprint(1)", cwd), "Here it is:");
+  assert.equal(subagentProse(`A ${"very ".repeat(60)}long answer`, cwd).length, 120);
+  assert.equal(subagentProse("", cwd), "");
 });

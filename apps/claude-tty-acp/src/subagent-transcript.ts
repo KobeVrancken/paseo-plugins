@@ -6,6 +6,10 @@ const FILE_SUFFIX = ".jsonl";
 /** How much of one subagent step is kept, and how many steps a card carries before the oldest go. */
 const LINE_CHARS = 200;
 const LOG_LINES = 40;
+/** A card is a ticker for work still in progress, so what a subagent says is its first breath of it. */
+const PROSE_CHARS = 120;
+/** Beyond this a path is all prefix, and the card has one line to say what a step was. */
+const PATH_CHARS = 60;
 
 /**
  * Claude writes each subagent's turns to its own transcript beside the session's, in a directory
@@ -101,6 +105,52 @@ export class SubagentLog {
     const earlier = this.dropped > 0 ? [`… ${this.dropped} earlier step${this.dropped === 1 ? "" : "s"}`] : [];
     return [...earlier, ...this.lines].join("\n");
   }
+}
+
+/**
+ * What a subagent said, as a card can show it. The card is rendered as plain text, so markdown
+ * arrives as the punctuation it is made of: a report ending in a fenced listing reads as a line of
+ * asterisks and backticks.
+ */
+export function subagentProse(text: string, cwd: string): string {
+  const plain = text
+    .replace(/```[\s\S]*?(?:```|$)/g, " ")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    // A path costs the same line here as it does in a step of its own.
+    .replace(/\/\S+/g, (token) => shortenPath(token, cwd))
+    .replace(/\s+/g, " ")
+    .trim();
+  return plain.length > PROSE_CHARS ? `${plain.slice(0, PROSE_CHARS - 1)}…` : plain;
+}
+
+/** One line for one tool call: what it was for, in the words the subagent had for it. */
+export function subagentToolLine(name: string, input: Record<string, unknown>, cwd: string): string {
+  // A search is named by what it looked for; the path it looked in is the scope, not the point.
+  const filePath = text(input.file_path) ?? text(input.notebook_path) ?? text(input.url) ?? text(input.path);
+  const detail =
+    text(input.description) ??
+    text(input.pattern) ??
+    text(input.query) ??
+    (filePath === null ? null : shortenPath(filePath, cwd)) ??
+    text(input.command);
+  return detail === null ? name : `${name}: ${detail}`;
+}
+
+/**
+ * A path costs a card its whole line, and the head of one is never the part that says which file
+ * this is: a scratchpad under `/tmp` is mostly the session ID that owns it.
+ */
+export function shortenPath(filePath: string, cwd: string): string {
+  const relative = filePath.startsWith(`${cwd}/`) ? filePath.slice(cwd.length + 1) : filePath;
+  if (relative.length <= PATH_CHARS) return relative;
+  const segments = relative.split("/").filter((segment) => segment !== "");
+  return segments.length > 2 ? `…/${segments.slice(-2).join("/")}` : relative;
+}
+
+function text(value: unknown): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

@@ -15,6 +15,8 @@ import {
   launchedAgent,
   notificationFailed,
   parseTaskNotifications,
+  subagentProse,
+  subagentToolLine,
   SubagentLog,
   type TaskNotification,
 } from "./subagent-transcript.ts";
@@ -331,7 +333,7 @@ export class TranscriptTranslator {
       const block = objectValue(value);
       if (!block) continue;
       if (block.type === "text") {
-        const text = stringValue(block.text)?.trim();
+        const text = subagentProse(stringValue(block.text) ?? "", this.cwd);
         if (text) {
           card.log.append(`${prefix}${text}`);
           appended = true;
@@ -339,7 +341,7 @@ export class TranscriptTranslator {
       }
       if (block.type === "tool_use") {
         const name = stringValue(block.name) || "Tool";
-        card.log.append(`${prefix}• ${toolTitle(name, objectValue(block.input) || {})}`);
+        card.log.append(`${prefix}• ${subagentToolLine(name, objectValue(block.input) || {}, this.cwd)}`);
         appended = true;
       }
     }

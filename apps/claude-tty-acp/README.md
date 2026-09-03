@@ -193,6 +193,7 @@ Left there, an agent that runs for ten minutes would show as a tool call that fi
 
 Claude writes each subagent's turns to `<projects>/<session id>/subagents/agent-<agent id>.jsonl`, and the adapter follows those files as well, five times a second, joining each to its launcher through the agent ID Claude records beside the launching tool result.
 Its steps — what it says, and the tools it calls — are streamed onto the launcher's tool call as a bounded tail of recent steps, which is why they never arrive as message chunks: a turn ends by counting those, and a subagent still working after its launcher has answered would hold the session's turn open for as long as it ran.
+A card is rendered as plain text and has one line per step, so each is written for that: markdown is read back out of what the subagent says, a path keeps the tail that says which file it is, and a tool call is named by what it was for rather than by whichever argument came first.
 A nested subagent's steps join the card of the agent that launched it, marked as its own.
 
 That tool call stays in progress until Claude reports the agent has stopped, which it does by writing a `<task-notification>` into the next user turn — the only record of it, and one that is otherwise scrubbed out of the text before it is shown.
