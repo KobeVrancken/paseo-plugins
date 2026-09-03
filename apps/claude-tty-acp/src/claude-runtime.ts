@@ -13,6 +13,7 @@ import { cleanupPromptFiles, materializePrompt } from "./prompt-content.ts";
 import { markRuntimeDirectory, runtimePrefix } from "./runtime-directories.ts";
 import { INHERIT_MODEL_ID } from "./session-options.ts";
 import { TerminalScreen } from "./terminal-screen.ts";
+import { SubagentWatcher } from "./subagent-watcher.ts";
 import { TranscriptReader } from "./transcript-reader.ts";
 import { TranscriptTranslator } from "./transcript-translator.ts";
 import { TranscriptWatcher } from "./transcript-watcher.ts";
@@ -541,10 +542,12 @@ export class ClaudeRuntime {
   }
 
   private createTranscriptWatcher(claudeSessionId: string, filePath?: string): TranscriptWatcher {
+    const reader = new TranscriptReader(claudeSessionId, this.cwd, { configDir: this.claudeConfigDir, filePath });
     return new TranscriptWatcher(
-      new TranscriptReader(claudeSessionId, this.cwd, { configDir: this.claudeConfigDir, filePath }),
+      reader,
       this.translator,
       this.transcriptPollIntervalMs,
+      new SubagentWatcher(reader.filePath, this.translator, this.cwd),
     );
   }
 

@@ -1,5 +1,6 @@
 import type { TranscriptTranslator } from "./transcript-translator.ts";
 import { TranscriptReader } from "./transcript-reader.ts";
+import type { SubagentWatcher } from "./subagent-watcher.ts";
 
 const POLL_INTERVAL_MS = 40;
 const FLUSH_INTERVAL_MS = 20;
@@ -9,13 +10,20 @@ export class TranscriptWatcher {
   private readonly reader: TranscriptReader;
   private readonly translator: TranscriptTranslator;
   private readonly pollIntervalMs: number;
+  private readonly subagents: SubagentWatcher | null;
   private timer: NodeJS.Timeout | null = null;
   private queue: Promise<void> = Promise.resolve();
 
-  constructor(reader: TranscriptReader, translator: TranscriptTranslator, pollIntervalMs = POLL_INTERVAL_MS) {
+  constructor(
+    reader: TranscriptReader,
+    translator: TranscriptTranslator,
+    pollIntervalMs = POLL_INTERVAL_MS,
+    subagents: SubagentWatcher | null = null,
+  ) {
     this.reader = reader;
     this.translator = translator;
     this.pollIntervalMs = pollIntervalMs;
+    this.subagents = subagents;
   }
 
   async start(): Promise<void> {
@@ -51,12 +59,14 @@ export class TranscriptWatcher {
   async close(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    this.subagents?.close();
     await this.queue;
   }
 
   private async syncOnce(): Promise<void> {
     const result = await this.reader.read();
     await this.translator.translate(result.records);
+    await this.subagents?.sync();
   }
 
   private syncWithState(): Promise<{ size: number | null; complete: boolean }> {
@@ -68,12 +78,14 @@ export class TranscriptWatcher {
         size = result.size;
         complete = result.complete;
         await this.translator.translate(result.records);
+        await this.subagents?.sync(true);
       },
       async () => {
         const result = await this.reader.read();
         size = result.size;
         complete = result.complete;
         await this.translator.translate(result.records);
+        await this.subagents?.sync(true);
       },
     );
     this.queue = operation.catch(() => undefined);

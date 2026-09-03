@@ -138,3 +138,179 @@ test("renders question tool calls as readable text instead of raw JSON", async (
     },
   ]);
 });
+
+test("keeps an asynchronous agent's tool call open and streams the work it does", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: {
+        content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Audit the API", subagent_type: "general-purpose" } }],
+      },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1", description: "Audit the API" },
+      message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [{ type: "text", text: "Async agent launched successfully." }] }] },
+    },
+  ]);
+
+  const launch = notifications.map((notification) => notification.update);
+  assert.deepEqual(launch.map((update) => update.sessionUpdate), ["tool_call", "tool_call_update"]);
+  assert.ok(launch[0]?.sessionUpdate === "tool_call");
+  assert.equal(launch[0].title, "Agent: Audit the API");
+  assert.equal(launch[0].status, "in_progress");
+  assert.ok(launch[1]?.sessionUpdate === "tool_call_update");
+  assert.equal(launch[1].status, "in_progress");
+
+  notifications.length = 0;
+  await translator.translateSubagent("a1", [
+    {
+      type: "assistant",
+      uuid: "sub-1",
+      message: {
+        content: [
+          { type: "thinking", thinking: "hidden" },
+          { type: "text", text: "Reading the controllers" },
+          { type: "tool_use", id: "sub-read", name: "Read", input: { file_path: "src/app.ts" } },
+        ],
+      },
+    },
+  ]);
+
+  assert.equal(notifications.length, 1);
+  const streamed = notifications[0]?.update;
+  assert.ok(streamed?.sessionUpdate === "tool_call_update");
+  assert.equal(streamed.toolCallId, "agent-tool");
+  assert.equal(streamed.status, "in_progress");
+  assert.deepEqual(streamed.content, [
+    { type: "content", content: { type: "text", text: "Reading the controllers\n• Read: src/app.ts" } },
+  ]);
+
+  notifications.length = 0;
+  const notification =
+    "<task-notification> <task-id>a1</task-id> <tool-use-id>agent-tool</tool-use-id> <status>completed</status> <summary>Agent \"Audit the API\" finished</summary> </task-notification>";
+  await translator.translate([{ type: "user", uuid: "notified", message: { content: notification } }]);
+  await translator.translate([{ type: "user", uuid: "notified", message: { content: notification } }]);
+
+  assert.equal(notifications.length, 1);
+  const finished = notifications[0]?.update;
+  assert.ok(finished?.sessionUpdate === "tool_call_update");
+  assert.equal(finished.status, "completed");
+  assert.deepEqual(finished.content, [
+    {
+      type: "content",
+      content: { type: "text", text: 'Reading the controllers\n• Read: src/app.ts\nAgent "Audit the API" finished' },
+    },
+  ]);
+});
+
+test("shows a subagent's steps that arrived before its launch was read, and its nested agents", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+
+  await translator.translateSubagent("a1", [
+    { type: "assistant", uuid: "early", message: { content: [{ type: "text", text: "Started early" }] } },
+  ]);
+  assert.equal(notifications.length, 0);
+
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: { content: [{ type: "tool_use", id: "agent-tool", name: "Task", input: { description: "Search" } }] },
+    },
+    {
+      type: "user",
+      uuid: "finished",
+      toolUseResult: { status: "completed", agentId: "a1" },
+      message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [{ type: "text", text: "report" }] }] },
+    },
+  ]);
+
+  // A synchronous agent answers when it is done, so its card is linked, filled in and then closed.
+  assert.deepEqual(notifications.map((notification) => notification.update.sessionUpdate), ["tool_call", "tool_call_update", "tool_call_update"]);
+  const linked = notifications[1]?.update;
+  assert.ok(linked?.sessionUpdate === "tool_call_update");
+  assert.deepEqual(linked.content, [{ type: "content", content: { type: "text", text: "Started early" } }]);
+  const closed = notifications[2]?.update;
+  assert.ok(closed?.sessionUpdate === "tool_call_update");
+  assert.equal(closed.status, "completed");
+
+  notifications.length = 0;
+  await translator.translateSubagent("a1", [
+    { type: "user", uuid: "nested-launch", toolUseResult: { isAsync: true, status: "async_launched", agentId: "a2" }, message: { content: [] } },
+  ]);
+  await translator.translateSubagent("a2", [
+    { type: "assistant", uuid: "nested", message: { content: [{ type: "text", text: "Nested work" }] } },
+  ]);
+
+  assert.equal(notifications.length, 1);
+  const nested = notifications[0]?.update;
+  assert.ok(nested?.sessionUpdate === "tool_call_update");
+  assert.equal(nested.toolCallId, "agent-tool");
+  assert.deepEqual(nested.content, [{ type: "content", content: { type: "text", text: "Started early\n↳ Nested work" } }]);
+});
+
+test("carries a nested subagent's earlier steps onto the card of the agent that launched it", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+
+  // Transcripts are read in name order, so a nested agent is routinely seen before its spawner.
+  await translator.translateSubagent("nested", [
+    { type: "assistant", uuid: "n1", message: { content: [{ type: "text", text: "Nested first step" }] } },
+  ]);
+  await translator.translateSubagent("spawner", [
+    { type: "user", uuid: "s1", toolUseResult: { isAsync: true, status: "async_launched", agentId: "nested" }, message: { content: [] } },
+    { type: "assistant", uuid: "s2", message: { content: [{ type: "text", text: "Spawner step" }] } },
+  ]);
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Investigate" } }] },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: { isAsync: true, status: "async_launched", agentId: "spawner" },
+      message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+    },
+  ]);
+
+  const linked = notifications.at(-1)?.update;
+  assert.ok(linked?.sessionUpdate === "tool_call_update");
+  assert.deepEqual(linked.content, [
+    { type: "content", content: { type: "text", text: "↳ Nested first step\nSpawner step" } },
+  ]);
+
+  notifications.length = 0;
+  await translator.translateSubagent("nested", [
+    { type: "assistant", uuid: "n2", message: { content: [{ type: "text", text: "Nested later step" }] } },
+  ]);
+  const streamed = notifications[0]?.update;
+  assert.ok(streamed?.sessionUpdate === "tool_call_update");
+  assert.equal(streamed.toolCallId, "agent-tool");
+  assert.deepEqual(streamed.content, [
+    { type: "content", content: { type: "text", text: "↳ Nested first step\nSpawner step\n↳ Nested later step" } },
+  ]);
+});

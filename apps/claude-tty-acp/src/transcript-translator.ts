@@ -11,6 +11,13 @@ import type {
 } from "@agentclientprotocol/sdk";
 import { writeLog } from "./log.ts";
 import { questionText } from "./question-text.ts";
+import {
+  launchedAgent,
+  notificationFailed,
+  parseTaskNotifications,
+  SubagentLog,
+  type TaskNotification,
+} from "./subagent-transcript.ts";
 import type { TranscriptRecord } from "./transcript-reader.ts";
 
 const IGNORED_RECORD_TYPES = new Set([
@@ -49,6 +56,20 @@ const TOOL_KINDS: Record<string, ToolKind> = {
   Write: "edit",
 };
 
+/** The tools that hand work to a subagent, whose own transcript is where that work then happens. */
+const AGENT_TOOLS = new Set(["Agent", "Task"]);
+
+/**
+ * A subagent and the tool call standing for it. Nested subagents share their spawner's card, so one
+ * card holds one log and an update never replaces another agent's steps with its own.
+ */
+type SubagentCard = {
+  agentId: string;
+  toolCallId: string | null;
+  log: SubagentLog;
+  status: "in_progress" | "completed" | "failed";
+};
+
 export class TranscriptTranslator {
   private readonly sessionId: string;
   private readonly cwd: string;
@@ -56,6 +77,9 @@ export class TranscriptTranslator {
   private readonly emitted = new Set<string>();
   private readonly emittedTools = new Set<string>();
   private readonly unknownKinds = new Set<string>();
+  private readonly agentCalls = new Set<string>();
+  private readonly subagents = new Map<string, SubagentCard>();
+  private readonly subagentsByToolCall = new Map<string, string>();
   private lastPlan = "";
   private lastUsage = "";
   private assistantChunkCount = 0;
@@ -104,6 +128,7 @@ export class TranscriptTranslator {
     const content = message?.content;
     const recordId = stringValue(record.uuid) || stableUuid(JSON.stringify(record));
     if (record.isMeta !== true && record.isSidechain !== true) this.suppressedAssistantText = null;
+    await this.translateNotifications(content, recordId);
     if (typeof content === "string") {
       await this.emitUserText(`${recordId}:text`, recordId, content, record);
       return;
@@ -115,7 +140,7 @@ export class TranscriptTranslator {
       const key = `${recordId}:${index}:${String(block.type)}`;
       if (block.type === "text") await this.emitUserText(key, recordId, stringValue(block.text) || "", record);
       if (block.type === "image") await this.emitContent("user_message_chunk", key, recordId, imageContent(block));
-      if (block.type === "tool_result") await this.translateToolResult(block);
+      if (block.type === "tool_result") await this.translateToolResult(block, record);
     }
   }
 
@@ -176,6 +201,7 @@ export class TranscriptTranslator {
       await this.translatePlan(input.todos);
       return;
     }
+    if (AGENT_TOOLS.has(name)) this.agentCalls.add(toolCallId);
     if (this.emittedTools.has(toolCallId)) return;
     this.emittedTools.add(toolCallId);
     const locations = toolLocations(input, this.cwd);
@@ -192,9 +218,16 @@ export class TranscriptTranslator {
     });
   }
 
-  private async translateToolResult(block: TranscriptRecord): Promise<void> {
+  private async translateToolResult(block: TranscriptRecord, record: TranscriptRecord): Promise<void> {
     const toolCallId = stringValue(block.tool_use_id);
     if (!toolCallId || !this.emittedTools.has(toolCallId)) return;
+    const launch = this.agentCalls.has(toolCallId) ? launchedAgent(record.toolUseResult) : null;
+    if (launch !== null) {
+      await this.linkSubagent(launch.agentId, toolCallId);
+      // An asynchronous agent answers the moment it starts, so closing the card here would report a
+      // minutes-long agent as finished before it had done anything. It is closed by its notification.
+      if (launch.running) return;
+    }
     const resultKey = `${toolCallId}:result:${createHash("sha256").update(JSON.stringify(block)).digest("hex")}`;
     if (this.emitted.has(resultKey)) return;
     this.emitted.add(resultKey);
@@ -205,6 +238,121 @@ export class TranscriptTranslator {
       status: block.is_error === true ? "failed" : "completed",
       rawOutput: block.content,
       ...(content.length > 0 ? { content } : {}),
+    });
+  }
+
+  /**
+   * The end of an asynchronous agent is reported in the next user turn and nowhere else, and the
+   * text carrying it is scrubbed before the user sees it, so it is read here on the way past.
+   */
+  private async translateNotifications(content: unknown, recordId: string): Promise<void> {
+    const texts =
+      typeof content === "string"
+        ? [content]
+        : Array.isArray(content)
+          ? content.flatMap((value) => {
+              const block = objectValue(value);
+              const text = block?.type === "text" ? stringValue(block.text) : null;
+              return text ? [text] : [];
+            })
+          : [];
+    for (const text of texts) {
+      for (const notification of parseTaskNotifications(text)) await this.applyNotification(notification, recordId);
+    }
+  }
+
+  /** A notification for a background command rather than an agent names no card here, and is left alone. */
+  private async applyNotification(notification: TaskNotification, recordId: string): Promise<void> {
+    const agentId =
+      notification.agentId ??
+      (notification.toolCallId === null ? null : this.subagentsByToolCall.get(notification.toolCallId) ?? null);
+    const card = agentId === null ? undefined : this.subagents.get(agentId);
+    if (card === undefined || card.toolCallId === null) return;
+    const key = `${card.toolCallId}:notification:${recordId}`;
+    if (this.emitted.has(key)) return;
+    this.emitted.add(key);
+    card.status = notificationFailed(notification.status) ? "failed" : "completed";
+    card.log.append(notification.summary ?? `Agent ${notification.status ?? "finished"}`);
+    await this.publishSubagent(card);
+  }
+
+  /**
+   * The steps a subagent took, streamed onto the tool call that launched it. They are never sent as
+   * message chunks: a turn is judged finished by counting those, and a subagent still working after
+   * its launcher has answered would keep the session's turn open for as long as it ran.
+   */
+  async translateSubagent(agentId: string, records: TranscriptRecord[]): Promise<void> {
+    const card = this.subagentCard(agentId);
+    // A nested subagent shares its spawner's card, so its steps are marked as its own.
+    const prefix = card.agentId === agentId ? "" : "\u21b3 ";
+    let appended = false;
+    for (const record of records) appended = this.logSubagentRecord(card, record, prefix) || appended;
+    if (appended) await this.publishSubagent(card);
+  }
+
+  private logSubagentRecord(card: SubagentCard, record: TranscriptRecord, prefix: string): boolean {
+    const nested = launchedAgent(record.toolUseResult);
+    if (nested !== null) this.adoptSubagent(nested.agentId, card);
+    const message = objectValue(record.message);
+    const content = message?.content;
+    if (stringValue(record.type) !== "assistant" || !Array.isArray(content)) return false;
+    let appended = false;
+    for (const value of content) {
+      const block = objectValue(value);
+      if (!block) continue;
+      if (block.type === "text") {
+        const text = stringValue(block.text)?.trim();
+        if (text) {
+          card.log.append(`${prefix}${text}`);
+          appended = true;
+        }
+      }
+      if (block.type === "tool_use") {
+        const name = stringValue(block.name) || "Tool";
+        card.log.append(`${prefix}• ${toolTitle(name, objectValue(block.input) || {})}`);
+        appended = true;
+      }
+    }
+    return appended;
+  }
+
+  /**
+   * Moves a subagent onto the card of the agent that launched it. Its transcript is often read
+   * before the record naming it as nested, so whatever it has already logged is carried across
+   * rather than left on a card of its own that nothing will ever show.
+   */
+  private adoptSubagent(agentId: string, card: SubagentCard): void {
+    const existing = this.subagents.get(agentId);
+    if (existing === card || (existing !== undefined && existing.toolCallId !== null)) return;
+    for (const step of existing?.log.steps() ?? []) card.log.append(step.startsWith("↳") ? step : `↳ ${step}`);
+    this.subagents.set(agentId, card);
+  }
+
+  private async linkSubagent(agentId: string, toolCallId: string): Promise<void> {
+    const card = this.subagentCard(agentId);
+    if (card.toolCallId === toolCallId) return;
+    card.toolCallId = toolCallId;
+    this.subagentsByToolCall.set(toolCallId, agentId);
+    await this.publishSubagent(card);
+  }
+
+  private subagentCard(agentId: string): SubagentCard {
+    const existing = this.subagents.get(agentId);
+    if (existing) return existing;
+    const card: SubagentCard = { agentId, toolCallId: null, log: new SubagentLog(), status: "in_progress" };
+    this.subagents.set(agentId, card);
+    return card;
+  }
+
+  /** A tool call's content is replaced rather than added to, so the whole tail goes out each time. */
+  private async publishSubagent(card: SubagentCard): Promise<void> {
+    if (card.toolCallId === null) return;
+    const text = card.log.empty ? "Started; waiting for its first step." : card.log.text();
+    await this.send({
+      sessionUpdate: "tool_call_update",
+      toolCallId: card.toolCallId,
+      status: card.status,
+      content: [{ type: "content", content: { type: "text", text } }],
     });
   }
 

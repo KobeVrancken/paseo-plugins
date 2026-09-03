@@ -186,6 +186,18 @@ Claude appends its own JSONL transcript under its projects directory, and the ad
 A translator turns each record into an ACP session update — user and agent chunks, thinking, tool calls with diffs and file locations, `TodoWrite` into a plan, token usage into a context-window update — and dedupes by record key so re-reads and history replay never emit the same thing twice.
 Loading a persisted session runs that translator over the whole file to rebuild the conversation, and still launches nothing until the next prompt.
 
+### Subagents come out of their own transcripts
+
+A session's transcript says only that a subagent was launched, and one launched asynchronously answers its launcher the moment it starts.
+Left there, an agent that runs for ten minutes would show as a tool call that finished immediately, with everything it then did happening out of sight.
+
+Claude writes each subagent's turns to `<projects>/<session id>/subagents/agent-<agent id>.jsonl`, and the adapter follows those files as well, five times a second, joining each to its launcher through the agent ID Claude records beside the launching tool result.
+Its steps — what it says, and the tools it calls — are streamed onto the launcher's tool call as a bounded tail of recent steps, which is why they never arrive as message chunks: a turn ends by counting those, and a subagent still working after its launcher has answered would hold the session's turn open for as long as it ran.
+A nested subagent's steps join the card of the agent that launched it, marked as its own.
+
+That tool call stays in progress until Claude reports the agent has stopped, which it does by writing a `<task-notification>` into the next user turn — the only record of it, and one that is otherwise scrubbed out of the text before it is shown.
+Anything but a clean finish leaves the call failed.
+
 ### Hooks carry everything interactive
 
 The adapter runs a single loopback HTTP server whose URL carries a per-process secret and a per-session route, and the generated hook client posts each hook payload to it and hands the JSON answer back to Claude.
