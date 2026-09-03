@@ -5,6 +5,7 @@ import {
   installStatusHandler,
   lastDoctorHandler,
   quarantineSessionHandler,
+  readSubagentHandler,
   releaseLockHandler,
   releaseStaleLocksHandler,
   sessionsHandler,
@@ -12,6 +13,7 @@ import {
   startInstallHandler,
   statusHandler,
   stopSessionHandler,
+  subagentsHandler,
   uninstallHandler,
 } from "./src/server/handlers.server.ts";
 import { ClaudeTtySurface } from "./src/client/surface.client.tsx";
@@ -29,6 +31,8 @@ export default function contribute(plugin: PluginContext) {
   plugin.handle(contracts.releaseLock, (input, { paseo }) => releaseLockHandler(paseo, input));
   plugin.handle(contracts.quarantineSession, (input, { paseo }) => quarantineSessionHandler(paseo, input));
   plugin.handle(contracts.stopSession, (input, { paseo }) => stopSessionHandler(paseo, input));
+  plugin.handle(contracts.getSubagents, () => subagentsHandler());
+  plugin.handle(contracts.readSubagent, (input) => readSubagentHandler(input));
   plugin.handle(contracts.releaseStaleLocks, (_input, { paseo }) => releaseStaleLocksHandler(paseo));
   plugin.handle(contracts.runUninstall, (input, { paseo }) => uninstallHandler(paseo, input));
 

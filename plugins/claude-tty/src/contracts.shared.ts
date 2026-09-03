@@ -171,6 +171,51 @@ export const releaseStaleLocks = defineRpc({
   output: SessionsSchema,
 });
 
+export const SubagentSchema = z.object({
+  agentId: z.string(),
+  /** What the session asked for, or the opening line of the prompt when the launch is long gone. */
+  description: z.string().nullable(),
+  status: z.enum(["running", "completed", "failed", "unknown"]),
+  summary: z.string().nullable(),
+  /** Launched by another subagent, so the session's own transcript never mentions it. */
+  nested: z.boolean(),
+  lastActivity: z.number().nullable(),
+});
+
+export const SubagentSessionSchema = z.object({
+  sessionId: z.string(),
+  cwd: z.string().nullable(),
+  subagents: z.array(SubagentSchema),
+});
+
+export const SubagentsSchema = z.object({
+  now: z.number(),
+  problem: z.string().nullable(),
+  sessions: z.array(SubagentSessionSchema),
+});
+
+export type SubagentsPayload = z.output<typeof SubagentsSchema>;
+
+export const getSubagents = defineRpc({
+  name: "claude-tty.subagents.list",
+  input: z.object({}),
+  output: SubagentsSchema,
+});
+
+export const SubagentTranscriptSchema = z.object({
+  steps: z.array(z.string()),
+  /** Steps older than the ones returned, which are on disk but not worth sending. */
+  earlier: z.number(),
+});
+
+export type SubagentTranscriptPayload = z.output<typeof SubagentTranscriptSchema>;
+
+export const readSubagent = defineRpc({
+  name: "claude-tty.subagents.read",
+  input: z.object({ sessionId: z.string(), agentId: z.string() }),
+  output: SubagentTranscriptSchema,
+});
+
 export const UninstallSchema = z.object({
   removedProvider: z.boolean(),
   removedState: z.boolean(),

@@ -8,6 +8,7 @@ import { DoctorSection } from "./doctor.client.tsx";
 import { InstallSection } from "./install.client.tsx";
 import { SessionsSection } from "./sessions.client.tsx";
 import { SettingsSection } from "./settings.client.tsx";
+import { SubagentsSection } from "./subagents.client.tsx";
 import { UninstallSection } from "./uninstall.client.tsx";
 import { MAX_CONTENT_WIDTH, fontSize, leading, spacing } from "./theme.client.ts";
 import { Monospace, ReadingRow, adapterReading, claudeReading, providerReading } from "./status.client.tsx";
@@ -89,6 +90,8 @@ export function ClaudeTtySurface({ theme, layout }: PluginSurfaceProps) {
       <SettingsSection palette={palette} status={status} />
 
       <SessionsSection palette={palette} />
+
+      <SubagentsSection palette={palette} />
 
       <Section palette={palette} title="This host">
         <Card palette={palette}>

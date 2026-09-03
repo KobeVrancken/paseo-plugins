@@ -4,11 +4,14 @@ import type {
   InstallJobPayload,
   SessionsPayload,
   StatusPayload,
+  SubagentsPayload,
+  SubagentTranscriptPayload,
   UninstallPayload,
 } from "../contracts.shared.ts";
 import { lastDoctorReport, runDoctor } from "./doctor.server.ts";
 import { currentInstall, startInstall } from "./install.server.ts";
 import { listSessions, quarantineSession, releaseLock, releaseStaleLocks, stopSession } from "./sessions.server.ts";
+import { listSubagents, readSubagentTranscript } from "./subagents.server.ts";
 import { runUninstall } from "./uninstall.server.ts";
 import { readStatus } from "./status.server.ts";
 import { updateSettings } from "./settings.server.ts";
@@ -47,6 +50,14 @@ export function quarantineSessionHandler(paseo: PaseoApi, input: { id: string })
 
 export function stopSessionHandler(paseo: PaseoApi, input: { id: string }): Promise<SessionsPayload> {
   return stopSession(paseo, input.id);
+}
+
+export function subagentsHandler(): Promise<SubagentsPayload> {
+  return listSubagents();
+}
+
+export function readSubagentHandler(input: { sessionId: string; agentId: string }): Promise<SubagentTranscriptPayload> {
+  return readSubagentTranscript(input.sessionId, input.agentId);
 }
 
 export function lastDoctorHandler(): DoctorPayload | null {

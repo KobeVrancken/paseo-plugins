@@ -50,6 +50,10 @@ An entry pointing at a different checkout is reported as a mismatch and left alo
 
 **Sessions** lists the adapter's saved sessions and the locks over them, each named after the Paseo agent holding it and saying when it was last prompted. That reads "last prompted" rather than "active" on purpose: the adapter stamps the time as a prompt starts, so a session an hour into one turn is still working.
 
+**Subagents** lists the subagents of every open session — what each was asked to do, whether it is running, and when it last did anything — and opens one to show the steps it has taken. Only open sessions are listed, because a subagent runs inside its session's Claude process and stops with it. A subagent whose launch has since been compacted out of the session's transcript is still listed, named after the opening line of its prompt.
+
+The same work also streams into the tool call that launched it, in the conversation itself, which is where to watch one as it runs. It cannot be opened as a tab of its own: a subagent is not an ACP session or a Paseo agent but a loop inside the one Claude process, so there is nothing for Paseo to attach a tab to, and a plugin can only open a surface it contributes itself.
+
 **Stop** ends the adapter process holding an open session, which closes its Claude terminal. Nothing durable goes with it: the session file, the transcript, and the Paseo agent all survive, and the next prompt resumes the same Claude session.
 
 A PID outlives the process that earned it, so a stop first establishes that the process really is the one that took the lock — the right kind of process, and one that cannot have started after the lock it holds. Anything else is refused, named, and left running, including a process that has already exited and is waiting to be reaped. The adapter is given ten seconds to close the session itself before it is forced.

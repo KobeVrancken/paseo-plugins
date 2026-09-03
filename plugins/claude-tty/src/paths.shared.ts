@@ -33,6 +33,26 @@ export function locksDirectory(stateDirectory: string): string {
   return path.join(stateDirectory, "locks");
 }
 
+/** Mirrors the adapter's own `claudeConfigDir`, which decides where Claude keeps its transcripts. */
+export function claudeConfigDirectory(env: Env = process.env): string {
+  const configured = env.CLAUDE_CONFIG_DIR?.trim();
+  return configured || path.join(env.HOME || os.homedir(), ".claude");
+}
+
+/** Claude names a project directory after its working directory, with everything else punched out. */
+export function projectDirectory(cwd: string, env: Env = process.env): string {
+  return path.join(claudeConfigDirectory(env), "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+}
+
+export function transcriptPath(cwd: string, claudeSessionId: string, env: Env = process.env): string {
+  return path.join(projectDirectory(cwd, env), `${claudeSessionId}.jsonl`);
+}
+
+/** Every subagent a session runs has its own transcript here, and nowhere in the session's own. */
+export function subagentsDirectory(cwd: string, claudeSessionId: string, env: Env = process.env): string {
+  return path.join(projectDirectory(cwd, env), claudeSessionId, "subagents");
+}
+
 /** `plugins/claude-tty` sits two levels below the checkout whose adapter this plugin manages. */
 export function repoRootFromPluginPath(pluginPath: string): string {
   return path.resolve(pluginPath, "..", "..");
