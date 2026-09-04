@@ -1390,7 +1390,6 @@ test("a turn waiting on a background agent still cancels at once", async () => {
     stateDirectory: path.join(root, "state"),
     startupTimeoutMs: 500,
     readinessTimeoutMs: 0,
-    cancelTimeoutMs: 5,
     submitDelayMs: 0,
     contextRefreshTimeoutMs: 0,
     transcriptPollIntervalMs: 10,
@@ -1419,8 +1418,11 @@ test("a turn waiting on a background agent still cancels at once", async () => {
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
 
     // Paseo replaces a prompt sent mid-turn by cancelling first, and gives the turn 2s to answer.
+    // This runs on the production cancel timeout, because the budget is what the test is about.
+    const startedAt = Date.now();
     await agent.cancel({ sessionId: session.sessionId });
     assert.deepEqual(await turn, { stopReason: "cancelled" });
+    assert.ok(Date.now() - startedAt < 2_000, `a held turn took ${Date.now() - startedAt}ms to cancel`);
   } finally {
     await agent.close();
     await rm(root, { force: true, recursive: true });
@@ -1487,6 +1489,155 @@ test("stops waiting when the agent that reported never wakes Claude to answer fo
     );
 
     assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("goes on waiting while Claude is answering for the agent that reported", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-subagent-answer-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = "/work/agents-answer";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(runtimeRoot, { recursive: true });
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    spawned = new FakePty(4000);
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return spawned;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    transcriptPollIntervalMs: 10,
+    subagentPollMs: 10,
+    subagentWakeMs: 400,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "launch an agent" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 2);
+    const transcript = path.join(projectDirectory, `${session.sessionId}.jsonl`);
+    const records = [
+      JSON.stringify({
+        type: "assistant",
+        uuid: "launcher",
+        message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Count the files" } }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "launched",
+        toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+      }),
+    ];
+    await writeFile(transcript, `${records.join("\n")}\n`);
+    let settled = false;
+    void turn.then(() => {
+      settled = true;
+    });
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
+
+    // The agent reports, and Claude wakes to answer for it — which is subagent silence, and work.
+    records.push(
+      JSON.stringify({
+        type: "user",
+        uuid: "notified",
+        message: { content: "<task-notification> <task-id>a1</task-id> <status>completed</status> <summary>done</summary> </task-notification>" },
+      }),
+    );
+    await writeFile(transcript, `${records.join("\n")}\n`);
+    for (let index = 0; index < 6; index += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      records.push(JSON.stringify({ type: "assistant", uuid: `answer-${index}`, message: { content: [{ type: "text", text: `Reading the report, part ${index}` }] } }));
+      await writeFile(transcript, `${records.join("\n")}\n`);
+    }
+    // Well past the wake bound, and the turn is still open because the session is still writing.
+    assert.equal(settled, false);
+
+    // It ends where it always ends: at the Stop hook of the turn that answered.
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "The agent counted them." });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("stops counting the agents a turn gave up on, so a later turn does not wait on them again", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-subagent-abandon-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = "/work/agents-abandon";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(runtimeRoot, { recursive: true });
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    spawned = new FakePty(4100);
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return spawned;
+  };
+  // A poll this slow is what makes the difference visible: a turn that still counted the abandoned
+  // agent would hold for a whole interval before giving up on it a second time.
+  agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    transcriptPollIntervalMs: 10,
+    subagentPollMs: 1_000,
+    subagentSilenceMs: 10,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const first = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "launch an agent" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 2);
+    await writeFile(
+      path.join(projectDirectory, `${session.sessionId}.jsonl`),
+      `${[
+        JSON.stringify({
+          type: "assistant",
+          uuid: "launcher",
+          message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Count the files" } }] },
+        }),
+        JSON.stringify({
+          type: "user",
+          uuid: "launched",
+          toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+          message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+        }),
+      ].join("\n")}\n`,
+    );
+    // The agent never writes anything, so the turn gives up on it.
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
+    assert.deepEqual(await first, { stopReason: "end_turn" });
+
+    const second = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "never mind the agent" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 4);
+    const startedAt = Date.now();
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "Never mind." });
+    assert.deepEqual(await second, { stopReason: "end_turn" });
+    assert.ok(Date.now() - startedAt < 500, `the next turn waited ${Date.now() - startedAt}ms on an abandoned agent`);
   } finally {
     await agent.close();
     await rm(root, { force: true, recursive: true });

@@ -162,6 +162,8 @@ export class ClaudeRuntime {
   private staleResumeAnswered = false;
   private subagentHold: NodeJS.Timeout | null = null;
   private heldAssistantMessage: string | undefined;
+  private heldAssistantChunks = 0;
+  private heldProgressAt = 0;
   private intentionalExit: Deferred<void> | null = null;
 
   constructor(
@@ -401,7 +403,7 @@ export class ClaudeRuntime {
         break;
       case "Stop":
         this.contextMtimeAtTurnEnd = await this.contextMtime();
-        await this.transcript.flushUntilStable();
+        await this.transcript.flushUntilStable(true);
         if (this.cancelRequested) {
           this.finishTurn({ response: { stopReason: "cancelled" } });
           break;
@@ -422,7 +424,7 @@ export class ClaudeRuntime {
         break;
       case "StopFailure":
         this.contextMtimeAtTurnEnd = await this.contextMtime();
-        await this.transcript.flushUntilStable();
+        await this.transcript.flushUntilStable(true);
         this.finishTurn(
           this.cancelRequested
             ? { response: { stopReason: "cancelled" } }
@@ -436,7 +438,7 @@ export class ClaudeRuntime {
         );
         break;
       case "SessionEnd":
-        await this.transcript.flushUntilStable();
+        await this.transcript.flushUntilStable(true);
         this.finishTurn({ response: { stopReason: "cancelled" } });
         break;
     }
@@ -556,6 +558,8 @@ export class ClaudeRuntime {
   private holdForSubagents(): void {
     if (this.subagentHold) return;
     writeLog({ level: "info", message: "Holding the turn open for a background agent", sessionId: this.sessionId, agents: this.translator.runningSubagents });
+    this.heldAssistantChunks = this.translator.assistantChunks;
+    this.heldProgressAt = Date.now();
     this.subagentHold = setInterval(() => this.reviewSubagentHold(), this.subagentPollMs);
     this.subagentHold.unref();
   }
@@ -568,7 +572,7 @@ export class ClaudeRuntime {
     // A hold that is simply over ends at the Stop hook. This is only the way out of one that is not:
     // agents that have stopped writing, or a last agent whose report never woke Claude to answer it.
     const agents = this.translator.runningSubagents;
-    const silent = Date.now() - this.translator.subagentActivityAt;
+    const silent = Date.now() - this.progressAt();
     if (silent < (agents > 0 ? this.subagentSilenceMs : this.subagentWakeMs)) return;
     writeLog({
       level: "warn",
@@ -577,10 +581,27 @@ export class ClaudeRuntime {
       agents,
       silentMs: silent,
     });
+    // The turn has stopped waiting on these agents, so nothing else goes on counting them either:
+    // every later turn would hold for a poll interval and give up again in the same breath.
+    this.translator.abandonRunningSubagents();
     this.finishTurn({
       response: { stopReason: "end_turn" },
       assistantMessage: this.translator.assistantChunks === this.assistantBaseline ? this.heldAssistantMessage : undefined,
     });
+  }
+
+  /**
+   * When the held turn last showed a sign of life. Claude answering for an agent that has reported
+   * is exactly what the wake bound is waiting for, and it writes nothing any subagent is credited
+   * with, so its own output counts as progress too.
+   */
+  private progressAt(): number {
+    const chunks = this.translator.assistantChunks;
+    if (chunks !== this.heldAssistantChunks) {
+      this.heldAssistantChunks = chunks;
+      this.heldProgressAt = Date.now();
+    }
+    return Math.max(this.translator.subagentActivityAt, this.heldProgressAt);
   }
 
   /**
@@ -603,7 +624,7 @@ export class ClaudeRuntime {
   }
 
   private async finishCancelled(): Promise<void> {
-    await this.transcript.flushUntilStable();
+    await this.transcript.flushUntilStable(true);
     this.finishTurn({ response: { stopReason: "cancelled" } });
   }
 
@@ -659,7 +680,7 @@ export class ClaudeRuntime {
     this.hookRegistration?.unregister();
     this.hookRegistration = null;
     // The last thing written may be the notification that closes an agent, and the reader has to be open to see it.
-    await this.transcript.flushUntilStable();
+    await this.transcript.flushUntilStable(true);
     await this.transcript.close();
     await this.settleOpenToolCalls();
     await this.removeRuntimeDirectory();

@@ -192,6 +192,8 @@ A session's transcript says only that a subagent was launched, and one launched 
 Left there, an agent that runs for ten minutes would show as a tool call that finished immediately, with everything it then did happening out of sight.
 
 Claude writes each subagent's turns to `<projects>/<session id>/subagents/agent-<agent id>.jsonl`, and the adapter follows those files as well, five times a second, joining each to its launcher through the agent ID Claude records beside the launching tool result.
+Only the end of a turn reads past that bound, for the last word; the flush a hook does before every tool call leaves it alone, because Claude is blocked on that flush and the subagents are not what it is waiting for.
+An agent that has reported is dropped from the poll, so a session that runs hundreds of them is not still stat'ing the first.
 Its steps — what it says, and the tools it calls — are streamed onto the launcher's tool call as a bounded tail of recent steps, which is why they never arrive as message chunks: a turn ends by counting those, and a subagent still working after its launcher has answered would hold the session's turn open for as long as it ran.
 A card is rendered as plain text and has one line per step, so each is written for that: markdown is read back out of what the subagent says, a path keeps the tail that says which file it is, and a tool call is named by what it was for rather than by whichever argument came first.
 A nested subagent's steps join the card of the agent that launched it, marked as its own.
@@ -203,6 +205,8 @@ The session's turn is held open for as long as any of those agents is still runn
 Paseo reads a session as busy from the turn it has open and from nothing else — an ACP agent has no other way to say so — and Claude goes idle the moment it launches a background agent, so without this a session with ten minutes of work ahead of it reads as ready, and the answer Claude writes when the agent reports arrives outside any turn at all.
 The hold ends at the first `Stop` hook with nothing left running, which is the end of the turn Claude runs to react to the notification, so the reply about the agent lands inside the turn that launched it.
 A turn that has been waiting on agents that have written nothing for fifteen minutes gives up and ends, because a session that is busy is also a session that is never suspended, and an agent that never reports would hold one open for the rest of its life.
+Giving up is the end of it: those agents stop being counted, so the next turn does not hold for a poll interval and give up on them all over again.
+Where every agent has reported and the wait is only for Claude to answer for the last of them, the bound is a minute — measured against what Claude itself writes as well, since answering for a long report is exactly the work being waited on and none of it is a subagent's.
 Cancelling is unaffected: a held turn ends as promptly as any other, which is what keeps Paseo's replacement of a prompt sent mid-turn inside its two-second budget.
 
 ### Hooks carry everything interactive
