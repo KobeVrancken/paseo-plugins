@@ -49,6 +49,11 @@ export class InteractionBridge {
     this.connection = connection;
   }
 
+  /** Something is waiting on a person: a card is open in Paseo and Claude is blocked on the hook behind it. */
+  get pending(): boolean {
+    return this.pendingRequests.size > 0;
+  }
+
   beginTurn(): void {
     this.pendingTools.length = 0;
     this.cancelPending();

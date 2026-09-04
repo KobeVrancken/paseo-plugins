@@ -147,4 +147,3 @@ function outcomeOf(
     exitCode: result.exitCode,
   };
 }
-

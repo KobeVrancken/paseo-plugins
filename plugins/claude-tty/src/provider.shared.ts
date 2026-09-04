@@ -25,6 +25,21 @@ export function providerEntryFor(repoRoot: string): ProviderEntry {
   };
 }
 
+/**
+ * `CLAUDE_BIN`, `CLAUDE_CONFIG_DIR` and the idle timeout are all documented as things a host may set
+ * on this entry, so `env` belongs to whoever set it: the plugin neither writes it nor compares it.
+ */
+export function envOf(entry: unknown): Record<string, string> | null {
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return null;
+  const env = (entry as { env?: unknown }).env;
+  if (env === null || env === undefined || typeof env !== "object" || Array.isArray(env)) return null;
+  const record: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
+    if (typeof value === "string") record[key] = value;
+  }
+  return record;
+}
+
 export type ProviderState =
   /** Nothing holds the ID, so registering is a pure addition. */
   | "absent"
@@ -51,7 +66,7 @@ export function commandOf(entry: unknown): string[] | null {
   return command as string[];
 }
 
-/** `label` is what the agent view displays and is the user's to change, so it is not compared. */
+/** `label` and `env` are the user's to set, so neither is compared. */
 function isCanonical(entry: unknown, expected: ProviderEntry): boolean {
   const record = entry as Record<string, unknown>;
   const command = commandOf(entry);

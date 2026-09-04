@@ -7,6 +7,7 @@ import * as contracts from "../contracts.shared.ts";
 import { DoctorSection } from "./doctor.client.tsx";
 import { InstallSection } from "./install.client.tsx";
 import { SessionsSection } from "./sessions.client.tsx";
+import { SettingsSection } from "./settings.client.tsx";
 import { UninstallSection } from "./uninstall.client.tsx";
 import { MAX_CONTENT_WIDTH, fontSize, leading, spacing } from "./theme.client.ts";
 import { Monospace, ReadingRow, adapterReading, claudeReading, providerReading } from "./status.client.tsx";
@@ -84,6 +85,8 @@ export function ClaudeTtySurface({ theme, layout }: PluginSurfaceProps) {
       <InstallSection palette={palette} status={status} onSettled={refreshStatus} />
 
       <DoctorSection palette={palette} />
+
+      <SettingsSection palette={palette} status={status} />
 
       <SessionsSection palette={palette} />
 

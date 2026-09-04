@@ -9,6 +9,19 @@ import { SessionLock } from "./session-lock.ts";
 import { type PersistedSession, StateStore } from "./state-store.ts";
 import { TranscriptReader } from "./transcript-reader.ts";
 import { TranscriptTranslator } from "./transcript-translator.ts";
+import { readIdleTimeout } from "./idle-timeout.ts";
+import { writeLog } from "./log.ts";
+
+export type SessionRegistryDependencies = RuntimeDependencies & {
+  /**
+   * Zero keeps the native Claude process alive until the logical session closes.
+   * Left out in production, where the timeout is read per suspension so a change in Paseo reaches live sessions.
+   */
+  idleTimeoutMs?: number;
+};
+
+/** How long a suspension stands aside when the session is busy or someone still has a card to answer. */
+const SUSPENSION_RETRY_MS = 60_000;
 
 type SessionOptions = {
   id: string;
@@ -30,17 +43,22 @@ export class ClaudeSession {
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
   private readonly runtimeDependencies: RuntimeDependencies;
+  private readonly fixedIdleTimeoutMs: number | undefined;
   private readonly stateStore: StateStore;
   private readonly lock: SessionLock;
   private readonly translator: TranscriptTranslator;
   private runtime: ClaudeRuntime | null = null;
   private queue: Promise<void> = Promise.resolve();
+  private idleTimer: NodeJS.Timeout | null = null;
+  private activityVersion = 0;
+  /** When the session last went quiet, so a deferred or re-read suspension keeps the deadline it earned. */
+  private idleSince = 0;
 
   constructor(
     options: SessionOptions,
     connection: AgentSideConnection,
     hooks: HookServer,
-    runtimeDependencies: RuntimeDependencies,
+    dependencies: SessionRegistryDependencies,
     stateStore: StateStore,
   ) {
     this.id = options.id;
@@ -51,7 +69,9 @@ export class ClaudeSession {
     this.persisted = options.persisted;
     this.connection = connection;
     this.hooks = hooks;
+    const { idleTimeoutMs, ...runtimeDependencies } = dependencies;
     this.runtimeDependencies = runtimeDependencies;
+    this.fixedIdleTimeoutMs = idleTimeoutMs;
     this.stateStore = stateStore;
     this.lock = new SessionLock(this.id, stateStore.locksDirectory);
     this.translator = new TranscriptTranslator(this.id, this.cwd, connection);
@@ -70,7 +90,8 @@ export class ClaudeSession {
   }
 
   prompt(content: ContentBlock[]): Promise<PromptResponse> {
-    return this.exclusive(async () => {
+    const activityVersion = this.beginActivity();
+    const result = this.exclusive(async () => {
       await this.lock.acquire();
       const resume = this.persisted;
       await this.save();
@@ -87,6 +108,8 @@ export class ClaudeSession {
       });
       return this.runtime.prompt(content);
     });
+    void result.finally(() => this.scheduleSuspension(activityVersion)).catch(() => undefined);
+    return result;
   }
 
   async replayHistory(): Promise<void> {
@@ -134,6 +157,7 @@ export class ClaudeSession {
   }
 
   async close(): Promise<void> {
+    this.beginActivity();
     await this.runtime?.close();
     this.runtime = null;
     await this.lock.release();
@@ -153,6 +177,81 @@ export class ClaudeSession {
     this.persisted = true;
   }
 
+  private beginActivity(): number {
+    this.activityVersion += 1;
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+    return this.activityVersion;
+  }
+
+  private scheduleSuspension(activityVersion: number): void {
+    if (activityVersion !== this.activityVersion || !this.runtime?.started) return;
+    this.idleSince = Date.now();
+    void this.idleTimeout().then((idleTimeoutMs) => {
+      if (idleTimeoutMs === 0) return;
+      this.armSuspension(activityVersion, idleTimeoutMs);
+    });
+  }
+
+  private armSuspension(activityVersion: number, delayMs: number): void {
+    // A prompt that landed while this was being scheduled owns the timer now.
+    if (activityVersion !== this.activityVersion || !this.runtime?.started) return;
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      void this.exclusive(() => this.suspendIfStillIdle(activityVersion));
+    }, Math.max(0, delayMs));
+    this.idleTimer.unref();
+  }
+
+  private async suspendIfStillIdle(activityVersion: number): Promise<void> {
+    if (activityVersion !== this.activityVersion || !this.runtime?.started) return;
+    // Read again rather than trusted from when the timer was armed, so a change made in Paseo reaches a session that has been idle since before it.
+    const idleTimeoutMs = await this.idleTimeout();
+    if (idleTimeoutMs === 0) return;
+    // Somebody is looking at a permission or question card. Stopping Claude now cancels the request behind it and
+    // leaves that card on screen in Paseo, answering to nothing.
+    if (this.runtime.turnActive || this.runtime.interactionPending) {
+      this.armSuspension(activityVersion, SUSPENSION_RETRY_MS);
+      return;
+    }
+    const remaining = this.idleSince + idleTimeoutMs - Date.now();
+    if (remaining > 0) {
+      this.armSuspension(activityVersion, remaining);
+      return;
+    }
+    try {
+      await this.runtime.suspend();
+      writeLog({ level: "info", message: "Suspended idle Claude session", sessionId: this.id, idleTimeoutMs });
+    } catch (error) {
+      // Trying once and giving up would keep this session's process alive for the rest of its life, which is what the timeout exists to prevent.
+      writeLog({
+        level: "warn",
+        message: "Failed to suspend idle Claude session; will try again",
+        sessionId: this.id,
+        retryInMs: SUSPENSION_RETRY_MS,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      this.armSuspension(activityVersion, SUSPENSION_RETRY_MS);
+    }
+  }
+
+  /** Zero disables suspension, which is also how an unreadable setting is treated: never stop a session over it. */
+  private async idleTimeout(): Promise<number> {
+    if (this.fixedIdleTimeoutMs !== undefined) return this.fixedIdleTimeoutMs;
+    try {
+      return await readIdleTimeout();
+    } catch (error) {
+      writeLog({
+        level: "warn",
+        message: "Could not read the idle timeout; keeping this session alive",
+        sessionId: this.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return 0;
+    }
+  }
+
   private exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.queue.then(operation, operation);
     this.queue = result.then(
@@ -167,18 +266,18 @@ export class SessionRegistry {
   private readonly sessions = new Map<string, ClaudeSession>();
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
-  private readonly runtimeDependencies: RuntimeDependencies;
+  private readonly dependencies: SessionRegistryDependencies;
   private readonly stateStore: StateStore;
 
   constructor(
     connection: AgentSideConnection,
     hooks: HookServer,
-    runtimeDependencies: RuntimeDependencies = {},
-    stateStore = new StateStore(runtimeDependencies.stateDirectory),
+    dependencies: SessionRegistryDependencies = {},
+    stateStore = new StateStore(dependencies.stateDirectory),
   ) {
     this.connection = connection;
     this.hooks = hooks;
-    this.runtimeDependencies = runtimeDependencies;
+    this.dependencies = dependencies;
     this.stateStore = stateStore;
   }
 
@@ -242,7 +341,7 @@ export class SessionRegistry {
   }
 
   private createSession(options: SessionOptions): ClaudeSession {
-    const session = new ClaudeSession(options, this.connection, this.hooks, this.runtimeDependencies, this.stateStore);
+    const session = new ClaudeSession(options, this.connection, this.hooks, this.dependencies, this.stateStore);
     this.sessions.set(session.id, session);
     return session;
   }

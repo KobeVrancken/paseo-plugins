@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyProviderEntry, providerEntryFor } from "./provider.shared.ts";
+import { classifyProviderEntry, envOf, providerEntryFor } from "./provider.shared.ts";
 
 const expected = providerEntryFor("/opt/paseo-plugins");
 
@@ -28,6 +28,14 @@ test("matches this checkout regardless of the label", () => {
     ),
     "matching",
   );
+});
+
+test("leaves environment variables a host set on the entry alone", () => {
+  const withEnv = { ...expected, env: { CLAUDE_BIN: "/usr/local/bin/claude", CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS: "900000" } };
+  assert.equal(classifyProviderEntry(withEnv, expected), "matching");
+  assert.deepEqual(envOf(withEnv), { CLAUDE_BIN: "/usr/local/bin/claude", CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS: "900000" });
+  assert.equal(envOf(expected), null);
+  assert.equal(envOf({ ...expected, env: "CLAUDE_BIN=claude" }), null);
 });
 
 test("reports this adapter pointed elsewhere or configured differently as mismatched", () => {

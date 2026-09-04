@@ -49,6 +49,24 @@ const CONTEXT_WAIT_MISS_LIMIT = 3;
 const CONTEXT_WAIT_RETRY_TURNS = 4;
 const WORKSPACE_TRUST_KEY_DELAY_MS = 500;
 const WORKSPACE_TRUST_SELECTION_TIMEOUT_MS = 3_000;
+// Claude asks how to resume a long or old conversation before it opens one, and answers that dialog the same way it answers the trust screen.
+const STALE_RESUME_KEY_DELAY_MS = 200;
+const STALE_RESUME_SELECTION_TIMEOUT_MS = 3_000;
+// A resumed session paints its whole conversation before its input box exists, and text inside that conversation can satisfy every readiness signal on its own.
+// Readiness therefore also requires Claude to have stopped painting, because a paste sent mid-restore is dropped without an echo to notice it by.
+const READY_QUIET_MS = 400;
+
+/** One of the menus Claude opens on its way up, as the adapter has to answer it. */
+type StartupMenu = {
+  /** Still asking, which is the only reason to go on answering it. */
+  onScreen: (screen: string) => boolean;
+  /** The marker is on the option to take, so the next key is the one that confirms it. */
+  selected: (screen: string) => boolean;
+  keyDelayMs: number;
+  timeoutMs: number;
+  /** What to throw when Claude exits mid-answer. */
+  exited: string;
+};
 
 type PtyProcess = Pick<nodePty.IPty, "pid" | "write" | "kill" | "onData" | "onExit">;
 type SpawnPty = (file: string, args: string[], options: nodePty.IPtyForkOptions) => PtyProcess;
@@ -63,6 +81,9 @@ export type RuntimeDependencies = {
   transcriptPollIntervalMs?: number;
   workspaceTrustKeyDelayMs?: number;
   workspaceTrustSelectionTimeoutMs?: number;
+  staleResumeKeyDelayMs?: number;
+  staleResumeSelectionTimeoutMs?: number;
+  readyQuietMs?: number;
   runtimeRoot?: string;
   claudeConfigDir?: string;
   transcriptFilePath?: string;
@@ -92,6 +113,9 @@ export class ClaudeRuntime {
   private readonly transcriptPollIntervalMs: number | undefined;
   private readonly workspaceTrustKeyDelayMs: number;
   private readonly workspaceTrustSelectionTimeoutMs: number;
+  private readonly staleResumeKeyDelayMs: number;
+  private readonly staleResumeSelectionTimeoutMs: number;
+  private readonly readyQuietMs: number;
   private readonly runtimeRoot: string;
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
@@ -119,6 +143,7 @@ export class ClaudeRuntime {
   private contextMtimeAtTurnEnd = 0;
   private contextWaitCancelled = false;
   private contextWaitMisses = 0;
+  private staleResumeAnswered = false;
   private intentionalExit: Deferred<void> | null = null;
 
   constructor(
@@ -150,6 +175,9 @@ export class ClaudeRuntime {
     this.transcriptPollIntervalMs = dependencies.transcriptPollIntervalMs;
     this.workspaceTrustKeyDelayMs = dependencies.workspaceTrustKeyDelayMs ?? WORKSPACE_TRUST_KEY_DELAY_MS;
     this.workspaceTrustSelectionTimeoutMs = dependencies.workspaceTrustSelectionTimeoutMs ?? WORKSPACE_TRUST_SELECTION_TIMEOUT_MS;
+    this.staleResumeKeyDelayMs = dependencies.staleResumeKeyDelayMs ?? STALE_RESUME_KEY_DELAY_MS;
+    this.staleResumeSelectionTimeoutMs = dependencies.staleResumeSelectionTimeoutMs ?? STALE_RESUME_SELECTION_TIMEOUT_MS;
+    this.readyQuietMs = dependencies.readyQuietMs ?? READY_QUIET_MS;
     this.runtimeRoot = dependencies.runtimeRoot ?? os.tmpdir();
     this.translator = dependencies.translator ?? new TranscriptTranslator(sessionId, cwd, connection);
     this.transcript = this.createTranscriptWatcher(claudeSessionId, dependencies.transcriptFilePath);
@@ -161,6 +189,11 @@ export class ClaudeRuntime {
 
   get turnActive(): boolean {
     return this.turn !== null;
+  }
+
+  /** A permission or question card is on screen in Paseo and nobody has answered it yet. */
+  get interactionPending(): boolean {
+    return this.interactions.pending;
   }
 
   async prompt(content: ContentBlock[]): Promise<PromptResponse> {
@@ -203,6 +236,14 @@ export class ClaudeRuntime {
     if (!this.pty) return;
     await this.stopForRestart();
     await this.ensureStarted();
+  }
+
+  /** Stop the native process without closing the logical ACP session or its persisted lock. */
+  async suspend(): Promise<void> {
+    if (this.closed || !this.pty) return;
+    if (this.turn) throw new Error("Cannot suspend Claude during an active turn");
+    this.interactions.cancelPending();
+    await this.stopForRestart();
   }
 
   cancel(): void {
@@ -252,6 +293,7 @@ export class ClaudeRuntime {
   private async ensureStarted(): Promise<void> {
     if (this.pty) return;
     this.screen.reset();
+    this.staleResumeAnswered = false;
     await this.hooks.start();
     this.runtimeDirectory = await mkdtemp(runtimePrefix(this.runtimeRoot));
     await chmod(this.runtimeDirectory, 0o700);
@@ -280,13 +322,16 @@ export class ClaudeRuntime {
     } catch (error) {
       await this.failedStartup(`Could not start ${claudeBin}: ${errorMessage(error)}`);
     }
-    this.pty?.onData((data) =>
+    const started = this.pty;
+    // A PTY that has been stopped can still flush its last output, and the screen it would land on now belongs to its replacement.
+    started?.onData((data) => {
+      if (this.pty !== started) return;
       this.screen.write(data, () => {
         const trustPrompt = this.trustPrompt;
         if (trustPrompt && isWorkspaceTrustScreen(this.screen.snapshot())) trustPrompt.resolve();
-      }),
-    );
-    this.pty?.onExit(({ exitCode, signal }) => this.handleExit(exitCode, signal));
+      });
+    });
+    started?.onExit(({ exitCode, signal }) => this.handleExit(started, exitCode, signal));
     try {
       await this.waitForSessionStart();
     } catch (error) {
@@ -366,13 +411,17 @@ export class ClaudeRuntime {
     return {};
   }
 
-  private handleExit(exitCode: number, signal?: number): void {
+  private handleExit(pty: PtyProcess, exitCode: number, signal?: number): void {
     if (this.closed) return;
+    const current = this.pty === pty;
     if (this.intentionalExit) {
-      this.pty = null;
+      if (current) this.pty = null;
       this.intentionalExit.resolve();
       return;
     }
+    // A stop that outlived its own wait lands here after the restart has already replaced this PTY.
+    // Tearing the session down on it would unregister the hooks, close the transcript and delete the runtime directory of the process that is now serving it.
+    if (!current) return;
     const details = this.screen.snapshot();
     const error = new Error(`Claude PTY exited unexpectedly with code ${exitCode}${signal === undefined ? "" : ` and signal ${signal}`}.${details ? `\n${details}` : ""}`);
     this.ready?.reject(error);
@@ -550,12 +599,77 @@ export class ClaudeRuntime {
 
   private async waitForTerminalReady(): Promise<void> {
     if (this.readinessTimeoutMs === 0) return;
-    const deadline = Date.now() + this.readinessTimeoutMs;
+    let deadline = Date.now() + this.readinessTimeoutMs;
     while (Date.now() < deadline) {
-      if (isReadyScreen(this.screen.snapshot())) return;
-      await delay(25);
+      const screen = this.screen.snapshot();
+      if (!this.staleResumeAnswered && isStaleResumeScreen(screen)) {
+        await this.keepFullSession();
+        // Claude reads the whole conversation in only after the answer, so readiness gets a fresh window rather than the remains of this one.
+        deadline = Date.now() + this.readinessTimeoutMs;
+        continue;
+      }
+      if (isReadyScreen(screen) && this.screen.quietFor(this.readyQuietMs)) return;
+      await delay(STARTUP_POLL_INTERVAL_MS);
     }
     await this.failedStartup(`Claude completed its SessionStart hook but its interactive prompt did not become ready within ${this.readinessTimeoutMs}ms. Check the terminal output:\n${this.screen.snapshot()}`);
+  }
+
+  /**
+   * Claude offers to replace a long or old conversation with a summary of it before resuming.
+   * The adapter always keeps the conversation, because that conversation is the ACP session it was asked to restore;
+   * a summary would silently discard the history Paseo has already replayed into its timeline.
+   */
+  private async keepFullSession(): Promise<void> {
+    this.staleResumeAnswered = true;
+    const answer = await this.answerStartupMenu({
+      onScreen: isStaleResumeScreen,
+      selected: isFullSessionSelected,
+      keyDelayMs: this.staleResumeKeyDelayMs,
+      timeoutMs: this.staleResumeSelectionTimeoutMs,
+      exited: "Claude exited before its resume question could be answered",
+    });
+    if (answer === "confirmed") {
+      writeLog({ level: "info", message: "Kept the full conversation at Claude's resume question", sessionId: this.sessionId });
+      return;
+    }
+    // The question is gone and Claude is resuming on an answer the adapter did not give. Which answer
+    // that was is not on screen to read, and a session carrying on is worth more than a certain one.
+    if (answer === "gone") {
+      writeLog({ level: "warn", message: "Claude's resume question was answered before the adapter could take it", sessionId: this.sessionId });
+      return;
+    }
+    await this.failedStartup(`Claude asked how to resume this session and the adapter could not select "Resume full session as-is". Terminal output:\n${this.screen.snapshot()}`);
+  }
+
+  /**
+   * Answers one of the menus Claude opens on its way up: put the marker on the option, confirm it,
+   * and wait for the question to go. Claude paints a menu just before its input state settles and
+   * drops whatever arrives in that gap — the trust screen visibly rolls its selection back — so a
+   * key is sent again for as long as the screen says the last one did not land, rather than once
+   * after a delay guessed in advance.
+   */
+  private async answerStartupMenu(menu: StartupMenu): Promise<"confirmed" | "gone" | "stuck"> {
+    const pty = this.pty;
+    if (!pty) throw new Error(menu.exited);
+    const deadline = Date.now() + menu.timeoutMs;
+    // The menu has just been painted, so the first key waits for the input state behind it.
+    await delay(menu.keyDelayMs);
+    while (Date.now() < deadline) {
+      if (this.pty !== pty) throw new Error(menu.exited);
+      const screen = this.screen.snapshot();
+      if (!menu.onScreen(screen)) return "gone";
+      if (menu.selected(screen)) {
+        // The marker moves before the input behind it does, so the choice is read once more on the way out.
+        await delay(menu.keyDelayMs);
+        if (this.pty !== pty) throw new Error(menu.exited);
+        if (!menu.selected(this.screen.snapshot())) continue;
+        pty.write(ENTER);
+        return "confirmed";
+      }
+      pty.write(CURSOR_DOWN);
+      await delay(Math.max(menu.keyDelayMs, STARTUP_POLL_INTERVAL_MS));
+    }
+    return menu.onScreen(this.screen.snapshot()) ? "stuck" : "gone";
   }
 
   private async waitForSessionStart(): Promise<void> {
@@ -575,6 +689,11 @@ export class ClaudeRuntime {
       if (!trustHandled) waits.push(trustPrompt);
       const result = await Promise.race(waits);
       if (result === "ready") return;
+      if (!this.staleResumeAnswered && isStaleResumeScreen(this.screen.snapshot())) {
+        await this.keepFullSession();
+        deadline = Date.now() + this.startupTimeoutMs;
+        continue;
+      }
       if (trustHandled || (result !== "trust-prompt" && !isWorkspaceTrustScreen(this.screen.snapshot()))) continue;
       trustHandled = true;
       const approved = await this.interactions.requestWorkspaceTrust();
@@ -591,26 +710,19 @@ export class ClaudeRuntime {
   }
 
   private async confirmWorkspaceTrust(): Promise<void> {
-    const pty = this.pty;
-    if (!pty) throw new Error("Claude exited before workspace trust could be confirmed");
-    // Claude paints this screen just before its input state settles. Immediate input can be
-    // displayed but ignored, and Enter sent in the same state update can confirm the old choice.
-    await delay(this.workspaceTrustKeyDelayMs);
-    if (this.pty !== pty) throw new Error("Claude exited before workspace trust could be confirmed");
-    pty.write(CURSOR_DOWN);
-    const deadline = Date.now() + this.workspaceTrustSelectionTimeoutMs;
-    while (Date.now() < deadline) {
-      if (this.pty !== pty) throw new Error("Claude exited before workspace trust could be confirmed");
-      if (isWorkspaceTrustSelected(this.screen.snapshot())) {
-        await delay(this.workspaceTrustKeyDelayMs);
-        if (this.pty !== pty) throw new Error("Claude exited before workspace trust could be confirmed");
-        if (!isWorkspaceTrustSelected(this.screen.snapshot())) continue;
-        pty.write(ENTER);
-        return;
-      }
-      await delay(STARTUP_POLL_INTERVAL_MS);
+    const answer = await this.answerStartupMenu({
+      onScreen: isWorkspaceTrustScreen,
+      selected: isWorkspaceTrustSelected,
+      keyDelayMs: this.workspaceTrustKeyDelayMs,
+      timeoutMs: this.workspaceTrustSelectionTimeoutMs,
+      exited: "Claude exited before workspace trust could be confirmed",
+    });
+    if (answer === "gone") {
+      writeLog({ level: "warn", message: "Claude's workspace trust question was answered before the adapter could take it", sessionId: this.sessionId });
     }
-    throw new Error(`Claude did not select the workspace trust option after approval in Paseo. Terminal output:\n${this.screen.snapshot()}`);
+    if (answer === "stuck") {
+      throw new Error(`Claude did not select the workspace trust option after approval in Paseo. Terminal output:\n${this.screen.snapshot()}`);
+    }
   }
 }
 
@@ -698,6 +810,21 @@ function isWorkspaceTrustScreen(screen: string): boolean {
     /Yes,\s*I trust this folder/i.test(screen) &&
     /Enter to confirm/i.test(screen)
   );
+}
+
+// Claude shows this before it opens a conversation it considers long or old, and nothing else on its startup path offers these four lines together.
+function isStaleResumeScreen(screen: string): boolean {
+  return (
+    /Resuming the full session will consume a substantial portion of your usage limits/i.test(screen) &&
+    /Resume from summary/i.test(screen) &&
+    /Resume full session as-is/i.test(screen) &&
+    /Enter to confirm/i.test(screen)
+  );
+}
+
+/** The options are numbered on screen, so the marker sits ahead of the number rather than the label. */
+function isFullSessionSelected(screen: string): boolean {
+  return /(?:^|\n)[ \t]*❯[ \t]*(?:\d+\.[ \t]*)?Resume full session as-is[ \t]*(?:$|\n)/i.test(screen);
 }
 
 function isWorkspaceTrustSelected(screen: string): boolean {

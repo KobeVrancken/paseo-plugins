@@ -34,7 +34,13 @@ Everything is host-local: selecting another host in Paseo shows that host's own 
 
 ## Settings
 
-The plugin has no settings of its own. What it manages is the `agents.providers.traecli` entry in that host's Paseo configuration, which it only ever writes when nothing else holds the ID.
+The **Suspend idle Claude** setting controls how long a native Claude process remains alive after its last foreground turn. It defaults to one hour, and you can choose 15 minutes through 8 hours, or **Never**.
+
+Suspending stops the PTY and any background tasks it owns, but does not close or archive the Paseo agent. The adapter keeps the persisted session mapping, and the next prompt automatically launches `claude --resume` with the same Claude session, model, and mode. Background task notifications do not reset the timer.
+
+The adapter reads the setting each time it schedules a suspension, so a change applies to sessions that are already open rather than only to the next adapter launch. A suspension also stands aside while a permission or question card is still waiting for an answer, and tries again later.
+
+Setting `CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS` on the provider entry, or on the daemon itself, overrides this setting for the hosts that do it; the panel says so when the entry is what sets it.
 
 An entry pointing at a different checkout is reported as a mismatch and left alone until you press **Point it at this checkout**, and an entry the plugin does not recognise is never written over at all.
 
