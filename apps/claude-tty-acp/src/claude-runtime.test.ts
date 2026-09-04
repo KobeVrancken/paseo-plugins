@@ -1168,6 +1168,117 @@ test("leaves a session running while a card is still waiting on the person who h
   }
 });
 
+test("presses again when Claude drops the key that moves its resume question", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-resume-retry-test-"));
+  const spawns: SpawnRecord[] = [];
+  let agent!: ClaudeTtyAgent;
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    let pty!: FakePty;
+    const resuming = args.includes("--resume");
+    // Claude paints a menu just before its input state settles, and the key that lands in that gap is dropped.
+    let dropped = false;
+    pty = new FakePty(4800 + spawns.length, (data) => {
+      if (data === "\u0004") setImmediate(() => pty.emitExit());
+      if (resuming && data === "\u001b[B" && !dropped) dropped = true;
+      else if (resuming && data === "\u001b[B") setImmediate(() => pty.emitData(staleResumeScreen("full")));
+      if (resuming && data === "\r") setImmediate(() => pty.emitData("\u001b[2J\u001b[H  auto mode on\r\n"));
+    });
+    spawns.push({ file, args, options, pty });
+    const idFlag = resuming ? "--resume" : "--session-id";
+    const sessionId = args[args.indexOf(idFlag) + 1];
+    setImmediate(() => {
+      void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId });
+      pty.emitData(resuming ? staleResumeScreen("summary") : "\u001b[2J\u001b[H  auto mode on\r\n");
+    });
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
+    startupTimeoutMs: 1_000,
+    readinessTimeoutMs: 1_000,
+    readyQuietMs: 5,
+    staleResumeKeyDelayMs: 5,
+    staleResumeSelectionTimeoutMs: 500,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    idleTimeoutMs: 20,
+  });
+
+  try {
+    const created = await agent.newSession({ cwd: "/work/resume-retry", mcpServers: [] });
+    const first = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "first" }] });
+    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: created.sessionId, last_assistant_message: "first done" });
+    await first;
+    await waitFor(() => agent.sessions.get(created.sessionId)?.started === false);
+
+    const second = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "second" }] });
+    await waitFor(() => spawns.length === 2 && spawns[1]!.pty.writes.some((write) => write.startsWith("\u001b[200~")), 3_000);
+    assert.deepEqual(spawns[1]!.pty.writes.slice(0, 3), ["\u001b[B", "\u001b[B", "\r"]);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: created.sessionId, last_assistant_message: "second done" });
+    assert.deepEqual(await second, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+test("carries on when Claude's resume question is answered before the adapter takes it", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-resume-gone-test-"));
+  const spawns: SpawnRecord[] = [];
+  let agent!: ClaudeTtyAgent;
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    let pty!: FakePty;
+    const resuming = args.includes("--resume");
+    pty = new FakePty(4900 + spawns.length, (data) => {
+      if (data === "\u0004") setImmediate(() => pty.emitExit());
+      // The question goes without the adapter answering it, and Claude resumes on somebody else's answer.
+      if (resuming && data === "\u001b[B") setImmediate(() => pty.emitData("\u001b[2J\u001b[H  auto mode on\r\n"));
+    });
+    spawns.push({ file, args, options, pty });
+    const idFlag = resuming ? "--resume" : "--session-id";
+    const sessionId = args[args.indexOf(idFlag) + 1];
+    setImmediate(() => {
+      void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId });
+      pty.emitData(resuming ? staleResumeScreen("summary") : "\u001b[2J\u001b[H  auto mode on\r\n");
+    });
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
+    startupTimeoutMs: 1_000,
+    readinessTimeoutMs: 1_000,
+    readyQuietMs: 5,
+    staleResumeKeyDelayMs: 5,
+    staleResumeSelectionTimeoutMs: 500,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    idleTimeoutMs: 20,
+  });
+
+  try {
+    const created = await agent.newSession({ cwd: "/work/resume-gone", mcpServers: [] });
+    const first = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "first" }] });
+    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: created.sessionId, last_assistant_message: "first done" });
+    await first;
+    await waitFor(() => agent.sessions.get(created.sessionId)?.started === false);
+
+    const second = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "second" }] });
+    await waitFor(() => spawns.length === 2 && spawns[1]!.pty.writes.some((write) => write.startsWith("\u001b[200~")), 3_000);
+    assert.equal(spawns[1]!.pty.killed, false);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: created.sessionId, last_assistant_message: "second done" });
+    assert.deepEqual(await second, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
 function staleResumeScreen(selected: "summary" | "full"): string {
   return [
     "\u001b[2J\u001b[H",

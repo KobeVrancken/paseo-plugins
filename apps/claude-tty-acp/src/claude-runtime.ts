@@ -56,6 +56,18 @@ const STALE_RESUME_SELECTION_TIMEOUT_MS = 3_000;
 // Readiness therefore also requires Claude to have stopped painting, because a paste sent mid-restore is dropped without an echo to notice it by.
 const READY_QUIET_MS = 400;
 
+/** One of the menus Claude opens on its way up, as the adapter has to answer it. */
+type StartupMenu = {
+  /** Still asking, which is the only reason to go on answering it. */
+  onScreen: (screen: string) => boolean;
+  /** The marker is on the option to take, so the next key is the one that confirms it. */
+  selected: (screen: string) => boolean;
+  keyDelayMs: number;
+  timeoutMs: number;
+  /** What to throw when Claude exits mid-answer. */
+  exited: string;
+};
+
 type PtyProcess = Pick<nodePty.IPty, "pid" | "write" | "kill" | "onData" | "onExit">;
 type SpawnPty = (file: string, args: string[], options: nodePty.IPtyForkOptions) => PtyProcess;
 
@@ -609,26 +621,55 @@ export class ClaudeRuntime {
    */
   private async keepFullSession(): Promise<void> {
     this.staleResumeAnswered = true;
-    const pty = this.pty;
-    if (!pty) throw new Error("Claude exited before its resume question could be answered");
-    // The dialog is painted just before its input state settles, exactly like the trust screen, and a key sent too early is displayed but ignored.
-    await delay(this.staleResumeKeyDelayMs);
-    if (this.pty !== pty) throw new Error("Claude exited before its resume question could be answered");
-    pty.write(CURSOR_DOWN);
-    const deadline = Date.now() + this.staleResumeSelectionTimeoutMs;
-    while (Date.now() < deadline) {
-      if (this.pty !== pty) throw new Error("Claude exited before its resume question could be answered");
-      if (isFullSessionSelected(this.screen.snapshot())) {
-        await delay(this.staleResumeKeyDelayMs);
-        if (this.pty !== pty) throw new Error("Claude exited before its resume question could be answered");
-        if (!isFullSessionSelected(this.screen.snapshot())) continue;
-        pty.write(ENTER);
-        writeLog({ level: "info", message: "Kept the full conversation at Claude's resume question", sessionId: this.sessionId });
-        return;
-      }
-      await delay(STARTUP_POLL_INTERVAL_MS);
+    const answer = await this.answerStartupMenu({
+      onScreen: isStaleResumeScreen,
+      selected: isFullSessionSelected,
+      keyDelayMs: this.staleResumeKeyDelayMs,
+      timeoutMs: this.staleResumeSelectionTimeoutMs,
+      exited: "Claude exited before its resume question could be answered",
+    });
+    if (answer === "confirmed") {
+      writeLog({ level: "info", message: "Kept the full conversation at Claude's resume question", sessionId: this.sessionId });
+      return;
+    }
+    // The question is gone and Claude is resuming on an answer the adapter did not give. Which answer
+    // that was is not on screen to read, and a session carrying on is worth more than a certain one.
+    if (answer === "gone") {
+      writeLog({ level: "warn", message: "Claude's resume question was answered before the adapter could take it", sessionId: this.sessionId });
+      return;
     }
     await this.failedStartup(`Claude asked how to resume this session and the adapter could not select "Resume full session as-is". Terminal output:\n${this.screen.snapshot()}`);
+  }
+
+  /**
+   * Answers one of the menus Claude opens on its way up: put the marker on the option, confirm it,
+   * and wait for the question to go. Claude paints a menu just before its input state settles and
+   * drops whatever arrives in that gap — the trust screen visibly rolls its selection back — so a
+   * key is sent again for as long as the screen says the last one did not land, rather than once
+   * after a delay guessed in advance.
+   */
+  private async answerStartupMenu(menu: StartupMenu): Promise<"confirmed" | "gone" | "stuck"> {
+    const pty = this.pty;
+    if (!pty) throw new Error(menu.exited);
+    const deadline = Date.now() + menu.timeoutMs;
+    // The menu has just been painted, so the first key waits for the input state behind it.
+    await delay(menu.keyDelayMs);
+    while (Date.now() < deadline) {
+      if (this.pty !== pty) throw new Error(menu.exited);
+      const screen = this.screen.snapshot();
+      if (!menu.onScreen(screen)) return "gone";
+      if (menu.selected(screen)) {
+        // The marker moves before the input behind it does, so the choice is read once more on the way out.
+        await delay(menu.keyDelayMs);
+        if (this.pty !== pty) throw new Error(menu.exited);
+        if (!menu.selected(this.screen.snapshot())) continue;
+        pty.write(ENTER);
+        return "confirmed";
+      }
+      pty.write(CURSOR_DOWN);
+      await delay(Math.max(menu.keyDelayMs, STARTUP_POLL_INTERVAL_MS));
+    }
+    return menu.onScreen(this.screen.snapshot()) ? "stuck" : "gone";
   }
 
   private async waitForSessionStart(): Promise<void> {
@@ -669,26 +710,19 @@ export class ClaudeRuntime {
   }
 
   private async confirmWorkspaceTrust(): Promise<void> {
-    const pty = this.pty;
-    if (!pty) throw new Error("Claude exited before workspace trust could be confirmed");
-    // Claude paints this screen just before its input state settles. Immediate input can be
-    // displayed but ignored, and Enter sent in the same state update can confirm the old choice.
-    await delay(this.workspaceTrustKeyDelayMs);
-    if (this.pty !== pty) throw new Error("Claude exited before workspace trust could be confirmed");
-    pty.write(CURSOR_DOWN);
-    const deadline = Date.now() + this.workspaceTrustSelectionTimeoutMs;
-    while (Date.now() < deadline) {
-      if (this.pty !== pty) throw new Error("Claude exited before workspace trust could be confirmed");
-      if (isWorkspaceTrustSelected(this.screen.snapshot())) {
-        await delay(this.workspaceTrustKeyDelayMs);
-        if (this.pty !== pty) throw new Error("Claude exited before workspace trust could be confirmed");
-        if (!isWorkspaceTrustSelected(this.screen.snapshot())) continue;
-        pty.write(ENTER);
-        return;
-      }
-      await delay(STARTUP_POLL_INTERVAL_MS);
+    const answer = await this.answerStartupMenu({
+      onScreen: isWorkspaceTrustScreen,
+      selected: isWorkspaceTrustSelected,
+      keyDelayMs: this.workspaceTrustKeyDelayMs,
+      timeoutMs: this.workspaceTrustSelectionTimeoutMs,
+      exited: "Claude exited before workspace trust could be confirmed",
+    });
+    if (answer === "gone") {
+      writeLog({ level: "warn", message: "Claude's workspace trust question was answered before the adapter could take it", sessionId: this.sessionId });
     }
-    throw new Error(`Claude did not select the workspace trust option after approval in Paseo. Terminal output:\n${this.screen.snapshot()}`);
+    if (answer === "stuck") {
+      throw new Error(`Claude did not select the workspace trust option after approval in Paseo. Terminal output:\n${this.screen.snapshot()}`);
+    }
   }
 }
 
