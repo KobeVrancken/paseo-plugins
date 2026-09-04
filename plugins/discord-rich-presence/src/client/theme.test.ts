@@ -80,9 +80,16 @@ test("reproduces the shades paseo's light theme keeps above the exposed ramp", (
 test("falls back to the host's own surfaces when a color cannot be read", () => {
   const palette = derivePalette({ colors: { ...ZINC_DARK, surface2: "var(--surface)" } });
   assert.equal(palette.surface3, "var(--surface)");
+  assert.equal(palette.isDark, true);
   assert.equal(palette.surface4, "var(--surface)");
   assert.equal(palette.borderAccent, ZINC_DARK.border);
   assert.equal(palette.foregroundExtraMuted, ZINC_DARK.foregroundMuted);
+});
+
+test("reads the theme's brightness off whichever surface is legible", () => {
+  assert.equal(derivePalette({ colors: { ...LIGHT, surface2: "var(--surface)" } }).isDark, false);
+  assert.equal(derivePalette({ colors: { ...LIGHT, surface0: "var(--surface)" } }).isDark, false);
+  assert.equal(derivePalette({ colors: { ...ZINC_DARK, surface0: "var(--surface)" } }).isDark, true);
 });
 
 test("measures and tints", () => {

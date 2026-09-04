@@ -136,10 +136,13 @@ export function derivePalette(theme: PluginTheme): Palette {
     statusDanger: colors.statusDanger,
   };
 
+  /** Either surface answers this, so only a theme with neither readable has to be assumed dark. */
+  const isDark = isDarkColor(base ?? raised ?? { r: 0, g: 0, b: 0 });
+
   if (base === null || raised === null) {
     return {
       ...host,
-      isDark: true,
+      isDark,
       surface3: colors.surface2,
       surface4: colors.surface2,
       borderAccent: colors.border,
@@ -147,7 +150,6 @@ export function derivePalette(theme: PluginTheme): Palette {
     };
   }
 
-  const isDark = isDarkColor(base);
   const ramp = isDark ? DARK_RAMP : LIGHT_RAMP;
   const target: Rgb = isDark ? { r: 255, g: 255, b: 255 } : { r: 0, g: 0, b: 0 };
   const surface3 = mix(raised, target, ramp.surface3);
