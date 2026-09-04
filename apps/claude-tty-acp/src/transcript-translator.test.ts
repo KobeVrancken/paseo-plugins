@@ -359,6 +359,76 @@ test("counts the agents a turn is still waiting on, and ignores the ones history
   assert.ok(translator.subagentActivityAt >= activityBefore);
 });
 
+test("does not wait again on an agent whose launch a rewrite replayed", async () => {
+  const connection = { sessionUpdate: async () => undefined } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const launch = [
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Count the files" } }] },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+      message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+    },
+  ];
+
+  translator.trackRunningSubagents();
+  await translator.translate(launch);
+  assert.equal(translator.runningSubagents, 1);
+
+  await translator.translate([
+    {
+      type: "user",
+      uuid: "notified",
+      message: { content: "<task-notification> <task-id>a1</task-id> <status>completed</status> <summary>done</summary> </task-notification>" },
+    },
+  ]);
+  assert.equal(translator.runningSubagents, 0);
+
+  // A compaction rewrites the transcript, and the reader that notices replays it from the top.
+  await translator.translate(launch);
+  assert.equal(translator.runningSubagents, 0);
+});
+
+test("leaves a synchronous agent's report alone when the session it ran in stops", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: { content: [{ type: "tool_use", id: "task-1", name: "Task", input: { description: "Count the files" } }] },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: { status: "completed", agentId: "a1" },
+      message: { content: [{ type: "tool_result", tool_use_id: "task-1", content: [{ type: "text", text: "There are 12." }] }] },
+    },
+  ]);
+
+  const reported = notifications.map((notification) => notification.update).at(-1);
+  assert.ok(reported?.sessionUpdate === "tool_call_update");
+  assert.equal(reported.status, "completed");
+  assert.deepEqual(reported.content, [{ type: "content", content: { type: "text", text: "There are 12." } }]);
+
+  // A history replay settles the calls of a session that is no longer running, and an agent that
+  // answered inside its launcher's turn is not one of them.
+  notifications.length = 0;
+  await translator.settleOpenToolCalls();
+  assert.deepEqual(notifications, []);
+});
+
 test("closes the tool calls a stopped session left running, and leaves the ones it answered", async () => {
   const notifications: SessionNotification[] = [];
   const connection = {

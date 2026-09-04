@@ -120,6 +120,21 @@ export class TranscriptTranslator {
   }
 
   /**
+   * Stops counting the agents a turn has given up waiting on. Their cards keep saying they are
+   * working, which is still true — nothing has reported — and they are closed when the process is.
+   * Without this every later turn holds for a poll interval and gives up again in the same breath.
+   */
+  abandonRunningSubagents(): void {
+    for (const card of this.subagents.values()) card.outstanding = false;
+  }
+
+  /** An agent that has reported writes nothing more, so its transcript stops being worth reading. */
+  subagentSettled(agentId: string): boolean {
+    const card = this.subagents.get(agentId);
+    return card !== undefined && card.status !== "in_progress";
+  }
+
+  /**
    * Called as a prompt starts. Loading a persisted session replays its whole transcript first, and
    * an agent launched in a session that has since been closed left its launch behind without the
    * notification that would have ended it: history says it is running when nothing is.
@@ -261,6 +276,9 @@ export class TranscriptTranslator {
       // An asynchronous agent answers the moment it starts, so closing the card here would report a
       // minutes-long agent as finished before it had done anything. It is closed by its notification.
       if (launch.running) return;
+      // A synchronous one has already finished, and the result below is its report. Its card is
+      // settled on that, or a session stopping later would rewrite the report as a failure.
+      this.settleSubagentCard(launch.agentId, block.is_error === true);
     }
     const resultKey = `${toolCallId}:result:${createHash("sha256").update(JSON.stringify(block)).digest("hex")}`;
     if (this.emitted.has(resultKey)) return;
@@ -369,12 +387,22 @@ export class TranscriptTranslator {
 
   private async linkSubagent(agentId: string, toolCallId: string, running: boolean): Promise<void> {
     const card = this.subagentCard(agentId);
-    card.outstanding = running && this.trackingSubagents;
+    // A compaction rewrites the transcript, and the re-read that follows replays the launch of an
+    // agent that has since reported. One that has answered is not waited on a second time.
+    card.outstanding = running && this.trackingSubagents && card.status === "in_progress";
     this.lastSubagentActivity = Date.now();
     if (card.toolCallId === toolCallId) return;
     card.toolCallId = toolCallId;
     this.subagentsByToolCall.set(toolCallId, agentId);
     await this.publishSubagent(card);
+  }
+
+  /** Records how an agent went, on the card that has to go on saying so after Claude has stopped. */
+  private settleSubagentCard(agentId: string, failed: boolean): void {
+    const card = this.subagents.get(agentId);
+    if (card === undefined || card.status !== "in_progress") return;
+    card.status = failed ? "failed" : "completed";
+    card.outstanding = false;
   }
 
   private subagentCard(agentId: string): SubagentCard {
