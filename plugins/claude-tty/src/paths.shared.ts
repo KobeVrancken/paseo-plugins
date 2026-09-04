@@ -6,6 +6,7 @@ export type Env = Record<string, string | undefined>;
 export const PLUGIN_ID = "claude-tty";
 export const ADAPTER_PACKAGE = "@paseo-plugins/claude-tty-acp";
 export const ADAPTER_BINARY_NAME = "claude-tty-acp";
+export const ADAPTER_ENTRY_NAME = "cli.js";
 
 /** Mirrors the adapter's own `defaultStateDirectory`; the plugin runs in the daemon and cannot import it. */
 export function defaultStateDirectory(env: Env = process.env): string {
@@ -51,7 +52,7 @@ export function adapterBinaryPath(repoRoot: string): string {
 
 /** The binary is a shell wrapper around this file, so its absence is what "not built yet" means. */
 export function adapterEntryPath(repoRoot: string): string {
-  return path.join(adapterDirectory(repoRoot), "dist", "cli.js");
+  return path.join(adapterDirectory(repoRoot), "dist", ADAPTER_ENTRY_NAME);
 }
 
 /** Where a bare command name would be found, in the order a shell would try. */

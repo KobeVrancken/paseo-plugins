@@ -14,7 +14,7 @@ import { readProviderEntry } from "./status.server.ts";
 export async function runUninstall(paseo: PaseoApi, options: { removeState: boolean }): Promise<UninstallPayload> {
   const stateDirectory = defaultStateDirectory();
   if (options.removeState) {
-    const held = (await listSessions()).sessions.filter((session) => session.lock?.live === true);
+    const held = (await listSessions(paseo)).sessions.filter((session) => session.lock?.live === true);
     if (held.length > 0) {
       const subject = held.length === 1 ? "A session is still open" : `${held.length} sessions are still open`;
       throw new Error(`${subject} on this host. Close ${held.length === 1 ? "it" : "them"} before removing ${stateDirectory}.`);

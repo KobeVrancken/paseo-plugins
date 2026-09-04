@@ -11,6 +11,7 @@ import {
   settingsHandler,
   startInstallHandler,
   statusHandler,
+  stopSessionHandler,
   uninstallHandler,
 } from "./src/server/handlers.server.ts";
 import { ClaudeTtySurface } from "./src/client/surface.client.tsx";
@@ -24,10 +25,11 @@ export default function contribute(plugin: PluginContext) {
   plugin.handle(contracts.getInstall, () => installStatusHandler());
   plugin.handle(contracts.runDoctor, (_input, { paseo }) => doctorHandler(paseo));
   plugin.handle(contracts.getDoctor, () => lastDoctorHandler());
-  plugin.handle(contracts.getSessions, () => sessionsHandler());
-  plugin.handle(contracts.releaseLock, (input) => releaseLockHandler(input));
-  plugin.handle(contracts.quarantineSession, (input) => quarantineSessionHandler(input));
-  plugin.handle(contracts.releaseStaleLocks, () => releaseStaleLocksHandler());
+  plugin.handle(contracts.getSessions, (_input, { paseo }) => sessionsHandler(paseo));
+  plugin.handle(contracts.releaseLock, (input, { paseo }) => releaseLockHandler(paseo, input));
+  plugin.handle(contracts.quarantineSession, (input, { paseo }) => quarantineSessionHandler(paseo, input));
+  plugin.handle(contracts.stopSession, (input, { paseo }) => stopSessionHandler(paseo, input));
+  plugin.handle(contracts.releaseStaleLocks, (_input, { paseo }) => releaseStaleLocksHandler(paseo));
   plugin.handle(contracts.runUninstall, (input, { paseo }) => uninstallHandler(paseo, input));
 
   plugin.addSurface(SURFACE_ID, ClaudeTtySurface);

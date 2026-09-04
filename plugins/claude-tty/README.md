@@ -48,7 +48,13 @@ An entry pointing at a different checkout is reported as a mismatch and left alo
 
 **Diagnostics** runs the host checks of the executable the daemon would actually launch — not the one this checkout builds — and shows Paseo's own provider diagnostic beneath them. A stale entry pointing somewhere else is exactly what that distinction catches.
 
-**Sessions** lists the adapter's saved sessions and the locks over them. A lock names the process holding a session; the adapter clears its own on exit and recovers one left by a dead process, so releasing by hand is only for a lock that outlived its process and is still in the way. Releasing is refused while the recorded process is alive. A session file that cannot be read can be moved aside rather than deleted, so the failure is still there to diagnose.
+**Sessions** lists the adapter's saved sessions and the locks over them, each named after the Paseo agent holding it and saying when it was last prompted. That reads "last prompted" rather than "active" on purpose: the adapter stamps the time as a prompt starts, so a session an hour into one turn is still working.
+
+**Stop** ends the adapter process holding an open session, which closes its Claude terminal. Nothing durable goes with it: the session file, the transcript, and the Paseo agent all survive, and the next prompt resumes the same Claude session.
+
+A PID outlives the process that earned it, so a stop first establishes that the process really is the one that took the lock — the right kind of process, and one that cannot have started after the lock it holds. Anything else is refused, named, and left running, including a process that has already exited and is waiting to be reaped. The adapter is given ten seconds to close the session itself before it is forced.
+
+A lock names the process holding a session; the adapter clears its own on exit and recovers one left by a dead process, so **Release lock** is only for a lock that outlived its process and is still in the way — including one left behind by a stop that had to force the process. Releasing is refused while the recorded process is alive. A session file that cannot be read can be moved aside rather than deleted, so the failure is still there to diagnose.
 
 The adapter's [troubleshooting table](../../apps/claude-tty-acp/README.md#troubleshooting) covers everything that goes wrong once a session is running.
 
