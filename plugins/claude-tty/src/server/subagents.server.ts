@@ -1,4 +1,4 @@
-import { open, readdir, stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import type { SubagentsPayload, SubagentTranscriptPayload } from "../contracts.shared.ts";
 import { subagentsDirectory, transcriptPath } from "../paths.shared.ts";
@@ -13,7 +13,7 @@ import {
   readOutcomes,
   subagentFileName,
   subagentMetaFileName,
-  subagentTranscript,
+  SubagentSteps,
   type SubagentFile,
   type SubagentLaunch,
   type SubagentMeta,
@@ -21,26 +21,31 @@ import {
 } from "../subagents.shared.ts";
 import { messageOf } from "./paths.server.ts";
 import { readState } from "./sessions.server.ts";
+import { newScan, readHead, readNewLines, readWhole, type FileScan } from "./transcript-scan.server.ts";
 
 /** Enough of a subagent's transcript to name it, without reading a prompt that runs to pages. */
 const PROMPT_BYTES = 8_192;
 /** How many of a subagent's steps the panel is sent; the rest stay on disk and are counted. */
 const STEP_LIMIT = 200;
 
-/**
- * A session's transcript is appended to for as long as it lives, so it is read the way the adapter
- * reads it: once from the beginning, and from there on only what is new. Module scope is the only
- * state a plugin has between calls, which is exactly as long as this is worth keeping.
- */
-type TranscriptScan = {
-  offset: number;
+type TranscriptScan = FileScan & {
   launches: Map<string, SubagentLaunch>;
   outcomes: Map<string, SubagentOutcome>;
 };
 
+/** A subagent's own transcript, read the same way: a running agent's is polled and only grows. */
+type SubagentScan = FileScan & { session: string; steps: SubagentSteps };
+
+/**
+ * Module scope is the only state a plugin has between calls, and it lives as long as the plugin
+ * process, so everything kept in it is keyed by the session it was read for and dropped with that
+ * session. A daemon that has run for weeks would otherwise hold the scan of every session it has
+ * ever polled, and every subagent name it has ever shown.
+ */
 const scans = new Map<string, TranscriptScan>();
 /** Neither a subagent's sidecar nor its opening prompt changes, so both are read once. */
-const names = new Map<string, { meta: SubagentMeta | null; prompt: string | null }>();
+const names = new Map<string, { session: string; name: { meta: SubagentMeta | null; prompt: string | null } }>();
+const stepScans = new Map<string, SubagentScan>();
 
 /**
  * Only sessions that are open are listed. A subagent lives inside its session's Claude process, so
@@ -49,50 +54,79 @@ const names = new Map<string, { meta: SubagentMeta | null; prompt: string | null
 export async function listSubagents(): Promise<SubagentsPayload> {
   const reading = await readState();
   const sessions: SubagentsPayload["sessions"] = [];
+  const live = new Set<string>();
   let problem: string | null = reading.problem;
   for (const session of reading.sessions) {
     if (session.lock?.live !== true || session.cwd === null || session.claudeSessionId === null) continue;
+    if (!isSafeStateFileStem(session.claudeSessionId)) {
+      problem = problem ?? `${session.id}: ${session.claudeSessionId} is not a Claude session ID whose files can be read.`;
+      continue;
+    }
+    const directory = subagentsDirectory(session.cwd, session.claudeSessionId);
+    live.add(directory);
     try {
       sessions.push({
         sessionId: session.id,
         cwd: session.cwd,
-        subagents: await sessionSubagents(session.cwd, session.claudeSessionId),
+        subagents: await sessionSubagents(session.cwd, session.claudeSessionId, directory),
       });
     } catch (error) {
       problem = problem ?? `${session.id}: ${messageOf(error)}`;
     }
   }
+  forgetStoppedSessions(live);
   return { now: Date.now(), problem, sessions: sessions.filter((entry) => entry.subagents.length > 0) };
 }
 
-/** The steps one subagent took, read whole: it is asked for one agent at a time, on request. */
+/** What was read for a session that is no longer open is never read again, so it is not kept. */
+function forgetStoppedSessions(live: ReadonlySet<string>): void {
+  for (const key of [...scans.keys()]) if (!live.has(key)) scans.delete(key);
+  for (const [key, entry] of [...names]) if (!live.has(entry.session)) names.delete(key);
+  for (const [key, entry] of [...stepScans]) if (!live.has(entry.session)) stepScans.delete(key);
+}
+
+/**
+ * The steps one subagent took. The panel re-asks every few seconds for as long as the agent runs,
+ * and the transcript behind the answer only grows, so it is scanned rather than re-read: what is
+ * new is parsed onto the tail already held, and the steps that fall off the tail are counted.
+ */
 export async function readSubagentTranscript(sessionId: string, agentId: string): Promise<SubagentTranscriptPayload> {
   if (!isSafeStateFileStem(sessionId) || !isSafeStateFileStem(agentId)) {
     throw new Error(`${sessionId}/${agentId} is not a subagent of a session on this host.`);
   }
   const session = (await readState()).sessions.find((entry) => entry.id === sessionId);
-  const file = subagentPath(session, agentId);
-  if (file === null) throw new Error(`Session ${sessionId} is not open, so its subagents cannot be read.`);
-  const handle = await open(file, "r");
-  try {
-    const { startedAt, steps } = subagentTranscript(parseRecords(await handle.readFile("utf8")));
-    return { startedAt, steps: steps.slice(-STEP_LIMIT), earlier: Math.max(0, steps.length - STEP_LIMIT) };
-  } finally {
-    await handle.close().catch(() => undefined);
-  }
+  const located = subagentPath(session, agentId);
+  if (located === null) throw new Error(`Session ${sessionId} is not open, so its subagents cannot be read.`);
+  const scan = await scanSubagent(located.file, located.directory);
+  return { startedAt: scan.steps.startedAt, steps: scan.steps.steps, earlier: scan.steps.earlier };
 }
 
-function subagentPath(session: SessionEntry | undefined, agentId: string): string | null {
+/** The Claude session ID is guarded like the two the caller named: it is joined into a path too. */
+function subagentPath(session: SessionEntry | undefined, agentId: string): { file: string; directory: string } | null {
   if (session === undefined || session.cwd === null || session.claudeSessionId === null) return null;
-  return path.join(subagentsDirectory(session.cwd, session.claudeSessionId), subagentFileName(agentId));
+  if (!isSafeStateFileStem(session.claudeSessionId)) return null;
+  const directory = subagentsDirectory(session.cwd, session.claudeSessionId);
+  return { file: path.join(directory, subagentFileName(agentId)), directory };
 }
 
-async function sessionSubagents(cwd: string, claudeSessionId: string) {
-  const directory = subagentsDirectory(cwd, claudeSessionId);
+async function sessionSubagents(cwd: string, claudeSessionId: string, directory: string) {
   const files = await readSubagentFiles(directory);
   if (files.length === 0) return [];
-  const scan = await scanTranscript(transcriptPath(cwd, claudeSessionId));
+  const scan = await scanTranscript(transcriptPath(cwd, claudeSessionId), directory);
   return joinSubagents(files, scan.launches, scan.outcomes);
+}
+
+async function scanSubagent(file: string, directory: string): Promise<SubagentScan> {
+  let scan = stepScans.get(file);
+  if (scan === undefined) {
+    scan = { session: directory, ...newScan(), steps: new SubagentSteps(STEP_LIMIT) };
+    stepScans.set(file, scan);
+  }
+  const read = await readNewLines(file, scan);
+  // Nothing rewrites a subagent's transcript, but one that was would be read twice onto one tail.
+  if (read.rewritten) scan.steps = new SubagentSteps(STEP_LIMIT);
+  scan.steps.append(parseRecords(read.text));
+  return scan;
 }
 
 /** A session that has never run a subagent has no directory of them, which is not a problem. */
@@ -116,59 +150,39 @@ async function readSubagentFiles(directory: string): Promise<SubagentFile[]> {
   return files;
 }
 
-/** The sidecar names a subagent outright; the prompt is only read when there is no sidecar to read. */
+/**
+ * The sidecar names a subagent outright; the prompt is only read when there is no sidecar to read.
+ * An agent ID is unique inside one session's directory of them and nowhere else, so that is what
+ * this is keyed by — which is also what lets it be dropped when the session is.
+ */
 async function nameOf(agentId: string, directory: string, file: string): Promise<{ meta: SubagentMeta | null; prompt: string | null }> {
-  const cached = names.get(agentId);
-  if (cached !== undefined) return cached;
+  const key = `${directory}\u0000${agentId}`;
+  const cached = names.get(key);
+  if (cached !== undefined) return cached.name;
   const meta = parseMeta(await readWhole(path.join(directory, subagentMetaFileName(agentId))));
   const prompt = meta?.description ? null : promptOf(parseRecords(await readHead(file, PROMPT_BYTES)));
   const name = { meta, prompt };
-  names.set(agentId, name);
+  names.set(key, { session: directory, name });
   return name;
 }
 
-async function readWhole(file: string): Promise<string | null> {
-  const handle = await open(file, "r").catch(() => null);
-  if (handle === null) return null;
-  try {
-    return await handle.readFile("utf8");
-  } finally {
-    await handle.close().catch(() => undefined);
-  }
-}
-
-async function scanTranscript(file: string): Promise<TranscriptScan> {
-  const scan = scans.get(file) ?? { offset: 0, launches: new Map(), outcomes: new Map() };
-  scans.set(file, scan);
-  const size = (await stat(file).catch(() => null))?.size ?? null;
-  if (size === null) return scan;
-  // A compaction rewrites the transcript in place, and what it dropped is still worth having read.
-  if (size < scan.offset) scan.offset = 0;
-  if (size === scan.offset) return scan;
-  const chunk = await readRange(file, scan.offset, size - scan.offset);
-  const complete = chunk.lastIndexOf("\n");
-  if (complete < 0) return scan;
-  scan.offset += Buffer.byteLength(chunk.slice(0, complete + 1));
-  const records = parseRecords(chunk.slice(0, complete));
+/**
+ * A compaction rewrites the transcript in place, and what it dropped is still worth having read, so
+ * the launches and outcomes already joined stay and only the reading of the file starts over.
+ * A session that has never been written to is not a problem, and there is nothing to join yet.
+ */
+async function scanTranscript(file: string, directory: string): Promise<TranscriptScan> {
+  const scan = scans.get(directory) ?? { ...newScan(), launches: new Map(), outcomes: new Map() };
+  scans.set(directory, scan);
+  const read = await readNewLines(file, scan).catch((error: unknown) => {
+    if (isMissing(error)) return null;
+    throw error;
+  });
+  if (read === null) return scan;
+  const records = parseRecords(read.text);
   for (const launch of readLaunches(records)) scan.launches.set(launch.agentId, launch);
   for (const outcome of readOutcomes(records)) scan.outcomes.set(outcome.agentId, outcome);
   return scan;
-}
-
-async function readHead(file: string, length: number): Promise<string> {
-  return readRange(file, 0, length);
-}
-
-async function readRange(file: string, start: number, length: number): Promise<string> {
-  if (length <= 0) return "";
-  const handle = await open(file, "r");
-  try {
-    const buffer = Buffer.alloc(length);
-    const { bytesRead } = await handle.read(buffer, 0, length, start);
-    return buffer.subarray(0, bytesRead).toString("utf8");
-  } finally {
-    await handle.close().catch(() => undefined);
-  }
 }
 
 function isMissing(error: unknown): boolean {

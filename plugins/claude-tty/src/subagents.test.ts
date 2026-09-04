@@ -10,7 +10,7 @@ import {
   readLaunches,
   readOutcomes,
   subagentFileName,
-  subagentTranscript,
+  SubagentSteps,
   type SubagentFile,
   type SubagentLaunch,
   type SubagentOutcome,
@@ -119,7 +119,8 @@ test("reads what a subagent said, ran, and got back", () => {
     ].join("\n"),
   );
 
-  const transcript = subagentTranscript(records);
+  const transcript = new SubagentSteps(200);
+  transcript.append(records);
   assert.equal(transcript.startedAt, Date.parse("2026-09-01T15:43:30.000Z"));
   assert.deepEqual(transcript.steps, [
     { kind: "text", at: Date.parse("2026-09-01T15:43:37.000Z"), title: "Reading   the controllers", detail: null, body: null, failed: false, error: null },
@@ -144,7 +145,9 @@ test("keeps a step readable when what it was handed is not", () => {
     }),
   );
 
-  const [text, tool] = subagentTranscript(records).steps;
+  const collected = new SubagentSteps(200);
+  collected.append(records);
+  const [text, tool] = collected.steps;
   assert.equal(text?.title.length, 1_200);
   assert.equal(text?.title.endsWith("…"), true);
   assert.equal(tool?.body?.length, 400);
@@ -159,4 +162,34 @@ test("says how long ago a subagent last wrote anything", () => {
   assert.equal(lastStepLabel(now - 20 * 60_000, now), "last step 20 minutes ago");
   assert.equal(lastStepLabel(now - 3 * 3_600_000, now), "last step 3 hours ago");
   assert.equal(lastStepLabel(null, now), null);
+});
+
+test("parses only what is new, and keeps the tail of a run too long to show whole", () => {
+  const steps = new SubagentSteps(3);
+  const step = (index: number) =>
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: `bash-${index}`, name: "Bash", input: { command: `step ${index}` } }] } });
+
+  steps.append(parseRecords([step(1), step(2)].join("\n")));
+  assert.deepEqual(steps.steps.map((entry) => entry.body), ["step 1", "step 2"]);
+  assert.equal(steps.earlier, 0);
+
+  // The next read carries only the records the last one did not see, onto the same tail.
+  steps.append(parseRecords([step(3), step(4)].join("\n")));
+  assert.deepEqual(steps.steps.map((entry) => entry.body), ["step 2", "step 3", "step 4"]);
+  assert.equal(steps.earlier, 1);
+
+  // A result lands in a later read than the call it answers, and still marks it failed.
+  steps.append(
+    parseRecords(
+      JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "bash-4", is_error: true, content: "Exit code 1" }] } }),
+    ),
+  );
+  assert.deepEqual(
+    steps.steps.map((entry) => [entry.body, entry.failed, entry.error]),
+    [
+      ["step 2", false, null],
+      ["step 3", false, null],
+      ["step 4", true, "Exit code 1"],
+    ],
+  );
 });

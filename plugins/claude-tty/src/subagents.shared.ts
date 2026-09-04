@@ -194,8 +194,6 @@ export type SubagentStep = {
   error: string | null;
 };
 
-export type SubagentTranscript = { startedAt: number | null; steps: SubagentStep[] };
-
 const TEXT_CHARS = 1_200;
 const BODY_CHARS = 400;
 const ERROR_CHARS = 200;
@@ -204,42 +202,79 @@ const ERROR_CHARS = 200;
 const BODY_KEYS = ["command", "file_path", "notebook_path", "path", "pattern", "query", "url"] as const;
 
 /**
- * What a subagent did, read out of its own transcript. Its results are read too: a tool that failed
- * is most of what is worth knowing about a run that went wrong, and the transcript is the only
- * place it is written down.
+ * What a subagent did, read out of its own transcript as that transcript is written. A running
+ * agent's file is re-read every few seconds and grows for as long as it runs, so records are handed
+ * over as they arrive and only the tail the panel shows is kept; the rest are counted and dropped.
+ *
+ * Results are read as well: a tool that failed is most of what is worth knowing about a run that
+ * went wrong, and the transcript is the only place it is written down.
  */
-export function subagentTranscript(records: readonly Record<string, unknown>[]): SubagentTranscript {
-  const steps: SubagentStep[] = [];
-  const byToolUse = new Map<string, SubagentStep>();
-  let startedAt: number | null = null;
-  for (const record of records) {
-    const at = timestampOf(record);
-    if (startedAt === null) startedAt = at;
-    const content = asRecord(record.message)?.content;
-    if (!Array.isArray(content)) continue;
-    for (const value of content) {
-      const block = asRecord(value);
-      if (!block) continue;
-      if (record.type === "assistant" && block.type === "text" && typeof block.text === "string") {
-        const text = truncate(block.text.trim(), TEXT_CHARS);
-        if (text !== "") steps.push({ kind: "text", at, title: text, detail: null, body: null, failed: false, error: null });
-      }
-      if (record.type === "assistant" && block.type === "tool_use") {
-        const step = toolStep(block, at);
-        steps.push(step);
-        const id = typeof block.id === "string" ? block.id : null;
-        if (id !== null) byToolUse.set(id, step);
-      }
-      if (block.type === "tool_result" && block.is_error === true) {
-        const step = typeof block.tool_use_id === "string" ? byToolUse.get(block.tool_use_id) : undefined;
-        if (step) {
-          step.failed = true;
-          step.error = firstLine(block.content);
+export class SubagentSteps {
+  private readonly limit: number;
+  private readonly kept: SubagentStep[] = [];
+  /** The tool use each kept step came from, so a result landing in a later read can find its step. */
+  private readonly keptIds: (string | null)[] = [];
+  private readonly byToolUse = new Map<string, SubagentStep>();
+  private dropped = 0;
+  private first: number | null = null;
+
+  constructor(limit: number) {
+    this.limit = limit;
+  }
+
+  /** When the subagent started, which is the first thing it wrote and outlives every step. */
+  get startedAt(): number | null {
+    return this.first;
+  }
+
+  get steps(): SubagentStep[] {
+    return [...this.kept];
+  }
+
+  /** The steps taken before those, which the panel says the number of rather than shows. */
+  get earlier(): number {
+    return this.dropped;
+  }
+
+  append(records: readonly Record<string, unknown>[]): void {
+    for (const record of records) {
+      const at = timestampOf(record);
+      if (this.first === null) this.first = at;
+      const content = asRecord(record.message)?.content;
+      if (!Array.isArray(content)) continue;
+      for (const value of content) {
+        const block = asRecord(value);
+        if (!block) continue;
+        if (record.type === "assistant" && block.type === "text" && typeof block.text === "string") {
+          const text = truncate(block.text.trim(), TEXT_CHARS);
+          if (text !== "") this.push({ kind: "text", at, title: text, detail: null, body: null, failed: false, error: null }, null);
+        }
+        if (record.type === "assistant" && block.type === "tool_use") {
+          this.push(toolStep(block, at), typeof block.id === "string" ? block.id : null);
+        }
+        if (block.type === "tool_result" && block.is_error === true) {
+          const step = typeof block.tool_use_id === "string" ? this.byToolUse.get(block.tool_use_id) : undefined;
+          if (step) {
+            step.failed = true;
+            step.error = firstLine(block.content);
+          }
         }
       }
     }
   }
-  return { startedAt, steps };
+
+  /** A step that falls out of the tail takes its tool use with it, so neither map outgrows the tail. */
+  private push(step: SubagentStep, id: string | null): void {
+    this.kept.push(step);
+    this.keptIds.push(id);
+    if (id !== null) this.byToolUse.set(id, step);
+    while (this.kept.length > this.limit) {
+      this.kept.shift();
+      const forgotten = this.keptIds.shift();
+      if (forgotten !== undefined && forgotten !== null) this.byToolUse.delete(forgotten);
+      this.dropped += 1;
+    }
+  }
 }
 
 function toolStep(block: Record<string, unknown>, at: number | null): SubagentStep {

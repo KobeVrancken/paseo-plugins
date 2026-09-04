@@ -92,7 +92,8 @@ Claude writes that notification into the turn it wakes for after the agent repor
 a launch left open in a finished transcript says only that nobody was there to hear the end of it, never that the agent is still working.
 
 The panel lists only open sessions, because a subagent is a loop inside its session's Claude process and stops with it, and it is not an ACP session or a Paseo agent, so the paragraph above about opening an agent applies to it twice over.
-A session transcript is read incrementally from module scope, the way the adapter reads it, because it is megabytes long and the panel polls.
+Both files are read incrementally from module scope, the way the adapter reads them, because each runs to megabytes and the panel polls: what is new is parsed onto what was already read, a rewrite is noticed by comparing the head of the file rather than its length, and only the tail of steps the panel shows is kept.
+Module scope lives as long as the plugin process, so everything it holds is keyed by the session directory it was read for and dropped as soon as that session is no longer open.
 
 ## index.ts is AST-filtered
 
