@@ -113,6 +113,7 @@ export class DaemonConnection {
    * and a list call keeps a missed or replayed event from drifting the counts.
    * The project list is the settings surface's, not the presence's: a project with no workspace
    * open still has to be listed so a detail level can be set on it.
+   * A project list that fails is dropped instead, because failing the snapshot would stall the presence behind a reconnect over data it never reads.
    */
   async snapshot(): Promise<PresenceSnapshot | null> {
     if (!this.client) return null;
@@ -121,7 +122,7 @@ export class DaemonConnection {
       const [workspaces, agents, projects] = await Promise.all([
         this.client.workspaces.list({ page: { limit: WORKSPACE_PAGE_LIMIT }, subscribe }),
         this.client.agents.list({ scope: "active", page: { limit: AGENT_PAGE_LIMIT }, subscribe }),
-        this.client.projects.list(),
+        this.client.projects.list().catch(() => ({ projects: [] })),
       ]);
       this.subscribed = true;
       this.state = { status: "connected" };
