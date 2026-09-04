@@ -2,6 +2,7 @@ import { readdir, readFile, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { PaseoApi } from "@getpaseo/client";
 import type { SessionsPayload } from "../contracts.shared.ts";
+import { ownsLock, type ProcessIdentity } from "../lock-owner.shared.ts";
 import { defaultStateDirectory, locksDirectory, sessionsDirectory } from "../paths.shared.ts";
 import {
   LOCK_SUFFIX,
@@ -9,8 +10,6 @@ import {
   attachAgents,
   isSafeStateFileStem,
   joinSessions,
-  ownsLock,
-  type ProcessIdentity,
   type SessionEntry,
   type SessionLock,
   type StateFile,

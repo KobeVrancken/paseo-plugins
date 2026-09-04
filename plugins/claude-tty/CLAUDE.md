@@ -53,6 +53,8 @@ Signal 0 proves only that a PID is taken, and a PID outlives the process that ea
 The command line alone cannot do it.
 Matching the adapter's name and its entry file as free-floating substrings passes for the `claude` child — it is handed a `--settings` path carrying the adapter's name, and is itself `node <...>/cli.js` wherever Claude Code is installed as a bundle rather than as a binary — and for any bystander whose arguments merely mention the checkout.
 So the command has to match as one path, `<...>/claude-tty-acp/<...>/cli.js`, and even then it says only what kind of process this is, never *which*: a second adapter that inherited the PID looks exactly like the first.
+That pattern is built from the same names `paths.shared.ts` registers the adapter under, so renaming either cannot leave a guard matching the old one behind.
+It lives in `lock-owner.shared.ts` rather than beside the session join, because `sessions.shared.ts` is bundled into the client and `paths.shared.ts` reaches for `node:os` and `node:path`.
 
 The start time is the half that settles it.
 Two live processes cannot share a PID, so a process that was already running when the lock was written and still holds that PID is the process that wrote it.
