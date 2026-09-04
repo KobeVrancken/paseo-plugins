@@ -28,6 +28,7 @@ export class TranscriptWatcher {
 
   async start(): Promise<void> {
     if (this.timer) return;
+    this.subagents?.open();
     await this.sync();
     this.timer = setInterval(() => void this.sync().catch(() => undefined), this.pollIntervalMs);
     this.timer.unref();

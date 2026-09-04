@@ -45,9 +45,16 @@ export class SubagentWatcher {
     }
   }
 
+  /**
+   * Reopened rather than replaced when a suspended session wakes, because the readers hold how far
+   * into each subagent's transcript this has read, and a fresh one would stream every step again.
+   */
+  open(): void {
+    this.closed = false;
+  }
+
   close(): void {
     this.closed = true;
-    this.readers.clear();
   }
 
   /** A session that has never run a subagent has no directory, which is not a failure to report. */

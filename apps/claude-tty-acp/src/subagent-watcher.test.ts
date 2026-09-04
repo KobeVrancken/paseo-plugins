@@ -41,6 +41,12 @@ test("follows every subagent transcript from where it last read", async () => {
   await writeFile(path.join(directory, "agent-a3.jsonl"), record("after close"));
   await watcher.sync();
   assert.equal(seen.length, 3);
+
+  // A suspended session wakes onto the same watcher, and picks up where it read rather than again.
+  watcher.open();
+  await watcher.sync();
+  assert.deepEqual(seen.slice(3).map((entry) => entry.agentId), ["a3"]);
+  assert.equal(seen[3]?.records.length, 1);
 });
 
 test("reads no more often than its interval unless the end of a turn forces it", async () => {
