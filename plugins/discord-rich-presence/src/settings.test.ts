@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULT_SETTINGS } from "./presence.shared.ts";
-import { coerceApplicationId, coerceSettings, withProjectDetailLevel } from "./settings.shared.ts";
+import { DEFAULT_SETTINGS, type PresenceSnapshot } from "./presence.shared.ts";
+import {
+  coerceApplicationId,
+  coerceSettings,
+  knownProjects,
+  withProjectDetailLevel,
+} from "./settings.shared.ts";
 
 test("an empty file yields the defaults", () => {
   assert.deepEqual(coerceSettings(null), DEFAULT_SETTINGS);
@@ -78,4 +83,72 @@ test("a project set to the level the default already has keeps its own entry", (
   const project = { rootPath: "/work/client", displayName: "client" };
   const settings = withProjectDetailLevel(DEFAULT_SETTINGS, project, "detailed");
   assert.equal(settings.projectDetailLevels.length, 1);
+});
+
+function snapshotOf(
+  workspaces: { rootPath: string; displayName: string }[],
+  projects: { rootPath: string; displayName: string }[],
+): PresenceSnapshot {
+  return {
+    workspaces: workspaces.map((project, index) => ({
+      id: `ws_${index}`,
+      projectRootPath: project.rootPath,
+      projectDisplayName: project.displayName,
+      workspaceName: "main",
+      status: "running",
+      activityAt: null,
+      statusEnteredAt: null,
+    })),
+    agents: [],
+    projects,
+  };
+}
+
+test("lists a registered project with no workspace open, sorted by name", () => {
+  const snapshot = snapshotOf(
+    [{ rootPath: "/work/zeta", displayName: "zeta" }],
+    [
+      { rootPath: "/work/zeta", displayName: "zeta" },
+      { rootPath: "/work/alpha", displayName: "alpha" },
+    ],
+  );
+  assert.deepEqual(knownProjects(DEFAULT_SETTINGS, snapshot), [
+    { rootPath: "/work/alpha", displayName: "alpha", level: null },
+    { rootPath: "/work/zeta", displayName: "zeta", level: null },
+  ]);
+});
+
+test("carries the saved level onto the project the daemon reports", () => {
+  const project = { rootPath: "/work/client", displayName: "client" };
+  const settings = withProjectDetailLevel(DEFAULT_SETTINGS, project, "hidden");
+  assert.deepEqual(knownProjects(settings, snapshotOf([], [project])), [{ ...project, level: "hidden" }]);
+});
+
+/** A level the user can no longer see is a level the user can no longer undo. */
+test("keeps a project the daemon has forgotten but the settings still name", () => {
+  const settings = withProjectDetailLevel(
+    DEFAULT_SETTINGS,
+    { rootPath: "/work/gone", displayName: "gone" },
+    "hidden",
+  );
+  assert.deepEqual(knownProjects(settings, snapshotOf([], [])), [
+    { rootPath: "/work/gone", displayName: "gone", level: "hidden" },
+  ]);
+});
+
+test("prefers the daemon's name over the one saved with the level", () => {
+  const settings = withProjectDetailLevel(
+    DEFAULT_SETTINGS,
+    { rootPath: "/work/client", displayName: "client" },
+    "projects",
+  );
+  const snapshot = snapshotOf([], [{ rootPath: "/work/client", displayName: "Acme" }]);
+  assert.deepEqual(knownProjects(settings, snapshot), [
+    { rootPath: "/work/client", displayName: "Acme", level: "projects" },
+  ]);
+});
+
+test("lists a project only once when a workspace and the daemon both name it", () => {
+  const project = { rootPath: "/work/client", displayName: "client" };
+  assert.equal(knownProjects(DEFAULT_SETTINGS, snapshotOf([project], [project])).length, 1);
 });

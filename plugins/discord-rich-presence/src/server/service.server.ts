@@ -1,10 +1,11 @@
 import type {
-  DetailLevel,
+  KnownProject,
   PresenceActivity,
   PresenceSettings,
   PresenceSnapshot,
 } from "../presence.shared.ts";
 import { renderActivity } from "../presence.shared.ts";
+import { knownProjects } from "../settings.shared.ts";
 import { decideWrite, MIN_WRITE_INTERVAL_MS } from "../throttle.shared.ts";
 import { DaemonConnection, type DaemonState } from "./daemon.server.ts";
 import { DiscordConnection, type DiscordState } from "./discord.server.ts";
@@ -14,13 +15,6 @@ import { SettingsStore } from "./settings-store.server.ts";
 const REFRESH_DEBOUNCE_MS = MIN_WRITE_INTERVAL_MS;
 /** Covers anything the update stream misses, including a subscription lost to a reconnect. */
 const REFRESH_INTERVAL_MS = 60_000;
-
-export type KnownProject = {
-  rootPath: string;
-  displayName: string;
-  /** null when the project follows the default level. */
-  level: DetailLevel | null;
-};
 
 export type PresenceStatus = {
   settings: PresenceSettings;
@@ -65,7 +59,7 @@ export class PresenceService {
       discord: this.discord.currentState(),
       daemon: this.daemon.currentState(),
       activity: this.activity,
-      projects: this.knownProjects(settings),
+      projects: knownProjects(settings, this.snapshot),
     };
   }
 
@@ -74,31 +68,6 @@ export class PresenceService {
     this.applyConnection();
     await this.refresh();
     return this.status();
-  }
-
-  /**
-   * Every project the daemon has registered, so a level can be set on one that is not running.
-   * The saved settings only contribute a name for a project the daemon has since forgotten, which
-   * is what keeps a level assigned to it undoable.
-   */
-  private knownProjects(settings: PresenceSettings): KnownProject[] {
-    const names = new Map<string, string>();
-    for (const project of settings.projectDetailLevels) names.set(project.rootPath, project.displayName);
-    for (const workspace of this.snapshot.workspaces) {
-      names.set(workspace.projectRootPath, workspace.projectDisplayName);
-    }
-    for (const project of this.snapshot.projects) names.set(project.rootPath, project.displayName);
-
-    const levels = new Map(
-      settings.projectDetailLevels.map((project) => [project.rootPath, project.level] as const),
-    );
-    return [...names]
-      .map(([rootPath, displayName]) => ({
-        rootPath,
-        displayName,
-        level: levels.get(rootPath) ?? null,
-      }))
-      .sort((left, right) => left.displayName.localeCompare(right.displayName));
   }
 
   private applyConnection(): void {
