@@ -15,7 +15,12 @@ test("follows every subagent transcript from where it last read", async () => {
   const transcript = path.join(root, "session.jsonl");
   const directory = path.join(root, "session", "subagents");
   const seen: Array<{ agentId: string; records: TranscriptRecord[] }> = [];
-  const watcher = new SubagentWatcher(transcript, { translateSubagent: async (agentId, records) => void seen.push({ agentId, records }) }, root, 0);
+  const watcher = new SubagentWatcher(
+    transcript,
+    { translateSubagent: async (agentId, records) => void seen.push({ agentId, records }), subagentSettled: () => false },
+    root,
+    0,
+  );
 
   // A session that has never run a subagent has no directory of them.
   await watcher.sync();
@@ -57,7 +62,7 @@ test("reads no more often than its interval unless the end of a turn forces it",
   const seen: string[] = [];
   const watcher = new SubagentWatcher(
     path.join(root, "session.jsonl"),
-    { translateSubagent: async (agentId) => void seen.push(agentId) },
+    { translateSubagent: async (agentId) => void seen.push(agentId), subagentSettled: () => false },
     root,
     60_000,
   );
@@ -68,5 +73,33 @@ test("reads no more often than its interval unless the end of a turn forces it",
   assert.deepEqual(seen, ["a1"]);
 
   await watcher.sync(true);
+  assert.deepEqual(seen, ["a1", "a1"]);
+});
+
+test("stops following a subagent that has reported, and does not open it again", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "subagents-"));
+  const directory = path.join(root, "session", "subagents");
+  await mkdir(directory, { recursive: true });
+  await writeFile(path.join(directory, "agent-a1.jsonl"), record("first"));
+  const seen: string[] = [];
+  const settled = new Set<string>();
+  const watcher = new SubagentWatcher(
+    path.join(root, "session.jsonl"),
+    { translateSubagent: async (agentId) => void seen.push(agentId), subagentSettled: (agentId) => settled.has(agentId) },
+    root,
+    0,
+  );
+
+  await watcher.sync();
+  assert.deepEqual(seen, ["a1"]);
+
+  // The agent reports, so the read that saw its last step is the last read it gets.
+  settled.add("a1");
+  await writeFile(path.join(directory, "agent-a1.jsonl"), `${record("first")}${record("second")}`);
+  await watcher.sync();
+  assert.deepEqual(seen, ["a1", "a1"]);
+
+  await writeFile(path.join(directory, "agent-a1.jsonl"), `${record("first")}${record("second")}${record("third")}`);
+  await watcher.sync();
   assert.deepEqual(seen, ["a1", "a1"]);
 });

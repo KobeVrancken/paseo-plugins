@@ -7,8 +7,16 @@ import { agentIdFromFileName, subagentsDirectory } from "./subagent-transcript.t
 /** A subagent's steps are worth following closely, but not as closely as the session's own turn. */
 const POLL_INTERVAL_MS = 200;
 
+/** All the transcript watcher needs of one, which is what lets a test stand in for it. */
+export type SubagentReads = {
+  sync(force?: boolean): Promise<void>;
+  open(): void;
+  close(): void;
+};
+
 export type SubagentSink = {
   translateSubagent(agentId: string, records: TranscriptRecord[]): Promise<void>;
+  subagentSettled(agentId: string): boolean;
 };
 
 /**
@@ -22,6 +30,8 @@ export class SubagentWatcher {
   private readonly cwd: string;
   private readonly pollIntervalMs: number;
   private readonly readers = new Map<string, TranscriptReader>();
+  /** Agents already read to the end, so discovering their files again does not reopen them. */
+  private readonly finished = new Set<string>();
   private lastPoll = 0;
   private closed = false;
 
@@ -42,6 +52,13 @@ export class SubagentWatcher {
     for (const [agentId, reader] of [...this.readers]) {
       const { records } = await reader.read().catch(() => ({ records: [] as TranscriptRecord[] }));
       if (records.length > 0) await this.sink.translateSubagent(agentId, records);
+      // The read above is the last one an agent that has reported needs. A session that runs
+      // hundreds of them would otherwise go on stat'ing every finished transcript five times a
+      // second for the rest of its life.
+      if (this.sink.subagentSettled(agentId)) {
+        this.readers.delete(agentId);
+        this.finished.add(agentId);
+      }
     }
   }
 
@@ -70,7 +87,7 @@ export class SubagentWatcher {
     }
     for (const name of names.sort()) {
       const agentId = agentIdFromFileName(name);
-      if (agentId === null || this.readers.has(agentId)) continue;
+      if (agentId === null || this.readers.has(agentId) || this.finished.has(agentId)) continue;
       this.readers.set(agentId, new TranscriptReader(agentId, this.cwd, { filePath: path.join(this.directory, name) }));
     }
   }
