@@ -1,6 +1,7 @@
 import type {
   AgentActivity,
   PresenceSnapshot,
+  Project,
   WorkspaceActivity,
   WorkspaceStatus,
 } from "./presence.shared.ts";
@@ -61,14 +62,36 @@ export function toAgentActivities(entries: readonly unknown[]): AgentActivity[] 
   return activities;
 }
 
+/** A project with no workspace open is still assignable a detail level, so it is read the same way. */
+export function toProjects(entries: readonly unknown[]): Project[] {
+  const projects: Project[] = [];
+  for (const entry of entries) {
+    const project = entry as Record<string, unknown> | null;
+    if (!project || typeof project.projectRootPath !== "string") continue;
+    projects.push({
+      rootPath: project.projectRootPath,
+      displayName:
+        typeof project.projectDisplayName === "string" && project.projectDisplayName.length > 0
+          ? project.projectDisplayName
+          : project.projectRootPath,
+    });
+  }
+  return projects;
+}
+
 export function toPresenceSnapshot(
   workspaceEntries: readonly unknown[],
   agentEntries: readonly unknown[],
+  projectEntries: readonly unknown[],
 ): PresenceSnapshot {
   const workspaces: WorkspaceActivity[] = [];
   for (const entry of workspaceEntries) {
     const workspace = toWorkspaceActivity(entry);
     if (workspace) workspaces.push(workspace);
   }
-  return { workspaces, agents: toAgentActivities(agentEntries) };
+  return {
+    workspaces,
+    agents: toAgentActivities(agentEntries),
+    projects: toProjects(projectEntries),
+  };
 }

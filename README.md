@@ -24,11 +24,19 @@ pnpm typecheck
 pnpm test
 ```
 
-Enable Paseo plugins, then install each plugin from its own directory:
+Enable Paseo plugins, then install each plugin by its directory in this repository:
 
 ```sh
-paseo plugin install "/absolute/path/to/paseo-plugins/plugins/claude-tty"
+paseo plugin add sleeyax/paseo-plugins --path plugins/discord-rich-presence
 paseo plugin ls
+```
+
+Paseo clones the repository itself and tracks the default branch, so `paseo plugin update <id>` and `paseo plugin status` keep an installation current. `claude-tty` is the exception: it manages the adapter in the checkout it was installed from and that adapter has to be built, which a Git installation never does, so it is installed from a clone by absolute path.
+
+To work on a plugin, install it from the working copy instead:
+
+```sh
+paseo plugin install "/absolute/path/to/paseo-plugins/plugins/discord-rich-presence"
 ```
 
 After making changes, run `paseo plugin reload <id>`. Paseo does not hot-reload plugins, and reloading is the compile check for the client and server bundles built from `index.ts`.

@@ -13,8 +13,10 @@ Show your current Paseo activity on Discord. The Paseo daemon and Discord app mu
 ## Installation
 
 ```sh
-paseo plugin install "/absolute/path/to/paseo-plugins/plugins/discord-rich-presence"
+paseo plugin add sleeyax/paseo-plugins --path plugins/discord-rich-presence
 ```
+
+Paseo tracks the default branch from there, so `paseo plugin update discord-rich-presence` picks up new releases without a clone. `paseo plugin status` says what is installed against what is available.
 
 The plugin uses a shared Paseo Discord application by default. Open **Discord Rich Presence** in the Paseo sidebar to see the connection status and change its settings.
 
@@ -32,7 +34,7 @@ Native, Snap, and Flatpak Discord installations are supported. The plugin reconn
 
 The second line counts only the project named on the first, so work in your other projects never shows through.
 
-**All projects** sets the level every project follows. Each project beneath it starts on **Default** and can be given a level of its own instead, saved by project path until you set it back to **Default** — a project you hid stays listed after you close it, so you can put it back. Workspace titles can contain task details, so review them before leaving a project on **Detailed**.
+**All projects** sets the level every project follows. Every project Paseo knows is listed beneath it, whether or not it has a workspace open, and each starts on **Default**. Giving one a level of its own saves it by project path until you set it back to **Default**. Workspace titles can contain task details, so review them before leaving a project on **Detailed**.
 
 A project set to **Hidden** is never named: Paseo names another project with active work when possible, and otherwise falls back to `Using Paseo`.
 
@@ -93,4 +95,4 @@ scripts/render-assets.sh /path/to/paseo
 
 ## Attribution
 
-The files in `assets/` are derived from the AGPLv3-licensed artwork in [getpaseo/paseo](https://github.com/getpaseo/paseo/tree/main/packages/app/assets/images).
+The files in `assets/` are derived from the Apache-2.0-licensed artwork in [getpaseo/paseo](https://github.com/getpaseo/paseo/tree/main/packages/app/assets/images). Paseo relicensed from AGPLv3 to Apache-2.0; note that the licence's trademark clause does not grant any right to Paseo's name or marks.

@@ -1,10 +1,11 @@
 import type {
-  DetailLevel,
+  KnownProject,
   PresenceActivity,
   PresenceSettings,
   PresenceSnapshot,
 } from "../presence.shared.ts";
 import { renderActivity } from "../presence.shared.ts";
+import { knownProjects } from "../settings.shared.ts";
 import { decideWrite, MIN_WRITE_INTERVAL_MS } from "../throttle.shared.ts";
 import { DaemonConnection, type DaemonState } from "./daemon.server.ts";
 import { DiscordConnection, type DiscordState } from "./discord.server.ts";
@@ -14,13 +15,6 @@ import { SettingsStore } from "./settings-store.server.ts";
 const REFRESH_DEBOUNCE_MS = MIN_WRITE_INTERVAL_MS;
 /** Covers anything the update stream misses, including a subscription lost to a reconnect. */
 const REFRESH_INTERVAL_MS = 60_000;
-
-export type KnownProject = {
-  rootPath: string;
-  displayName: string;
-  /** null when the project follows the default level. */
-  level: DetailLevel | null;
-};
 
 export type PresenceStatus = {
   settings: PresenceSettings;
@@ -36,7 +30,7 @@ export class PresenceService {
   private readonly daemon: DaemonConnection;
   private readonly discord: DiscordConnection;
   private settings: PresenceSettings | null = null;
-  private snapshot: PresenceSnapshot = { workspaces: [], agents: [] };
+  private snapshot: PresenceSnapshot = { workspaces: [], agents: [], projects: [] };
   private activity: PresenceActivity | null = null;
   private lastPayload: string | null = null;
   private lastSentAt: number | null = null;
@@ -65,7 +59,7 @@ export class PresenceService {
       discord: this.discord.currentState(),
       daemon: this.daemon.currentState(),
       activity: this.activity,
-      projects: this.knownProjects(settings),
+      projects: knownProjects(settings, this.snapshot),
     };
   }
 
@@ -74,25 +68,6 @@ export class PresenceService {
     this.applyConnection();
     await this.refresh();
     return this.status();
-  }
-
-  /** A project given a level of its own stays listed with no workspace open, so the choice can be undone. */
-  private knownProjects(settings: PresenceSettings): KnownProject[] {
-    const projects = new Map<string, KnownProject>();
-    for (const project of settings.projectDetailLevels) {
-      projects.set(project.rootPath, project);
-    }
-    for (const workspace of this.snapshot.workspaces) {
-      if (projects.has(workspace.projectRootPath)) continue;
-      projects.set(workspace.projectRootPath, {
-        rootPath: workspace.projectRootPath,
-        displayName: workspace.projectDisplayName,
-        level: null,
-      });
-    }
-    return [...projects.values()].sort((left, right) =>
-      left.displayName.localeCompare(right.displayName),
-    );
   }
 
   private applyConnection(): void {

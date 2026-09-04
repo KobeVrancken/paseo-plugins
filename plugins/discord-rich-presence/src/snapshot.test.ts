@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { renderActivity, DEFAULT_SETTINGS } from "./presence.shared.ts";
-import { toAgentActivities, toPresenceSnapshot, toWorkspaceActivity } from "./snapshot.shared.ts";
+import {
+  toAgentActivities,
+  toPresenceSnapshot,
+  toProjects,
+  toWorkspaceActivity,
+} from "./snapshot.shared.ts";
 
 function fixture(name: string): unknown[] {
   return JSON.parse(readFileSync(path.join(import.meta.dirname, "fixtures", `${name}.json`), "utf8"));
@@ -11,6 +16,7 @@ function fixture(name: string): unknown[] {
 
 const workspaceEntries = fixture("workspaces");
 const agentEntries = fixture("agents");
+const projectEntries = fixture("projects");
 
 test("reads the fields the presence needs off a live workspace payload", () => {
   const workspace = toWorkspaceActivity(workspaceEntries[0]);
@@ -58,8 +64,23 @@ test("ignores archived and closed agents", () => {
   assert.deepEqual(toAgentActivities(gone), []);
 });
 
+test("lists a registered project that has no workspace open", () => {
+  const projects = toProjects(projectEntries);
+  assert.equal(projects.length, 4);
+  assert.deepEqual(
+    projects.filter((project) => !workspaceEntries.some((entry) => (entry as { projectRootPath?: string }).projectRootPath === project.rootPath)),
+    [{ rootPath: "/home/dev/scratch", displayName: "scratch" }],
+  );
+});
+
+test("falls back to the root path when a registered project has no display name", () => {
+  assert.deepEqual(toProjects([{ projectRootPath: "/home/dev/thing" }, { projectId: "prj_x" }]), [
+    { rootPath: "/home/dev/thing", displayName: "/home/dev/thing" },
+  ]);
+});
+
 test("builds a presence from the live payloads", () => {
-  const snapshot = toPresenceSnapshot(workspaceEntries, agentEntries);
+  const snapshot = toPresenceSnapshot(workspaceEntries, agentEntries, projectEntries);
   const now = Date.parse("2026-08-26T11:10:00.000Z");
   const activity = renderActivity(
     snapshot,
@@ -71,4 +92,6 @@ test("builds a presence from the live payloads", () => {
   // Each of the three workspaces is its own project, and the running agent belongs to none of them.
   assert.equal(activity?.state, "1 workspace · idle");
   assert.equal(activity?.smallImageKey, "idle");
+  // The registered project with nothing running is listed but never named by the presence.
+  assert.equal(snapshot.projects.length, 4);
 });

@@ -5,6 +5,7 @@ The reload is the only compile check of the two bundles the daemon builds.
 Do this yourself; never leave it to the user.
 
 `paseo plugin install <directory>` works against a 0.6 daemon and writes the `plugins` entry itself, but the plugin only loads once `pluginsEnabled` is true in `~/.paseo/config.json` and `paseo reload` has run.
+The v0.7 `paseo plugin add <repo>` form is not usable for this plugin: a Git installation runs no package manager, and the adapter this plugin manages has to be built.
 
 To exercise a handler without a client, invoke it over the daemon's own plugin RPC:
 
@@ -50,11 +51,12 @@ The entry must default-export one function taking one named parameter with a blo
 
 ## The panel is styled off paseo's own scale
 
-`src/client/theme.client.ts` and `src/client/ui.client.tsx` are copies of the Discord plugin's, because the host hands plugins six flat colours and no metrics and each plugin directory has to bundle from its own root.
+`src/client/theme.client.ts` and `src/client/ui.client.tsx` are copies of the Discord plugin's, because the host hands plugins no metrics and each plugin directory has to bundle from its own root.
 Build new controls out of those tokens rather than out of literals, and keep the two files in step with their originals.
+Icons come from `@getpaseo/plugin/react-native`, by Lucide name; nothing here draws its own.
 
 ## Tests
 
 `pnpm test` is `node --test "src/**/*.test.ts"` through Node's type stripping, so no TypeScript that has to be emitted and relative imports keep their `.ts` extension.
 Tests must not import `contracts.shared.ts`, because `@getpaseo/plugin/server` only exists inside the daemon — keep the decisions in modules the tests can reach.
-`@getpaseo/client` is pinned to 0.6.1 here, not the 0.4 the other plugins use, because `paseo.config` and `paseo.providers` do not exist before that.
+`@getpaseo/client` is on 0.7.0 across the workspace; this plugin needs at least 0.6, because `paseo.config` and `paseo.providers` do not exist before that.

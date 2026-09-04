@@ -1,0 +1,42 @@
+[
+  {
+    "projectId": "prj_1affeee258225ac1",
+    "projectKey": "prj_1affeee258225ac1",
+    "projectDisplayName": "todo-app",
+    "projectCustomName": null,
+    "projectCustomIconRevision": null,
+    "projectIconRevision": "icon_2f6b1c",
+    "projectRootPath": "/home/dev/todo-app",
+    "projectKind": "git"
+  },
+  {
+    "projectId": "prj_8937f43d44e1c6bc",
+    "projectKey": "prj_8937f43d44e1c6bc",
+    "projectDisplayName": "acme-billing",
+    "projectCustomName": null,
+    "projectCustomIconRevision": null,
+    "projectIconRevision": "icon_9a41d0",
+    "projectRootPath": "/home/dev/work/acme-billing",
+    "projectKind": "git"
+  },
+  {
+    "projectId": "prj_fba306a10c3cc1bc",
+    "projectKey": "prj_fba306a10c3cc1bc",
+    "projectDisplayName": "dotfiles",
+    "projectCustomName": null,
+    "projectCustomIconRevision": null,
+    "projectIconRevision": "icon_c07e35",
+    "projectRootPath": "/home/dev/dotfiles",
+    "projectKind": "git"
+  },
+  {
+    "projectId": "prj_3d5c9e0b74a2f118",
+    "projectKey": "prj_3d5c9e0b74a2f118",
+    "projectDisplayName": "scratch",
+    "projectCustomName": null,
+    "projectCustomIconRevision": null,
+    "projectIconRevision": "icon_5b8802",
+    "projectRootPath": "/home/dev/scratch",
+    "projectKind": "directory"
+  }
+]

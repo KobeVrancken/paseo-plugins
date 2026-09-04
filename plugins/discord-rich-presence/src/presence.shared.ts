@@ -35,6 +35,12 @@ export type ProjectDetailLevel = Project & {
   level: DetailLevel;
 };
 
+/** A project the settings surface can assign a level to. */
+export type KnownProject = Project & {
+  /** null when the project follows the default level. */
+  level: DetailLevel | null;
+};
+
 export type PresenceSettings = {
   enabled: boolean;
   applicationId: string | null;
@@ -45,6 +51,8 @@ export type PresenceSettings = {
 export type PresenceSnapshot = {
   workspaces: WorkspaceActivity[];
   agents: AgentActivity[];
+  /** Every project the daemon has registered. The presence itself is computed from activity, so this only feeds the settings listing. */
+  projects: Project[];
 };
 
 /**

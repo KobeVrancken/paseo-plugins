@@ -2,7 +2,9 @@ import {
   DEFAULT_SETTINGS,
   DETAIL_LEVELS,
   type DetailLevel,
+  type KnownProject,
   type PresenceSettings,
+  type PresenceSnapshot,
   type Project,
   type ProjectDetailLevel,
 } from "./presence.shared.ts";
@@ -73,4 +75,32 @@ export function withProjectDetailLevel(
     ...settings,
     projectDetailLevels: level === null ? without : [...without, { ...project, level }],
   };
+}
+
+/**
+ * Every project the daemon has registered, so a level can be set on one that is not running.
+ * The saved settings only contribute a name for a project the daemon has since forgotten, which
+ * is what keeps a level assigned to it undoable.
+ */
+export function knownProjects(
+  settings: PresenceSettings,
+  snapshot: PresenceSnapshot,
+): KnownProject[] {
+  const names = new Map<string, string>();
+  for (const project of settings.projectDetailLevels) names.set(project.rootPath, project.displayName);
+  for (const workspace of snapshot.workspaces) {
+    names.set(workspace.projectRootPath, workspace.projectDisplayName);
+  }
+  for (const project of snapshot.projects) names.set(project.rootPath, project.displayName);
+
+  const levels = new Map(
+    settings.projectDetailLevels.map((project) => [project.rootPath, project.level] as const),
+  );
+  return [...names]
+    .map(([rootPath, displayName]) => ({
+      rootPath,
+      displayName,
+      level: levels.get(rootPath) ?? null,
+    }))
+    .sort((left, right) => left.displayName.localeCompare(right.displayName));
 }
