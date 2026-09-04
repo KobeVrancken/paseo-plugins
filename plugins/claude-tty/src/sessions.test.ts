@@ -111,7 +111,7 @@ test("names a session after the Paseo agent holding it", () => {
   assert.deepEqual(entry?.agent, { id: "agent-a", title: "Fix the pipeline" });
 });
 
-test("reads an agent the SDK hands over without the daemon's wrapper", () => {
+test("tolerates an agent handed over without the daemon's wrapper", () => {
   const entries = joinSessions([session("a", 5)], [], isAlive);
   const [entry] = attachAgents(entries, [{ id: "agent-a", title: null, persistence: { sessionId: "a" } }]);
   assert.deepEqual(entry?.agent, { id: "agent-a", title: null });

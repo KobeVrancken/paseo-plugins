@@ -135,8 +135,8 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 /**
  * Paseo keys an ACP agent by the session ID the adapter handed it, which is this file stem, so the
- * two lists join on it. The daemon answers with `{ agent, project }` entries while the SDK types say
- * the agent itself, so both shapes are read.
+ * two lists join on it. The daemon answers with `{ agent, project }` entries; a bare agent is read
+ * too, as tolerance rather than because anything hands one over.
  */
 export function attachAgents(entries: readonly SessionEntry[], agents: readonly unknown[]): SessionEntry[] {
   const bySessionId = new Map<string, SessionAgent>();

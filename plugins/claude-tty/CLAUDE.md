@@ -65,7 +65,8 @@ Concurrent stops of one session are coalesced onto a single promise: the adapter
 ## Agent titles are a courtesy and are budgeted like one
 
 A session row is named after the Paseo agent holding it, joined on the ACP session ID: the daemon stores it as an agent's `runtimeInfo.sessionId` and `persistence.sessionId`, and it is this plugin's file stem.
-`paseo.agents.list()` is typed as returning agents but answers with the daemon's `{ agent, project }` entries, so both shapes are read.
+`paseo.agents.list()` answers with the daemon's `{ agent, project }` entries, and the SDK types say so: its `entries` are `FetchAgentsEntry`, which is that wrapper and not the agent itself.
+A bare agent is read as well, but only as tolerance for a shape the SDK has never handed over — not because the types and the wire disagree.
 
 The lookup never gates a decision.
 Mutations read the state directory through `readState`, which does not touch the daemon; only the payload handed back is decorated.
