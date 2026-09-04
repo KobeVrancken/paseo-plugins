@@ -1492,3 +1492,78 @@ test("stops waiting when the agent that reported never wakes Claude to answer fo
     await rm(root, { force: true, recursive: true });
   }
 });
+
+test("closes a background agent's card when the session it ran in is suspended", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-subagent-suspend-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = "/work/agents-suspend";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(runtimeRoot, { recursive: true });
+  const updates: SessionNotification[] = [];
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    let pty!: FakePty;
+    pty = new FakePty(3900, (data) => {
+      if (data === "\u0004") setImmediate(() => pty.emitExit());
+    });
+    spawned = pty;
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection(updates), {
+    spawnPty,
+    runtimeRoot,
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    transcriptPollIntervalMs: 10,
+    subagentPollMs: 10,
+    subagentSilenceMs: 30,
+    idleTimeoutMs: 20,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "launch an agent" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 2);
+    await writeFile(
+      path.join(projectDirectory, `${session.sessionId}.jsonl`),
+      `${[
+        JSON.stringify({
+          type: "assistant",
+          uuid: "launcher",
+          message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Fix the findings" } }] },
+        }),
+        JSON.stringify({
+          type: "user",
+          uuid: "launched",
+          toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+          message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+        }),
+      ].join("\n")}\n`,
+    );
+    // The agent goes quiet without ever reporting, so the turn gives up on it and the session goes idle.
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+    // The suspension stops Claude, and with it any agent it was still running.
+    await waitFor(() => updates.some((sent) => sent.update.sessionUpdate === "tool_call_update" && sent.update.status === "failed"));
+
+    const closed = updates.map((update) => update.update).filter((update) => update.sessionUpdate === "tool_call_update").at(-1);
+    assert.ok(closed?.sessionUpdate === "tool_call_update");
+    assert.equal(closed.toolCallId, "agent-tool");
+    assert.equal(closed.status, "failed");
+    assert.deepEqual(closed.content, [
+      { type: "content", content: { type: "text", text: "Claude stopped before this agent reported back." } },
+    ]);
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});

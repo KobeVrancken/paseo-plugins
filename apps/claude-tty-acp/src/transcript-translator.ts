@@ -61,6 +61,9 @@ const TOOL_KINDS: Record<string, ToolKind> = {
 /** The tools that hand work to a subagent, whose own transcript is where that work then happens. */
 const AGENT_TOOLS = new Set(["Agent", "Task"]);
 
+/** The last step on the card of a subagent whose session stopped before it said how it went. */
+const UNREPORTED_AGENT = "Claude stopped before this agent reported back.";
+
 /**
  * A subagent and the tool call standing for it. Nested subagents share their spawner's card, so one
  * card holds one log and an update never replaces another agent's steps with its own.
@@ -82,6 +85,8 @@ export class TranscriptTranslator {
   private readonly emittedTools = new Set<string>();
   private readonly unknownKinds = new Set<string>();
   private readonly agentCalls = new Set<string>();
+  /** The tool calls Paseo is still showing as running, which is what a stopped session has to close. */
+  private readonly openToolCalls = new Set<string>();
   private readonly subagents = new Map<string, SubagentCard>();
   private readonly subagentsByToolCall = new Map<string, string>();
   private lastSubagentActivity = 0;
@@ -232,6 +237,7 @@ export class TranscriptTranslator {
     if (AGENT_TOOLS.has(name)) this.agentCalls.add(toolCallId);
     if (this.emittedTools.has(toolCallId)) return;
     this.emittedTools.add(toolCallId);
+    this.openToolCalls.add(toolCallId);
     const locations = toolLocations(input, this.cwd);
     const content = toolContents(name, input, this.cwd);
     await this.send({
@@ -260,6 +266,7 @@ export class TranscriptTranslator {
     if (this.emitted.has(resultKey)) return;
     this.emitted.add(resultKey);
     const content = resultContent(block.content);
+    this.openToolCalls.delete(toolCallId);
     await this.send({
       sessionUpdate: "tool_call_update",
       toolCallId,
@@ -378,9 +385,29 @@ export class TranscriptTranslator {
     return card;
   }
 
+  /**
+   * Closes every tool call that is still shown as running. What closes one is written by the Claude
+   * process that ran it — a result, or the notification that reports an asynchronous agent — so once
+   * that process has stopped nothing is coming, and a card left open goes on saying it is working.
+   */
+  async settleOpenToolCalls(): Promise<void> {
+    for (const card of new Set(this.subagents.values())) {
+      if (card.status !== "in_progress" || card.toolCallId === null) continue;
+      card.status = "failed";
+      card.outstanding = false;
+      card.log.append(UNREPORTED_AGENT);
+      await this.publishSubagent(card);
+    }
+    for (const toolCallId of [...this.openToolCalls]) {
+      this.openToolCalls.delete(toolCallId);
+      await this.send({ sessionUpdate: "tool_call_update", toolCallId, status: "failed" });
+    }
+  }
+
   /** A tool call's content is replaced rather than added to, so the whole tail goes out each time. */
   private async publishSubagent(card: SubagentCard): Promise<void> {
     if (card.toolCallId === null) return;
+    if (card.status !== "in_progress") this.openToolCalls.delete(card.toolCallId);
     const text = card.log.empty ? "Started; waiting for its first step." : card.log.text();
     await this.send({
       sessionUpdate: "tool_call_update",

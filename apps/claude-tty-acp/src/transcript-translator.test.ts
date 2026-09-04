@@ -358,3 +358,70 @@ test("counts the agents a turn is still waiting on, and ignores the ones history
   assert.equal(translator.runningSubagents, 0);
   assert.ok(translator.subagentActivityAt >= activityBefore);
 });
+
+test("closes the tool calls a stopped session left running, and leaves the ones it answered", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: {
+        content: [
+          { type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Fix the findings" } },
+          { type: "tool_use", id: "done-agent-tool", name: "Agent", input: { description: "Review the branch" } },
+          { type: "tool_use", id: "bash-tool", name: "Bash", input: { command: "pnpm test" } },
+          { type: "tool_use", id: "read-tool", name: "Read", input: { file_path: "src/app.ts" } },
+        ],
+      },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1", description: "Fix the findings" },
+      message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+    },
+    {
+      type: "user",
+      uuid: "launched-done",
+      toolUseResult: { isAsync: true, status: "async_launched", agentId: "a2", description: "Review the branch" },
+      message: { content: [{ type: "tool_result", tool_use_id: "done-agent-tool", content: [] }] },
+    },
+    {
+      type: "user",
+      uuid: "reported",
+      message: { content: "<task-notification> <task-id>a2</task-id> <status>completed</status> <summary>Reviewed</summary> </task-notification>" },
+    },
+    {
+      type: "user",
+      uuid: "read-result",
+      message: { content: [{ type: "tool_result", tool_use_id: "read-tool", content: [{ type: "text", text: "contents" }] }] },
+    },
+  ]);
+  await translator.translateSubagent("a1", [
+    { type: "assistant", uuid: "sub-1", message: { content: [{ type: "text", text: "Reading the diff" }] } },
+  ]);
+
+  notifications.length = 0;
+  await translator.settleOpenToolCalls();
+  await translator.settleOpenToolCalls();
+
+  const updates = notifications.map((notification) => notification.update);
+  assert.equal(updates.length, 2);
+  assert.ok(updates[0]?.sessionUpdate === "tool_call_update");
+  assert.equal(updates[0].toolCallId, "agent-tool");
+  assert.equal(updates[0].status, "failed");
+  assert.deepEqual(updates[0].content, [
+    { type: "content", content: { type: "text", text: "Reading the diff\nClaude stopped before this agent reported back." } },
+  ]);
+  assert.ok(updates[1]?.sessionUpdate === "tool_call_update");
+  assert.equal(updates[1].toolCallId, "bash-tool");
+  assert.equal(updates[1].status, "failed");
+  assert.equal(translator.runningSubagents, 0);
+});

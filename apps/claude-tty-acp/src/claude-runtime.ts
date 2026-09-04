@@ -308,6 +308,7 @@ export class ClaudeRuntime {
       }
     }
     await this.transcript.close();
+    await this.settleOpenToolCalls();
     this.screen.dispose();
     await this.removeRuntimeDirectory();
   }
@@ -465,9 +466,12 @@ export class ClaudeRuntime {
     this.pty = null;
     this.hookRegistration?.unregister();
     this.hookRegistration = null;
-    void this.transcript.close().catch((transcriptError) => {
-      writeLog({ level: "warn", message: "Failed to stop Claude transcript watcher", sessionId: this.sessionId, error: errorMessage(transcriptError) });
-    });
+    void this.transcript
+      .close()
+      .catch((transcriptError) => {
+        writeLog({ level: "warn", message: "Failed to stop Claude transcript watcher", sessionId: this.sessionId, error: errorMessage(transcriptError) });
+      })
+      .finally(() => this.settleOpenToolCalls());
     void this.removeRuntimeDirectory().catch((cleanupError) => {
       writeLog({ level: "warn", message: "Failed to remove Claude runtime directory", sessionId: this.sessionId, error: errorMessage(cleanupError) });
     });
@@ -579,6 +583,19 @@ export class ClaudeRuntime {
     });
   }
 
+  /**
+   * Anything Claude was running has stopped with it, so the cards standing for that work are closed
+   * rather than left turning. Never worth failing a shutdown over: a session reloaded later replays
+   * its transcript, which closes them again.
+   */
+  private async settleOpenToolCalls(): Promise<void> {
+    try {
+      await this.translator.settleOpenToolCalls();
+    } catch (error) {
+      writeLog({ level: "warn", message: "Could not close the tool calls a stopped session left running", sessionId: this.sessionId, error: errorMessage(error) });
+    }
+  }
+
   private releaseSubagentHold(): void {
     if (this.subagentHold) clearInterval(this.subagentHold);
     this.subagentHold = null;
@@ -641,7 +658,10 @@ export class ClaudeRuntime {
     this.intentionalExit = null;
     this.hookRegistration?.unregister();
     this.hookRegistration = null;
+    // The last thing written may be the notification that closes an agent, and the reader has to be open to see it.
+    await this.transcript.flushUntilStable();
     await this.transcript.close();
+    await this.settleOpenToolCalls();
     await this.removeRuntimeDirectory();
   }
 
