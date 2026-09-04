@@ -2,7 +2,7 @@ import { readdir, readFile, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { PaseoApi } from "@getpaseo/client";
 import type { SessionsPayload } from "../contracts.shared.ts";
-import { ownsLock, type ProcessIdentity } from "../lock-owner.shared.ts";
+import { lockOwnerRefusal, ownsLock, type LockOwnerRefusal, type ProcessIdentity } from "../lock-owner.shared.ts";
 import { defaultStateDirectory, locksDirectory, sessionsDirectory } from "../paths.shared.ts";
 import {
   LOCK_SUFFIX,
@@ -113,19 +113,25 @@ export async function quarantineSession(paseo: PaseoApi, id: string): Promise<Se
   return listSessions(paseo);
 }
 
-/** Every refusal names the process and says that nothing was signalled, because nothing was. */
 async function requireOwner(lock: SessionLock, id: string): Promise<void> {
   const identity = await identify(lock.pid);
   if (identity === null) {
     throw new Error(`Could not read what process ${lock.pid} is running, so it was left alone.`);
   }
-  if (identity.zombie) {
-    throw new Error(`Process ${lock.pid} has already exited and is waiting to be reaped. Release the lock once it is gone.`);
-  }
-  if (!ownsLock(identity, lock)) {
-    throw new Error(
-      `Process ${lock.pid} is not the adapter that took the lock on session ${id} — a PID outlives the process that earned it — so it was left alone.`,
-    );
+  const refusal = lockOwnerRefusal(identity, lock);
+  if (refusal !== null) throw new Error(refusalMessage(refusal, lock.pid, id));
+}
+
+/** Every refusal names the process and says that nothing was signalled, because nothing was. */
+function refusalMessage(refusal: LockOwnerRefusal, pid: number, id: string): string {
+  switch (refusal) {
+    case "zombie":
+      return `Process ${pid} has already exited and is waiting to be reaped. Release the lock once it is gone.`;
+    case "unknown-start":
+      return `This host would not say when process ${pid} started, and without that a stop cannot tell the adapter from something that inherited its PID, so it was left alone.`;
+    case "not-adapter":
+    case "started-after-lock":
+      return `Process ${pid} is not the adapter that took the lock on session ${id} — a PID outlives the process that earned it — so it was left alone.`;
   }
 }
 

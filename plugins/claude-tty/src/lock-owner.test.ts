@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isAdapterCommand, ownsLock, type ProcessIdentity } from "./lock-owner.shared.ts";
+import { isAdapterCommand, lockOwnerRefusal, ownsLock, type ProcessIdentity } from "./lock-owner.shared.ts";
 import { adapterBinaryPath, adapterEntryPath } from "./paths.shared.ts";
 import type { SessionLock } from "./sessions.shared.ts";
 
@@ -52,3 +52,17 @@ test("refuses a process that cannot be the lock's owner", () => {
   assert.ok(!ownsLock(identity({ command: "claude --session-id a" }), LOCK));
 });
 
+
+test("says which check refused the process, not just that one did", () => {
+  assert.equal(lockOwnerRefusal(identity(), LOCK), null);
+  assert.equal(lockOwnerRefusal(identity({ zombie: true }), LOCK), "zombie");
+  assert.equal(lockOwnerRefusal(identity({ command: "claude --session-id a" }), LOCK), "not-adapter");
+  assert.equal(lockOwnerRefusal(identity({ startedAt: 900_000 }), LOCK), "started-after-lock");
+  // A host that will not give a start time has not found a stranger; it has failed to look.
+  assert.equal(lockOwnerRefusal(identity({ startedAt: null }), LOCK), "unknown-start");
+});
+
+test("reads a zombie as a zombie whatever its command line says", () => {
+  // /proc leaves a reaped process with no command line of its own.
+  assert.equal(lockOwnerRefusal(identity({ command: "", zombie: true }), LOCK), "zombie");
+});

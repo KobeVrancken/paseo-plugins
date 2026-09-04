@@ -38,14 +38,26 @@ export function isAdapterCommand(command: string): boolean {
   return ADAPTER_COMMAND.test(command);
 }
 
+/** Why a process may not be signalled on a lock's behalf, phrased so a caller can say which it was. */
+export type LockOwnerRefusal = "zombie" | "not-adapter" | "unknown-start" | "started-after-lock";
+
 /**
  * A PID outlives the process that earned it, so the owner of a lock is identified rather than
  * assumed. Two live processes cannot share a PID, so a process that was already running when the
  * lock was written and still holds that PID is the process that wrote it — which is what makes the
  * start time worth more than the command line, and what keeps a *second* adapter that inherited the
  * PID from being mistaken for this one.
+ *
+ * A host that will not give a start time is its own answer: the check cannot be made, which is not
+ * the same as making it and finding a stranger.
  */
+export function lockOwnerRefusal(identity: ProcessIdentity, lock: SessionLock): LockOwnerRefusal | null {
+  if (identity.zombie) return "zombie";
+  if (!isAdapterCommand(identity.command)) return "not-adapter";
+  if (identity.startedAt === null) return "unknown-start";
+  return identity.startedAt <= lock.createdAt + START_SLACK_MS ? null : "started-after-lock";
+}
+
 export function ownsLock(identity: ProcessIdentity, lock: SessionLock): boolean {
-  if (identity.zombie || !isAdapterCommand(identity.command)) return false;
-  return identity.startedAt !== null && identity.startedAt <= lock.createdAt + START_SLACK_MS;
+  return lockOwnerRefusal(identity, lock) === null;
 }
