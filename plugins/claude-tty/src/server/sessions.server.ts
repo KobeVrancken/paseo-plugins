@@ -239,6 +239,9 @@ function splitFirstWord(line: string): [string, string] {
 }
 
 function signal(pid: number, name: NodeJS.Signals): void {
+  // `process.kill` reads 0 and negatives as process groups, and an unreadable lock is recorded as
+  // pid -1, so the one number that must never reach here has a way of being written down.
+  if (!Number.isInteger(pid) || pid <= 0) throw new Error(`${pid} is not a process this can signal.`);
   try {
     process.kill(pid, name);
   } catch (error) {
