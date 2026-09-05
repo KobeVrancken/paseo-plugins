@@ -38,6 +38,8 @@ The **Suspend idle Claude** setting controls how long a native Claude process re
 
 Suspending stops the PTY and any background tasks it owns, but does not close or archive the Paseo agent. The adapter keeps the persisted session mapping, and the next prompt automatically launches `claude --resume` with the same Claude session, model, and mode. Background task notifications do not reset the timer.
 
+A session waiting on a subagent is not suspended at all. The adapter holds the turn open until every agent it launched has reported, which is also what makes Paseo show the session as busy while they work, and a suspension stands aside for an active turn and tries again later. A turn whose agents have written nothing for fifteen minutes stops waiting, so a stuck agent cannot keep a session alive indefinitely. Background commands are not agents and hold nothing open.
+
 The adapter reads the setting each time it schedules a suspension, so a change applies to sessions that are already open rather than only to the next adapter launch. A suspension also stands aside while a permission or question card is still waiting for an answer, and tries again later.
 
 Setting `CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS` on the provider entry, or on the daemon itself, overrides this setting for the hosts that do it; the panel says so when the entry is what sets it.
@@ -49,6 +51,10 @@ An entry pointing at a different checkout is reported as a mismatch and left alo
 **Diagnostics** runs the host checks of the executable the daemon would actually launch — not the one this checkout builds — and shows Paseo's own provider diagnostic beneath them. A stale entry pointing somewhere else is exactly what that distinction catches.
 
 **Sessions** lists the adapter's saved sessions and the locks over them, each named after the Paseo agent holding it and saying when it was last prompted. That reads "last prompted" rather than "active" on purpose: the adapter stamps the time as a prompt starts, so a session an hour into one turn is still working.
+
+**Subagents** lists the subagents of every open session — what each was asked to do, whether it is running, and when it last did anything — and opens one to show the steps it has taken: how far into the run each happened, what it said, the command or path each tool call was handed, and the reason any of them failed. Only open sessions are listed, because a subagent runs inside its session's Claude process and stops with it. A subagent whose launch has since been compacted out of the session's transcript is still listed, named after the opening line of its prompt.
+
+The same work also streams into the tool call that launched it, in the conversation itself, which is where to watch one as it runs. It cannot be opened as a tab of its own: a subagent is not an ACP session or a Paseo agent but a loop inside the one Claude process, so there is nothing for Paseo to attach a tab to, and a plugin can only open a surface it contributes itself.
 
 **Stop** ends the adapter process holding an open session, which closes its Claude terminal. Nothing durable goes with it: the session file, the transcript, and the Paseo agent all survive, and the next prompt resumes the same Claude session.
 

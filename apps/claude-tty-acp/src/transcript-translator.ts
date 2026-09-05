@@ -11,6 +11,15 @@ import type {
 } from "@agentclientprotocol/sdk";
 import { writeLog } from "./log.ts";
 import { questionText } from "./question-text.ts";
+import {
+  launchedAgent,
+  notificationFailed,
+  parseTaskNotifications,
+  subagentProse,
+  subagentToolLine,
+  SubagentLog,
+  type TaskNotification,
+} from "./subagent-transcript.ts";
 import type { TranscriptRecord } from "./transcript-reader.ts";
 
 const IGNORED_RECORD_TYPES = new Set([
@@ -49,6 +58,27 @@ const TOOL_KINDS: Record<string, ToolKind> = {
   Write: "edit",
 };
 
+/** The tools that hand work to a subagent, whose own transcript is where that work then happens. */
+const AGENT_TOOLS = new Set(["Agent", "Task"]);
+
+/** The last step on the card of a subagent whose session stopped before it said how it went. */
+const UNREPORTED_AGENT = "Claude stopped before this agent reported back.";
+
+/**
+ * A subagent and the tool call standing for it. Nested subagents share their spawner's card, so one
+ * card holds one log and an update never replaces another agent's steps with its own.
+ */
+type SubagentCard = {
+  agentId: string;
+  toolCallId: string | null;
+  log: SubagentLog;
+  status: "in_progress" | "completed" | "failed";
+  /** Launched to run on its own and not yet reported, which is what keeps the session's turn open. */
+  outstanding: boolean;
+  /** Given up on by a turn that waited its bound out, so no later turn waits on it again. */
+  abandoned: boolean;
+};
+
 export class TranscriptTranslator {
   private readonly sessionId: string;
   private readonly cwd: string;
@@ -56,6 +86,14 @@ export class TranscriptTranslator {
   private readonly emitted = new Set<string>();
   private readonly emittedTools = new Set<string>();
   private readonly unknownKinds = new Set<string>();
+  private readonly agentCalls = new Set<string>();
+  /** The tool calls Paseo is still showing as running, which is what a stopped session has to close. */
+  private readonly openToolCalls = new Set<string>();
+  private readonly subagents = new Map<string, SubagentCard>();
+  private readonly subagentsByToolCall = new Map<string, string>();
+  private lastSubagentActivity = 0;
+  private lastAssistantActivity = 0;
+  private trackingSubagents = false;
   private lastPlan = "";
   private lastUsage = "";
   private assistantChunkCount = 0;
@@ -69,6 +107,52 @@ export class TranscriptTranslator {
 
   get assistantChunks(): number {
     return this.assistantChunkCount;
+  }
+
+  /** When Claude itself last said, thought or ran anything, whichever kind of record it was. */
+  get assistantActivityAt(): number {
+    return this.lastAssistantActivity;
+  }
+
+  /**
+   * Subagents that were launched to run on their own and have not reported. Nested subagents share
+   * their spawner's card, so they are counted once, as the one piece of work the session launched.
+   */
+  get runningSubagents(): number {
+    return new Set([...this.subagents.values()].filter((card) => card.outstanding)).size;
+  }
+
+  /** When any subagent last did anything, which is all there is to say whether one is still alive. */
+  get subagentActivityAt(): number {
+    return this.lastSubagentActivity;
+  }
+
+  /**
+   * Stops counting the agents a turn has given up waiting on. Their cards keep saying they are
+   * working, which is still true — nothing has reported — and they are closed when the process is.
+   * Without this every later turn holds for a poll interval and gives up again in the same breath.
+   */
+  abandonRunningSubagents(): void {
+    for (const card of this.subagents.values()) {
+      if (!card.outstanding) continue;
+      card.outstanding = false;
+      card.abandoned = true;
+    }
+  }
+
+  /** An agent that has reported writes nothing more, so its transcript stops being worth reading. */
+  subagentSettled(agentId: string): boolean {
+    const card = this.subagents.get(agentId);
+    return card !== undefined && card.status !== "in_progress";
+  }
+
+  /**
+   * Called as a prompt starts. Loading a persisted session replays its whole transcript first, and
+   * an agent launched in a session that has since been closed left its launch behind without the
+   * notification that would have ended it: history says it is running when nothing is.
+   */
+  trackRunningSubagents(): void {
+    this.trackingSubagents = true;
   }
 
   suppressNextAssistantText(text: string): void {
@@ -104,6 +188,7 @@ export class TranscriptTranslator {
     const content = message?.content;
     const recordId = stringValue(record.uuid) || stableUuid(JSON.stringify(record));
     if (record.isMeta !== true && record.isSidechain !== true) this.suppressedAssistantText = null;
+    await this.translateNotifications(content, recordId);
     if (typeof content === "string") {
       await this.emitUserText(`${recordId}:text`, recordId, content, record);
       return;
@@ -115,7 +200,7 @@ export class TranscriptTranslator {
       const key = `${recordId}:${index}:${String(block.type)}`;
       if (block.type === "text") await this.emitUserText(key, recordId, stringValue(block.text) || "", record);
       if (block.type === "image") await this.emitContent("user_message_chunk", key, recordId, imageContent(block));
-      if (block.type === "tool_result") await this.translateToolResult(block);
+      if (block.type === "tool_result") await this.translateToolResult(block, record);
     }
   }
 
@@ -176,8 +261,11 @@ export class TranscriptTranslator {
       await this.translatePlan(input.todos);
       return;
     }
+    if (AGENT_TOOLS.has(name)) this.agentCalls.add(toolCallId);
     if (this.emittedTools.has(toolCallId)) return;
     this.emittedTools.add(toolCallId);
+    this.openToolCalls.add(toolCallId);
+    this.lastAssistantActivity = Date.now();
     const locations = toolLocations(input, this.cwd);
     const content = toolContents(name, input, this.cwd);
     await this.send({
@@ -192,19 +280,194 @@ export class TranscriptTranslator {
     });
   }
 
-  private async translateToolResult(block: TranscriptRecord): Promise<void> {
+  private async translateToolResult(block: TranscriptRecord, record: TranscriptRecord): Promise<void> {
     const toolCallId = stringValue(block.tool_use_id);
     if (!toolCallId || !this.emittedTools.has(toolCallId)) return;
+    const launch = this.agentCalls.has(toolCallId) ? launchedAgent(record.toolUseResult) : null;
+    if (launch !== null) {
+      await this.linkSubagent(launch.agentId, toolCallId, launch.running);
+      // An asynchronous agent answers the moment it starts, so closing the card here would report a
+      // minutes-long agent as finished before it had done anything. It is closed by its notification.
+      if (launch.running) return;
+      // A synchronous one has already finished, and the result below is its report. Its card is
+      // settled on that, or a session stopping later would rewrite the report as a failure.
+      this.settleSubagentCard(launch.agentId, block.is_error === true);
+    }
     const resultKey = `${toolCallId}:result:${createHash("sha256").update(JSON.stringify(block)).digest("hex")}`;
     if (this.emitted.has(resultKey)) return;
     this.emitted.add(resultKey);
     const content = resultContent(block.content);
+    this.openToolCalls.delete(toolCallId);
     await this.send({
       sessionUpdate: "tool_call_update",
       toolCallId,
       status: block.is_error === true ? "failed" : "completed",
       rawOutput: block.content,
       ...(content.length > 0 ? { content } : {}),
+    });
+  }
+
+  /**
+   * The end of an asynchronous agent is reported in the next user turn and nowhere else, and the
+   * text carrying it is scrubbed before the user sees it, so it is read here on the way past.
+   */
+  private async translateNotifications(content: unknown, recordId: string): Promise<void> {
+    const texts =
+      typeof content === "string"
+        ? [content]
+        : Array.isArray(content)
+          ? content.flatMap((value) => {
+              const block = objectValue(value);
+              const text = block?.type === "text" ? stringValue(block.text) : null;
+              return text ? [text] : [];
+            })
+          : [];
+    for (const text of texts) {
+      for (const notification of parseTaskNotifications(text)) await this.applyNotification(notification, recordId);
+    }
+  }
+
+  /**
+   * A notification for a background command rather than an agent names no card here, and is left
+   * alone. One for an agent whose launch is no longer in the transcript has no tool call to close,
+   * but still says the agent has stopped, which is what lets its transcript stop being followed.
+   */
+  private async applyNotification(notification: TaskNotification, recordId: string): Promise<void> {
+    const agentId =
+      notification.agentId ??
+      (notification.toolCallId === null ? null : this.subagentsByToolCall.get(notification.toolCallId) ?? null);
+    const card = agentId === null ? undefined : this.subagents.get(agentId);
+    if (card === undefined) return;
+    const key = `${card.agentId}:notification:${recordId}`;
+    if (this.emitted.has(key)) return;
+    this.emitted.add(key);
+    card.status = notificationFailed(notification.status) ? "failed" : "completed";
+    card.outstanding = false;
+    this.lastSubagentActivity = Date.now();
+    card.log.append(notification.summary ?? `Agent ${notification.status ?? "finished"}`);
+    await this.publishSubagent(card);
+  }
+
+  /**
+   * The steps a subagent took, streamed onto the tool call that launched it. They are never sent as
+   * message chunks: a turn is judged finished by counting those, and a subagent still working after
+   * its launcher has answered would keep the session's turn open for as long as it ran.
+   */
+  async translateSubagent(agentId: string, records: TranscriptRecord[]): Promise<void> {
+    const card = this.subagentCard(agentId);
+    // A nested subagent shares its spawner's card, so its steps are marked as its own.
+    const prefix = card.agentId === agentId ? "" : "\u21b3 ";
+    let appended = false;
+    for (const record of records) appended = this.logSubagentRecord(card, record, prefix) || appended;
+    if (!appended) return;
+    this.lastSubagentActivity = Date.now();
+    await this.publishSubagent(card);
+  }
+
+  private logSubagentRecord(card: SubagentCard, record: TranscriptRecord, prefix: string): boolean {
+    const nested = launchedAgent(record.toolUseResult);
+    if (nested !== null) this.adoptSubagent(nested.agentId, card);
+    const message = objectValue(record.message);
+    const content = message?.content;
+    if (stringValue(record.type) !== "assistant" || !Array.isArray(content)) return false;
+    let appended = false;
+    for (const value of content) {
+      const block = objectValue(value);
+      if (!block) continue;
+      if (block.type === "text") {
+        const text = subagentProse(stringValue(block.text) ?? "", this.cwd);
+        if (text) {
+          card.log.append(`${prefix}${text}`);
+          appended = true;
+        }
+      }
+      if (block.type === "tool_use") {
+        const name = stringValue(block.name) || "Tool";
+        card.log.append(`${prefix}• ${subagentToolLine(name, objectValue(block.input) || {}, this.cwd)}`);
+        appended = true;
+      }
+    }
+    return appended;
+  }
+
+  /**
+   * Moves a subagent onto the card of the agent that launched it. Its transcript is often read
+   * before the record naming it as nested, so whatever it has already logged is carried across
+   * rather than left on a card of its own that nothing will ever show.
+   */
+  private adoptSubagent(agentId: string, card: SubagentCard): void {
+    const existing = this.subagents.get(agentId);
+    if (existing === card || (existing !== undefined && existing.toolCallId !== null)) return;
+    for (const step of existing?.log.steps() ?? []) card.log.append(step.startsWith("↳") ? step : `↳ ${step}`);
+    this.subagents.set(agentId, card);
+  }
+
+  private async linkSubagent(agentId: string, toolCallId: string, running: boolean): Promise<void> {
+    const card = this.subagentCard(agentId);
+    // A compaction rewrites the transcript, and the re-read that follows replays the launch of an
+    // agent that has since reported, or that a turn gave up waiting on. Neither is waited on again.
+    card.outstanding = running && this.trackingSubagents && card.status === "in_progress" && !card.abandoned;
+    this.lastSubagentActivity = Date.now();
+    if (card.toolCallId === toolCallId) return;
+    card.toolCallId = toolCallId;
+    this.subagentsByToolCall.set(toolCallId, agentId);
+    await this.publishSubagent(card);
+  }
+
+  /** Records how an agent went, on the card that has to go on saying so after Claude has stopped. */
+  private settleSubagentCard(agentId: string, failed: boolean): void {
+    const card = this.subagents.get(agentId);
+    if (card === undefined || card.status !== "in_progress") return;
+    card.status = failed ? "failed" : "completed";
+    card.outstanding = false;
+  }
+
+  private subagentCard(agentId: string): SubagentCard {
+    const existing = this.subagents.get(agentId);
+    if (existing) return existing;
+    const card: SubagentCard = {
+      agentId,
+      toolCallId: null,
+      log: new SubagentLog(),
+      status: "in_progress",
+      outstanding: false,
+      abandoned: false,
+    };
+    this.subagents.set(agentId, card);
+    return card;
+  }
+
+  /**
+   * Closes every tool call that is still shown as running. What closes one is written by the Claude
+   * process that ran it — a result, or the notification that reports an asynchronous agent — so once
+   * that process has stopped nothing is coming, and a card left open goes on saying it is working.
+   */
+  async settleOpenToolCalls(): Promise<void> {
+    for (const card of new Set(this.subagents.values())) {
+      if (card.status !== "in_progress") continue;
+      card.status = "failed";
+      card.outstanding = false;
+      // An agent with no tool call has nothing to show the last step on, and is only marked so that its transcript is let go of.
+      if (card.toolCallId === null) continue;
+      card.log.append(UNREPORTED_AGENT);
+      await this.publishSubagent(card);
+    }
+    for (const toolCallId of [...this.openToolCalls]) {
+      this.openToolCalls.delete(toolCallId);
+      await this.send({ sessionUpdate: "tool_call_update", toolCallId, status: "failed" });
+    }
+  }
+
+  /** A tool call's content is replaced rather than added to, so the whole tail goes out each time. */
+  private async publishSubagent(card: SubagentCard): Promise<void> {
+    if (card.toolCallId === null) return;
+    if (card.status !== "in_progress") this.openToolCalls.delete(card.toolCallId);
+    const text = card.log.empty ? "Started; waiting for its first step." : card.log.text();
+    await this.send({
+      sessionUpdate: "tool_call_update",
+      toolCallId: card.toolCallId,
+      status: card.status,
+      content: [{ type: "content", content: { type: "text", text } }],
     });
   }
 
@@ -268,6 +531,7 @@ export class TranscriptTranslator {
     if (!content || this.emitted.has(key)) return;
     this.emitted.add(key);
     if (sessionUpdate === "agent_message_chunk") this.assistantChunkCount += 1;
+    if (sessionUpdate !== "user_message_chunk") this.lastAssistantActivity = Date.now();
     await this.send({ sessionUpdate, messageId: stableUuid(sourceMessageId), content });
   }
 

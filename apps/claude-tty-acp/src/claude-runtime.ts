@@ -13,6 +13,7 @@ import { cleanupPromptFiles, materializePrompt } from "./prompt-content.ts";
 import { markRuntimeDirectory, runtimePrefix } from "./runtime-directories.ts";
 import { INHERIT_MODEL_ID } from "./session-options.ts";
 import { TerminalScreen } from "./terminal-screen.ts";
+import { SubagentWatcher } from "./subagent-watcher.ts";
 import { TranscriptReader } from "./transcript-reader.ts";
 import { TranscriptTranslator } from "./transcript-translator.ts";
 import { TranscriptWatcher } from "./transcript-watcher.ts";
@@ -22,6 +23,15 @@ const STARTUP_TIMEOUT_MS = 15_000;
 // This fallback plus the transcript flush behind it has to settle well inside that budget.
 const CANCEL_TIMEOUT_MS = 600;
 const SUBMIT_DELAY_MS = 150;
+/**
+ * How long every subagent a turn launched may go without writing anything before the turn stops
+ * waiting for them. Paseo reads a session as busy from the turn it has open, so an agent that never
+ * reports would otherwise leave the session busy — and unsuspendable — for the rest of its life.
+ */
+const SUBAGENT_SILENCE_MS = 15 * 60_000;
+/** How long the last agent to report is given to wake Claude for the turn that answers for it. */
+const SUBAGENT_WAKE_MS = 60_000;
+const SUBAGENT_POLL_MS = 5_000;
 // Claude drops the submit key while it is still settling a paste, so the prompt is re-submitted until its input box lets go of it.
 const SUBMIT_ATTEMPTS = 6;
 const SUBMIT_CONFIRM_MS = 400;
@@ -84,6 +94,9 @@ export type RuntimeDependencies = {
   staleResumeKeyDelayMs?: number;
   staleResumeSelectionTimeoutMs?: number;
   readyQuietMs?: number;
+  subagentPollMs?: number;
+  subagentSilenceMs?: number;
+  subagentWakeMs?: number;
   runtimeRoot?: string;
   claudeConfigDir?: string;
   transcriptFilePath?: string;
@@ -116,6 +129,9 @@ export class ClaudeRuntime {
   private readonly staleResumeKeyDelayMs: number;
   private readonly staleResumeSelectionTimeoutMs: number;
   private readonly readyQuietMs: number;
+  private readonly subagentPollMs: number;
+  private readonly subagentSilenceMs: number;
+  private readonly subagentWakeMs: number;
   private readonly runtimeRoot: string;
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
@@ -144,6 +160,9 @@ export class ClaudeRuntime {
   private contextWaitCancelled = false;
   private contextWaitMisses = 0;
   private staleResumeAnswered = false;
+  private subagentHold: NodeJS.Timeout | null = null;
+  private heldAssistantMessage: string | undefined;
+  private heldAt = 0;
   private intentionalExit: Deferred<void> | null = null;
 
   constructor(
@@ -178,6 +197,9 @@ export class ClaudeRuntime {
     this.staleResumeKeyDelayMs = dependencies.staleResumeKeyDelayMs ?? STALE_RESUME_KEY_DELAY_MS;
     this.staleResumeSelectionTimeoutMs = dependencies.staleResumeSelectionTimeoutMs ?? STALE_RESUME_SELECTION_TIMEOUT_MS;
     this.readyQuietMs = dependencies.readyQuietMs ?? READY_QUIET_MS;
+    this.subagentPollMs = dependencies.subagentPollMs ?? SUBAGENT_POLL_MS;
+    this.subagentSilenceMs = dependencies.subagentSilenceMs ?? SUBAGENT_SILENCE_MS;
+    this.subagentWakeMs = dependencies.subagentWakeMs ?? SUBAGENT_WAKE_MS;
     this.runtimeRoot = dependencies.runtimeRoot ?? os.tmpdir();
     this.translator = dependencies.translator ?? new TranscriptTranslator(sessionId, cwd, connection);
     this.transcript = this.createTranscriptWatcher(claudeSessionId, dependencies.transcriptFilePath);
@@ -208,6 +230,7 @@ export class ClaudeRuntime {
     this.contextWaitCancelled = false;
     this.interactions.beginTurn();
     this.assistantBaseline = this.translator.assistantChunks;
+    this.translator.trackRunningSubagents();
     await this.submit(prompt.text);
     try {
       const result = await turn.promise;
@@ -286,6 +309,7 @@ export class ClaudeRuntime {
       }
     }
     await this.transcript.close();
+    await this.settleOpenToolCalls();
     this.screen.dispose();
     await this.removeRuntimeDirectory();
   }
@@ -378,19 +402,28 @@ export class ClaudeRuntime {
         break;
       case "Stop":
         this.contextMtimeAtTurnEnd = await this.contextMtime();
-        await this.transcript.flushUntilStable();
-        this.finishTurn(
-          this.cancelRequested
-            ? { response: { stopReason: "cancelled" } }
-            : {
-                response: { stopReason: "end_turn" },
-                assistantMessage: this.translator.assistantChunks === this.assistantBaseline ? asString(payload.last_assistant_message) : undefined,
-              },
-        );
+        await this.transcript.flushUntilStable(true);
+        if (this.cancelRequested) {
+          this.finishTurn({ response: { stopReason: "cancelled" } });
+          break;
+        }
+        // Claude goes idle the moment it launches a background agent, but the work it launched has
+        // not happened yet. The turn is the only thing that tells Paseo a session is busy, so it is
+        // held open until every agent has reported — and Claude has answered for them, since the
+        // notification that closes one wakes Claude for a turn of its own that ends in another Stop.
+        this.heldAssistantMessage = asString(payload.last_assistant_message);
+        if (this.turn && this.translator.runningSubagents > 0) {
+          this.holdForSubagents();
+          break;
+        }
+        this.finishTurn({
+          response: { stopReason: "end_turn" },
+          assistantMessage: this.translator.assistantChunks === this.assistantBaseline ? this.heldAssistantMessage : undefined,
+        });
         break;
       case "StopFailure":
         this.contextMtimeAtTurnEnd = await this.contextMtime();
-        await this.transcript.flushUntilStable();
+        await this.transcript.flushUntilStable(true);
         this.finishTurn(
           this.cancelRequested
             ? { response: { stopReason: "cancelled" } }
@@ -404,7 +437,7 @@ export class ClaudeRuntime {
         );
         break;
       case "SessionEnd":
-        await this.transcript.flushUntilStable();
+        await this.transcript.flushUntilStable(true);
         this.finishTurn({ response: { stopReason: "cancelled" } });
         break;
     }
@@ -434,9 +467,12 @@ export class ClaudeRuntime {
     this.pty = null;
     this.hookRegistration?.unregister();
     this.hookRegistration = null;
-    void this.transcript.close().catch((transcriptError) => {
-      writeLog({ level: "warn", message: "Failed to stop Claude transcript watcher", sessionId: this.sessionId, error: errorMessage(transcriptError) });
-    });
+    void this.transcript
+      .close()
+      .catch((transcriptError) => {
+        writeLog({ level: "warn", message: "Failed to stop Claude transcript watcher", sessionId: this.sessionId, error: errorMessage(transcriptError) });
+      })
+      .finally(() => this.settleOpenToolCalls());
     void this.removeRuntimeDirectory().catch((cleanupError) => {
       writeLog({ level: "warn", message: "Failed to remove Claude runtime directory", sessionId: this.sessionId, error: errorMessage(cleanupError) });
     });
@@ -446,6 +482,7 @@ export class ClaudeRuntime {
     if (!this.turn) return;
     if (this.cancelTimer) clearTimeout(this.cancelTimer);
     this.cancelTimer = null;
+    this.releaseSubagentHold();
     this.cancelRequested = false;
     this.interactions.cancelPending();
     const turn = this.turn;
@@ -516,8 +553,71 @@ export class ClaudeRuntime {
     }
   }
 
+  /** Watches from outside the hook channel, because a stuck agent produces no hook to answer. */
+  private holdForSubagents(): void {
+    if (this.subagentHold) return;
+    writeLog({ level: "info", message: "Holding the turn open for a background agent", sessionId: this.sessionId, agents: this.translator.runningSubagents });
+    this.heldAt = Date.now();
+    this.subagentHold = setInterval(() => this.reviewSubagentHold(), this.subagentPollMs);
+    this.subagentHold.unref();
+  }
+
+  private reviewSubagentHold(): void {
+    if (!this.turn) {
+      this.releaseSubagentHold();
+      return;
+    }
+    // A hold that is simply over ends at the Stop hook. This is only the way out of one that is not:
+    // agents that have stopped writing, or a last agent whose report never woke Claude to answer it.
+    const agents = this.translator.runningSubagents;
+    const silent = Date.now() - this.progressAt();
+    if (silent < (agents > 0 ? this.subagentSilenceMs : this.subagentWakeMs)) return;
+    writeLog({
+      level: "warn",
+      message: agents > 0 ? "Ending a turn whose background agents have gone quiet" : "Ending a turn Claude never answered its agents in",
+      sessionId: this.sessionId,
+      agents,
+      silentMs: silent,
+    });
+    // The turn has stopped waiting on these agents, so nothing else goes on counting them either:
+    // every later turn would hold for a poll interval and give up again in the same breath.
+    this.translator.abandonRunningSubagents();
+    this.finishTurn({
+      response: { stopReason: "end_turn" },
+      assistantMessage: this.translator.assistantChunks === this.assistantBaseline ? this.heldAssistantMessage : undefined,
+    });
+  }
+
+  /**
+   * When the held turn last showed a sign of life. Claude answering for an agent that has reported
+   * is exactly what the wake bound is waiting for, and none of it is credited to a subagent, so
+   * anything Claude writes counts: what it says, what it thinks, and the tools it runs on the way.
+   */
+  private progressAt(): number {
+    return Math.max(this.translator.subagentActivityAt, this.translator.assistantActivityAt, this.heldAt);
+  }
+
+  /**
+   * Anything Claude was running has stopped with it, so the cards standing for that work are closed
+   * rather than left turning. Never worth failing a shutdown over: a session reloaded later replays
+   * its transcript, which closes them again.
+   */
+  private async settleOpenToolCalls(): Promise<void> {
+    try {
+      await this.translator.settleOpenToolCalls();
+    } catch (error) {
+      writeLog({ level: "warn", message: "Could not close the tool calls a stopped session left running", sessionId: this.sessionId, error: errorMessage(error) });
+    }
+  }
+
+  private releaseSubagentHold(): void {
+    if (this.subagentHold) clearInterval(this.subagentHold);
+    this.subagentHold = null;
+    this.heldAssistantMessage = undefined;
+  }
+
   private async finishCancelled(): Promise<void> {
-    await this.transcript.flushUntilStable();
+    await this.transcript.flushUntilStable(true);
     this.finishTurn({ response: { stopReason: "cancelled" } });
   }
 
@@ -541,10 +641,12 @@ export class ClaudeRuntime {
   }
 
   private createTranscriptWatcher(claudeSessionId: string, filePath?: string): TranscriptWatcher {
+    const reader = new TranscriptReader(claudeSessionId, this.cwd, { configDir: this.claudeConfigDir, filePath });
     return new TranscriptWatcher(
-      new TranscriptReader(claudeSessionId, this.cwd, { configDir: this.claudeConfigDir, filePath }),
+      reader,
       this.translator,
       this.transcriptPollIntervalMs,
+      new SubagentWatcher(reader.filePath, this.translator, this.cwd),
     );
   }
 
@@ -570,7 +672,10 @@ export class ClaudeRuntime {
     this.intentionalExit = null;
     this.hookRegistration?.unregister();
     this.hookRegistration = null;
+    // The last thing written may be the notification that closes an agent, and the reader has to be open to see it.
+    await this.transcript.flushUntilStable(true);
     await this.transcript.close();
+    await this.settleOpenToolCalls();
     await this.removeRuntimeDirectory();
   }
 

@@ -30,7 +30,7 @@ const AGENT_BUDGET_MS = 3_000;
 const AGENT_PAGE_SIZE = 200;
 const AGENT_PAGE_LIMIT = 10;
 
-type StateReading = { stateDirectory: string; problem: string | null; sessions: SessionEntry[] };
+export type StateReading = { stateDirectory: string; problem: string | null; sessions: SessionEntry[] };
 
 /**
  * Two clients pressing Stop on one session must not both signal it: the adapter registers its
@@ -143,7 +143,7 @@ async function requireEntry(id: string): Promise<SessionEntry> {
   return entry;
 }
 
-async function readState(): Promise<StateReading> {
+export async function readState(): Promise<StateReading> {
   const root = defaultStateDirectory();
   const sessions = await readDirectory(sessionsDirectory(root));
   const locks = await readDirectory(locksDirectory(root));

@@ -9,6 +9,8 @@ import {
   defaultStateDirectory,
   executableCandidates,
   repoRootFromPluginPath,
+  subagentsDirectory,
+  transcriptPath,
 } from "./paths.shared.ts";
 
 test("resolves the state directory the way the adapter does", () => {
@@ -50,4 +52,20 @@ test("prefers CLAUDE_BIN over PATH, as the adapter does", () => {
     "/opt/claude/bin/claude",
   ]);
   assert.deepEqual(claudeCandidates({ CLAUDE_BIN: " ", PATH: "/usr/bin" }), ["/usr/bin/claude"]);
+});
+
+test("finds a session's transcript and the subagent transcripts beside it", () => {
+  const env = { HOME: "/home/me" };
+  assert.equal(
+    transcriptPath("/work/repo", "46ece69b", env),
+    "/home/me/.claude/projects/-work-repo/46ece69b.jsonl",
+  );
+  assert.equal(
+    subagentsDirectory("/work/repo", "46ece69b", env),
+    "/home/me/.claude/projects/-work-repo/46ece69b/subagents",
+  );
+  assert.equal(
+    transcriptPath("/work/repo", "46ece69b", { HOME: "/home/me", CLAUDE_CONFIG_DIR: "/config/claude" }),
+    "/config/claude/projects/-work-repo/46ece69b.jsonl",
+  );
 });

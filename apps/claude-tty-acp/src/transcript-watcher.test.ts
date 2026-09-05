@@ -81,6 +81,39 @@ test("does not consider a partial final JSONL record stable", async () => {
   }
 });
 
+test("leaves the subagent throttle alone unless the flush is the end of a turn", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "transcript-watcher-test-"));
+  const cwd = "/work/watch-subagents";
+  const sessionId = "66666666-6666-4666-8666-666666666666";
+  const connection = { sessionUpdate: async () => undefined } as unknown as AgentSideConnection;
+  const forced: boolean[] = [];
+  const watcher = new TranscriptWatcher(
+    new TranscriptReader(sessionId, cwd, { configDir: root }),
+    new TranscriptTranslator(sessionId, cwd, connection),
+    5,
+    { sync: async (force = false) => void forced.push(force), open: () => undefined, close: () => undefined },
+  );
+
+  try {
+    const projectDir = path.join(root, "projects", escapeProjectDirName(cwd));
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(path.join(projectDir, `${sessionId}.jsonl`), `${JSON.stringify({ type: "user", uuid: "user", message: { content: "hello" } })}\n`);
+
+    // The flush a hook does runs several reads, and Claude is blocked on every one of them.
+    await watcher.flushUntilStable();
+    assert.ok(forced.length >= 3, `expected repeated reads, got ${forced.length}`);
+    assert.deepEqual(new Set(forced), new Set([false]));
+
+    forced.length = 0;
+    await watcher.flushUntilStable(true);
+    assert.deepEqual(forced.slice(-1), [true]);
+    assert.deepEqual(new Set(forced.slice(0, -1)), new Set([false]));
+  } finally {
+    await watcher.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {

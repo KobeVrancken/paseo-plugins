@@ -82,6 +82,21 @@ A daemon that stalls or pages forever costs the titles and nothing else, which i
 Paseo has a `{ kind: "agent" }` navigation target of its own but does not expose it, so nothing a plugin can call reveals an agent's terminal.
 An "open" button built on `addClientSide` and an agent panel was tried and removed: the closest the API reaches is opening a tab that shows the same row the sidebar already shows, which is worse than sending someone to the agent list.
 
+## A subagent is not a session, and its work is in another file
+
+Claude writes a subagent's turns to `<projects>/<claude session id>/subagents/agent-<agent id>.jsonl`, never into the session's own transcript, which carries only the launch and — for an asynchronous agent — a `<task-notification>` in a later user turn saying it stopped.
+So both files are read: the session's for the launch metadata Claude leaves beside the tool result (`toolUseResult.agentId`, and `status: "async_launched"` for one that has only started), and the subagent's for anything it actually did.
+Claude also writes an `agent-<agent id>.meta.json` beside each transcript carrying the description, the tool use that launched it and its `spawnDepth`, which is the only thing that names a subagent another subagent launched, because the session's transcript never sees one.
+An asynchronous launch answers its launcher immediately, so a tool result is not proof the agent finished; the notification is.
+Claude writes that notification into the turn it wakes for after the agent reports, so a session whose process stops first never writes one:
+a launch left open in a finished transcript says only that nobody was there to hear the end of it, never that the agent is still working.
+
+The panel lists only open sessions, because a subagent is a loop inside its session's Claude process and stops with it, and it is not an ACP session or a Paseo agent, so the paragraph above about opening an agent applies to it twice over.
+An asynchronous launch with no notification after it reads as running in the panel, and nothing on disk says whether the Claude process behind it is still the one that launched it.
+So an agent launched before a suspension or a model change stays listed as running until its session closes, with the last-step label as the only sign, while the adapter closes its card in the conversation because it knows the process stopped.
+Both files are read incrementally from module scope, the way the adapter reads them, because each runs to megabytes and the panel polls: what is new is parsed onto what was already read, a rewrite is noticed by comparing the head of the file rather than its length, and only the tail of steps the panel shows is kept.
+Module scope lives as long as the plugin process, so everything it holds is keyed by the session directory it was read for and dropped as soon as that session is no longer open.
+
 ## index.ts is AST-filtered
 
 The daemon builds both bundles from the entry, deleting `plugin.handle(...)` and `*.server` imports for the client, and `plugin.add*` and `*.client` imports for the server.

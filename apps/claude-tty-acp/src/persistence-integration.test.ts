@@ -101,6 +101,66 @@ test("loads history lazily, resumes Claude, and follows clear session rotation",
   }
 });
 
+test("closes the background agent a loaded session's history leaves running", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "persistence-agents-test-"));
+  const stateDirectory = path.join(root, "state");
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  await mkdir(runtimeRoot, { recursive: true });
+  const acpSessionId = "77777777-7777-4777-8777-777777777777";
+  const claudeSessionId = "66666666-6666-4666-8666-666666666666";
+  const cwd = "/work/agents-load";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  // An agent launched to run on its own is reported in a later user turn, which a session that
+  // stopped while it ran never wrote.
+  await writeFile(
+    path.join(projectDirectory, `${claudeSessionId}.jsonl`),
+    [
+      JSON.stringify({
+        type: "assistant",
+        uuid: "launcher",
+        message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Fix the findings" } }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "launched",
+        toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+      }),
+      "",
+    ].join("\n"),
+  );
+  await new StateStore(stateDirectory).save({
+    version: 1,
+    acpSessionId,
+    claudeSessionId,
+    cwd,
+    model: "inherit",
+    mode: "default",
+    lastActivity: 1,
+  });
+  const updates: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      updates.push(notification);
+    },
+  } as AgentSideConnection;
+  const agent = new ClaudeTtyAgent(connection, { claudeConfigDir: configDirectory, runtimeRoot, stateDirectory, startupTimeoutMs: 500, readinessTimeoutMs: 0 });
+
+  try {
+    await agent.loadSession({ sessionId: acpSessionId, cwd, mcpServers: [] });
+    const toolCalls = updates.map((notification) => notification.update).filter((update) => update.sessionUpdate === "tool_call_update");
+    const closed = toolCalls.at(-1);
+    assert.ok(closed?.sessionUpdate === "tool_call_update");
+    assert.equal(closed.toolCallId, "agent-tool");
+    assert.equal(closed.status, "failed");
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 async function waitFor(predicate: () => boolean): Promise<void> {
   const deadline = Date.now() + 1_000;
   while (!predicate()) {

@@ -117,6 +117,10 @@ export class ClaudeSession {
     const reader = new TranscriptReader(this.currentClaudeSessionId, this.cwd, { configDir: this.runtimeDependencies.claudeConfigDir });
     const result = await reader.read();
     await this.translator.translate(result.records);
+    // The lock is this session's proof that no Claude process is behind the history just replayed,
+    // so a tool call the transcript leaves open — an agent launched to run on its own and never
+    // reported — is finished as far as Paseo is concerned, whatever the record says.
+    await this.translator.settleOpenToolCalls();
   }
 
   async emitCommands(): Promise<void> {
