@@ -117,15 +117,13 @@ async function sessionSubagents(cwd: string, claudeSessionId: string, directory:
 }
 
 async function scanSubagent(file: string, directory: string): Promise<SubagentScan> {
-  let scan = stepScans.get(file);
-  if (scan === undefined) {
-    scan = { session: directory, ...newScan(), steps: new SubagentSteps(STEP_LIMIT) };
-    stepScans.set(file, scan);
-  }
-  const read = await readNewLines(file, scan);
-  // Nothing rewrites a subagent's transcript, but one that was would be read twice onto one tail.
-  if (read.rewritten) scan.steps = new SubagentSteps(STEP_LIMIT);
-  scan.steps.append(parseRecords(read.text));
+  const scan = stepScans.get(file) ?? { session: directory, ...newScan(), steps: new SubagentSteps(STEP_LIMIT) };
+  stepScans.set(file, scan);
+  await readNewLines(file, scan, (read) => {
+    // Nothing rewrites a subagent's transcript, but one that was would be read twice onto one tail.
+    if (read.rewritten) scan.steps = new SubagentSteps(STEP_LIMIT);
+    scan.steps.append(parseRecords(read.text));
+  });
   return scan;
 }
 
@@ -174,14 +172,14 @@ async function nameOf(agentId: string, directory: string, file: string): Promise
 async function scanTranscript(file: string, directory: string): Promise<TranscriptScan> {
   const scan = scans.get(directory) ?? { ...newScan(), launches: new Map(), outcomes: new Map() };
   scans.set(directory, scan);
-  const read = await readNewLines(file, scan).catch((error: unknown) => {
-    if (isMissing(error)) return null;
+  await readNewLines(file, scan, (read) => {
+    const records = parseRecords(read.text);
+    for (const launch of readLaunches(records)) scan.launches.set(launch.agentId, launch);
+    for (const outcome of readOutcomes(records)) scan.outcomes.set(outcome.agentId, outcome);
+  }).catch((error: unknown) => {
+    if (isMissing(error)) return;
     throw error;
   });
-  if (read === null) return scan;
-  const records = parseRecords(read.text);
-  for (const launch of readLaunches(records)) scan.launches.set(launch.agentId, launch);
-  for (const outcome of readOutcomes(records)) scan.outcomes.set(outcome.agentId, outcome);
   return scan;
 }
 

@@ -12,19 +12,35 @@ export type FileScan = {
   offset: number;
   signature: string;
   signatureBytes: number;
+  /** Reads of one scan run one at a time; two that overlapped would both read from the old offset. */
+  queue: Promise<unknown>;
 };
 
+/** The whole lines one read found, and whether the file was rewritten under the scan before them. */
+export type NewLines = { text: string; rewritten: boolean };
+
 export function newScan(): FileScan {
-  return { offset: 0, signature: "", signatureBytes: 0 };
+  return { offset: 0, signature: "", signatureBytes: 0, queue: Promise.resolve() };
 }
 
 /**
- * The whole lines written since the last read, and whether the file was rewritten under the scan
- * before them — a compaction can land on the same size or a larger one, so what identifies the file
- * is the head of it rather than its length. The last line of a file being appended to is
- * half-written, so it is left where it is until the read that finds the rest of it.
+ * Reads what has been written since the last read and hands it to `apply`. A compaction can land on
+ * the same size or a larger one, so what identifies the file is the head of it rather than its
+ * length. The last line of a file being appended to is half-written, so it is left where it is
+ * until the read that finds the rest of it.
+ *
+ * `apply` runs inside the read rather than after it because the scans are module scope and shared
+ * by every client the daemon serves: two polls that overlapped on one file would otherwise read the
+ * same records twice onto one tail, and leave the offset past the end of the file.
  */
-export async function readNewLines(file: string, scan: FileScan): Promise<{ text: string; rewritten: boolean }> {
+export function readNewLines<T>(file: string, scan: FileScan, apply: (lines: NewLines) => T): Promise<T> {
+  const read = async () => apply(await readAhead(file, scan));
+  const operation = scan.queue.then(read, read);
+  scan.queue = operation.catch(() => undefined);
+  return operation;
+}
+
+async function readAhead(file: string, scan: FileScan): Promise<NewLines> {
   const size = (await stat(file)).size;
   const rewritten = await rewind(file, scan, size);
   if (size <= scan.offset) return { text: "", rewritten };
