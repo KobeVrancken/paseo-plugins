@@ -66,19 +66,22 @@ export async function readWhole(file: string): Promise<string | null> {
 }
 
 async function rewind(file: string, scan: FileScan, size: number): Promise<boolean> {
-  const comparable = scan.offset > 0 ? scan.signatureBytes : Math.min(SIGNATURE_BYTES, size);
+  const comparable = scan.signatureBytes || Math.min(SIGNATURE_BYTES, size);
   const signature = await readRange(file, 0, comparable);
   if (size < scan.offset || (scan.offset > 0 && signature !== scan.signature)) {
     scan.offset = 0;
-    scan.signatureBytes = Math.min(SIGNATURE_BYTES, size);
-    scan.signature = await readRange(file, 0, scan.signatureBytes);
+    await sign(file, scan, size);
     return true;
   }
-  if (scan.offset === 0) {
-    scan.signatureBytes = comparable;
-    scan.signature = signature;
-  }
+  // A file signed while it was shorter than the constant is signed again once it is that long, so
+  // what identifies it is the head the constant names rather than whatever the first read caught.
+  if (scan.signatureBytes < Math.min(SIGNATURE_BYTES, size)) await sign(file, scan, size);
   return false;
+}
+
+async function sign(file: string, scan: FileScan, size: number): Promise<void> {
+  scan.signatureBytes = Math.min(SIGNATURE_BYTES, size);
+  scan.signature = await readRange(file, 0, scan.signatureBytes);
 }
 
 async function readRange(file: string, start: number, length: number): Promise<string> {

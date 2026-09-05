@@ -76,3 +76,23 @@ test("serialises two reads that overlap, so one record is never read onto one ta
   // An offset left past the end of the file would read the whole of it again as a rewrite.
   assert.deepEqual(await readLines(file, scan), { text: "", rewritten: false });
 });
+
+test("signs a file that has grown past the signature, not just the head the first read caught", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "transcript-scan-"));
+  const file = path.join(root, "session.jsonl");
+  const scan = newScan();
+  const head = '{"session":"opened"}\n';
+  const turns = (tag: string) => Array.from({ length: 20 }, (_, index) => `{"tag":"${tag}","record":${index}}`).join("\n") + "\n";
+
+  // The first read catches a file far shorter than the signature, and the offset moves past it.
+  await writeFile(file, head);
+  await readLines(file, scan);
+  await writeFile(file, head + turns("first"));
+  await readLines(file, scan);
+
+  // A compaction lands on the same size and the same opening record, and differs after it.
+  await writeFile(file, head + turns("after"));
+  const read = await readLines(file, scan);
+  assert.equal(read.rewritten, true);
+  assert.ok(read.text.includes('"tag":"after"'));
+});
