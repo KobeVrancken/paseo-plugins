@@ -162,8 +162,7 @@ export class ClaudeRuntime {
   private staleResumeAnswered = false;
   private subagentHold: NodeJS.Timeout | null = null;
   private heldAssistantMessage: string | undefined;
-  private heldAssistantChunks = 0;
-  private heldProgressAt = 0;
+  private heldAt = 0;
   private intentionalExit: Deferred<void> | null = null;
 
   constructor(
@@ -558,8 +557,7 @@ export class ClaudeRuntime {
   private holdForSubagents(): void {
     if (this.subagentHold) return;
     writeLog({ level: "info", message: "Holding the turn open for a background agent", sessionId: this.sessionId, agents: this.translator.runningSubagents });
-    this.heldAssistantChunks = this.translator.assistantChunks;
-    this.heldProgressAt = Date.now();
+    this.heldAt = Date.now();
     this.subagentHold = setInterval(() => this.reviewSubagentHold(), this.subagentPollMs);
     this.subagentHold.unref();
   }
@@ -592,16 +590,11 @@ export class ClaudeRuntime {
 
   /**
    * When the held turn last showed a sign of life. Claude answering for an agent that has reported
-   * is exactly what the wake bound is waiting for, and it writes nothing any subagent is credited
-   * with, so its own output counts as progress too.
+   * is exactly what the wake bound is waiting for, and none of it is credited to a subagent, so
+   * anything Claude writes counts: what it says, what it thinks, and the tools it runs on the way.
    */
   private progressAt(): number {
-    const chunks = this.translator.assistantChunks;
-    if (chunks !== this.heldAssistantChunks) {
-      this.heldAssistantChunks = chunks;
-      this.heldProgressAt = Date.now();
-    }
-    return Math.max(this.translator.subagentActivityAt, this.heldProgressAt);
+    return Math.max(this.translator.subagentActivityAt, this.translator.assistantActivityAt, this.heldAt);
   }
 
   /**

@@ -1576,6 +1576,97 @@ test("goes on waiting while Claude is answering for the agent that reported", as
   }
 });
 
+test("goes on waiting while Claude is running tools for the agent that reported, before it has said anything", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-subagent-tools-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = "/work/agents-tools";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(runtimeRoot, { recursive: true });
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    spawned = new FakePty(4100);
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return spawned;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    transcriptPollIntervalMs: 10,
+    subagentPollMs: 10,
+    subagentWakeMs: 400,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "launch an agent" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 2);
+    const transcript = path.join(projectDirectory, `${session.sessionId}.jsonl`);
+    const records = [
+      JSON.stringify({
+        type: "assistant",
+        uuid: "launcher",
+        message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Count the files" } }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "launched",
+        toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+      }),
+    ];
+    await writeFile(transcript, `${records.join("\n")}\n`);
+    let settled = false;
+    void turn.then(() => {
+      settled = true;
+    });
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
+
+    // The agent reports, and Claude wakes to check its work: it thinks and runs tools, and has said nothing yet.
+    records.push(
+      JSON.stringify({
+        type: "user",
+        uuid: "notified",
+        message: { content: "<task-notification> <task-id>a1</task-id> <status>completed</status> <summary>done</summary> </task-notification>" },
+      }),
+    );
+    await writeFile(transcript, `${records.join("\n")}\n`);
+    for (let index = 0; index < 6; index += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      records.push(
+        JSON.stringify({
+          type: "assistant",
+          uuid: `check-${index}`,
+          message: {
+            content: [
+              { type: "thinking", thinking: `Verifying part ${index}` },
+              { type: "tool_use", id: `check-tool-${index}`, name: "Bash", input: { command: `ls ${index}`, description: "Check the count" } },
+            ],
+          },
+        }),
+      );
+      await writeFile(transcript, `${records.join("\n")}\n`);
+    }
+    // Well past the wake bound, and the turn is still open because the session is still working.
+    assert.equal(settled, false);
+
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "The agent counted them." });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test("stops counting the agents a turn gave up on, so a later turn does not wait on them again", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-subagent-abandon-test-"));
   const configDirectory = path.join(root, "claude");

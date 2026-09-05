@@ -92,6 +92,7 @@ export class TranscriptTranslator {
   private readonly subagents = new Map<string, SubagentCard>();
   private readonly subagentsByToolCall = new Map<string, string>();
   private lastSubagentActivity = 0;
+  private lastAssistantActivity = 0;
   private trackingSubagents = false;
   private lastPlan = "";
   private lastUsage = "";
@@ -106,6 +107,11 @@ export class TranscriptTranslator {
 
   get assistantChunks(): number {
     return this.assistantChunkCount;
+  }
+
+  /** When Claude itself last said, thought or ran anything, whichever kind of record it was. */
+  get assistantActivityAt(): number {
+    return this.lastAssistantActivity;
   }
 
   /**
@@ -259,6 +265,7 @@ export class TranscriptTranslator {
     if (this.emittedTools.has(toolCallId)) return;
     this.emittedTools.add(toolCallId);
     this.openToolCalls.add(toolCallId);
+    this.lastAssistantActivity = Date.now();
     const locations = toolLocations(input, this.cwd);
     const content = toolContents(name, input, this.cwd);
     await this.send({
@@ -518,6 +525,7 @@ export class TranscriptTranslator {
     if (!content || this.emitted.has(key)) return;
     this.emitted.add(key);
     if (sessionUpdate === "agent_message_chunk") this.assistantChunkCount += 1;
+    if (sessionUpdate !== "user_message_chunk") this.lastAssistantActivity = Date.now();
     await this.send({ sessionUpdate, messageId: stableUuid(sourceMessageId), content });
   }
 
