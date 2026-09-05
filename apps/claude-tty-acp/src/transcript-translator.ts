@@ -75,6 +75,8 @@ type SubagentCard = {
   status: "in_progress" | "completed" | "failed";
   /** Launched to run on its own and not yet reported, which is what keeps the session's turn open. */
   outstanding: boolean;
+  /** Given up on by a turn that waited its bound out, so no later turn waits on it again. */
+  abandoned: boolean;
 };
 
 export class TranscriptTranslator {
@@ -125,7 +127,11 @@ export class TranscriptTranslator {
    * Without this every later turn holds for a poll interval and gives up again in the same breath.
    */
   abandonRunningSubagents(): void {
-    for (const card of this.subagents.values()) card.outstanding = false;
+    for (const card of this.subagents.values()) {
+      if (!card.outstanding) continue;
+      card.outstanding = false;
+      card.abandoned = true;
+    }
   }
 
   /** An agent that has reported writes nothing more, so its transcript stops being worth reading. */
@@ -388,8 +394,8 @@ export class TranscriptTranslator {
   private async linkSubagent(agentId: string, toolCallId: string, running: boolean): Promise<void> {
     const card = this.subagentCard(agentId);
     // A compaction rewrites the transcript, and the re-read that follows replays the launch of an
-    // agent that has since reported. One that has answered is not waited on a second time.
-    card.outstanding = running && this.trackingSubagents && card.status === "in_progress";
+    // agent that has since reported, or that a turn gave up waiting on. Neither is waited on again.
+    card.outstanding = running && this.trackingSubagents && card.status === "in_progress" && !card.abandoned;
     this.lastSubagentActivity = Date.now();
     if (card.toolCallId === toolCallId) return;
     card.toolCallId = toolCallId;
@@ -408,7 +414,14 @@ export class TranscriptTranslator {
   private subagentCard(agentId: string): SubagentCard {
     const existing = this.subagents.get(agentId);
     if (existing) return existing;
-    const card: SubagentCard = { agentId, toolCallId: null, log: new SubagentLog(), status: "in_progress", outstanding: false };
+    const card: SubagentCard = {
+      agentId,
+      toolCallId: null,
+      log: new SubagentLog(),
+      status: "in_progress",
+      outstanding: false,
+      abandoned: false,
+    };
     this.subagents.set(agentId, card);
     return card;
   }

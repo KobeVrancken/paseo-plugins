@@ -394,6 +394,35 @@ test("does not wait again on an agent whose launch a rewrite replayed", async ()
   assert.equal(translator.runningSubagents, 0);
 });
 
+test("does not wait again on an agent a turn gave up on when a rewrite replays its launch", async () => {
+  const connection = { sessionUpdate: async () => undefined } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const launch = [
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Count the files" } }] },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+      message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+    },
+  ];
+
+  translator.trackRunningSubagents();
+  await translator.translate(launch);
+  assert.equal(translator.runningSubagents, 1);
+
+  // The turn waited its bound out on an agent that never reported, and stopped counting it.
+  translator.abandonRunningSubagents();
+  assert.equal(translator.runningSubagents, 0);
+
+  await translator.translate(launch);
+  assert.equal(translator.runningSubagents, 0);
+});
+
 test("leaves a synchronous agent's report alone when the session it ran in stops", async () => {
   const notifications: SessionNotification[] = [];
   const connection = {
