@@ -327,14 +327,18 @@ export class TranscriptTranslator {
     }
   }
 
-  /** A notification for a background command rather than an agent names no card here, and is left alone. */
+  /**
+   * A notification for a background command rather than an agent names no card here, and is left
+   * alone. One for an agent whose launch is no longer in the transcript has no tool call to close,
+   * but still says the agent has stopped, which is what lets its transcript stop being followed.
+   */
   private async applyNotification(notification: TaskNotification, recordId: string): Promise<void> {
     const agentId =
       notification.agentId ??
       (notification.toolCallId === null ? null : this.subagentsByToolCall.get(notification.toolCallId) ?? null);
     const card = agentId === null ? undefined : this.subagents.get(agentId);
-    if (card === undefined || card.toolCallId === null) return;
-    const key = `${card.toolCallId}:notification:${recordId}`;
+    if (card === undefined) return;
+    const key = `${card.agentId}:notification:${recordId}`;
     if (this.emitted.has(key)) return;
     this.emitted.add(key);
     card.status = notificationFailed(notification.status) ? "failed" : "completed";
@@ -440,9 +444,11 @@ export class TranscriptTranslator {
    */
   async settleOpenToolCalls(): Promise<void> {
     for (const card of new Set(this.subagents.values())) {
-      if (card.status !== "in_progress" || card.toolCallId === null) continue;
+      if (card.status !== "in_progress") continue;
       card.status = "failed";
       card.outstanding = false;
+      // An agent with no tool call has nothing to show the last step on, and is only marked so that its transcript is let go of.
+      if (card.toolCallId === null) continue;
       card.log.append(UNREPORTED_AGENT);
       await this.publishSubagent(card);
     }

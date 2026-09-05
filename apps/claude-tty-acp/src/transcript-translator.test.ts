@@ -423,6 +423,43 @@ test("does not wait again on an agent a turn gave up on when a rewrite replays i
   assert.equal(translator.runningSubagents, 0);
 });
 
+test("settles a subagent whose launch is no longer in the transcript, so it stops being followed", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const steps = (agentId: string) => [
+    { type: "assistant", uuid: `${agentId}-step`, message: { content: [{ type: "text", text: "Counting" }] } },
+  ];
+
+  // Two agents whose transcripts exist, and whose launches a compaction has taken out of the session's own.
+  await translator.translateSubagent("reported", steps("reported"));
+  await translator.translateSubagent("unreported", steps("unreported"));
+  assert.equal(translator.subagentSettled("reported"), false);
+  assert.equal(translator.subagentSettled("unreported"), false);
+
+  // One reports, in the only record that says so.
+  await translator.translate([
+    {
+      type: "user",
+      uuid: "notified",
+      message: { content: "<task-notification><task-id>reported</task-id><status>completed</status><summary>done</summary></task-notification>" },
+    },
+  ]);
+  assert.equal(translator.subagentSettled("reported"), true);
+  assert.equal(translator.subagentSettled("unreported"), false);
+
+  // The other is still open when the session stops, which is the end of it too.
+  await translator.settleOpenToolCalls();
+  assert.equal(translator.subagentSettled("unreported"), true);
+
+  // Neither has a tool call to show any of this on.
+  assert.deepEqual(notifications, []);
+});
+
 test("leaves a synchronous agent's report alone when the session it ran in stops", async () => {
   const notifications: SessionNotification[] = [];
   const connection = {
